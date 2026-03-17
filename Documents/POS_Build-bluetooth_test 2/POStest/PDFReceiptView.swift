@@ -3,104 +3,209 @@ import SwiftUI
 struct PDFReceiptView: View {
     let table: Table
     let posData: POSData
+    var tipAmount: Double = 0.0
+
+    @AppStorage("businessName") private var businessName: String = "Five Points Cocktail Bar"
+    @AppStorage("location")     private var location: String     = ""
+    @AppStorage("currencyCode") private var currencyCode: String = "EUR"
+
+    private var subtotal: Double { table.total - table.tax }
+    private var grandTotal: Double { table.total + tipAmount }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            Text("Invoice / Receipt")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .padding(.bottom, 8)
+        VStack(alignment: .leading, spacing: 0) {
 
-            HStack {
-                VStack(alignment: .leading) {
-                    Text("Table: \(table.id)")
-                    Text("Date: \(Date(), formatter: itemFormatter)")
+            // MARK: Header
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(businessName)
+                        .font(.system(size: 20, weight: .bold))
+                    if !location.isEmpty {
+                        Text(location)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
                 }
                 Spacer()
-                Text("Your Business Name") // Placeholder
-                    .font(.headline)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Receipt")
+                        .font(.system(size: 20, weight: .bold))
+                    Text("Table \(table.id)")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                    Text(Date(), formatter: dateFormatter)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
             }
             .padding(.bottom, 20)
 
-            // Items
-            Text("Items")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            LazyVStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(table.items.enumerated()), id: \.offset) { (index, item) in
-                    HStack {
-                        Text(item.menuItem.name)
-                        Spacer()
-                        Text(String(format: "$%.2f", item.menuItem.price))
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-
             Divider()
 
-            // Totals
-            VStack(spacing: 8) {
+            // MARK: Items
+            VStack(alignment: .leading, spacing: 0) {
+                // Column headers
                 HStack {
-                    Text("Subtotal")
-                        .fontWeight(.semibold)
-                    Spacer()
-                    Text(String(format: "$%.2f", table.subtotal))
+                    Text("Item")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Price")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 70, alignment: .trailing)
                 }
-                HStack {
-                    Text("Tax")
-                        .fontWeight(.semibold)
-                    Spacer()
-                    Text(String(format: "$%.2f", table.tax))
+                .padding(.vertical, 6)
+
+                Divider()
+
+                ForEach(Array(table.items.enumerated()), id: \.offset) { _, item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .top) {
+                            Text(item.menuItem.name)
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(item.finalPrice, format: .currency(code: currencyCode))
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(width: 70, alignment: .trailing)
+                        }
+
+                        // Modifiers
+                        ForEach(item.appliedModifiers) { modifier in
+                            HStack {
+                                Text("  + \(modifier.name)")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                if modifier.priceAdjustment != 0 {
+                                    Text(modifier.displayAdjustment)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 70, alignment: .trailing)
+                                }
+                            }
+                        }
+
+                        // Note
+                        if let note = item.note, !note.isEmpty {
+                            Text("  \u{2192} \(note)")
+                                .font(.system(size: 11).italic())
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 5)
+
+                    Divider().opacity(0.4)
                 }
-                HStack {
-                    Text("Total")
-                        .font(.title3)
-                        .fontWeight(.bold)
-                    Spacer()
-                    Text(String(format: "$%.2f", table.total))
-                        .font(.title3)
-                        .fontWeight(.bold)
+            }
+            .padding(.vertical, 8)
+
+            // MARK: Totals
+            VStack(spacing: 6) {
+                totalRow(label: "Subtotal (excl. tax)", value: subtotal, bold: false)
+
+                // Tax breakdown by band
+                let taxBreakdown = taxBreakdown()
+                ForEach(taxBreakdown, id: \.label) { row in
+                    totalRow(label: row.label, value: row.amount, bold: false, secondary: true)
+                }
+
+                Divider().padding(.vertical, 2)
+
+                totalRow(label: "Order Total", value: table.total, bold: true)
+
+                if tipAmount > 0 {
+                    totalRow(label: "Tip", value: tipAmount, bold: false)
+                    Divider().padding(.vertical, 2)
+                    totalRow(label: "Total (incl. tip)", value: grandTotal, bold: true, large: true)
                 }
             }
             .padding(.top, 8)
 
             Spacer()
 
-            // Footer
-            Text("Thank you for your business!")
-                .font(.footnote)
-                .foregroundColor(.gray)
-                .padding(.top, 20)
+            // MARK: Footer
+            Divider().padding(.top, 20)
+            Text("Thank you for your visit — see you again soon!")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .padding(.top, 8)
         }
         .padding(40)
-        .frame(width: 595, height: 842) // A4 paper size in points
+        .frame(width: 595, height: 842) // A4 in points
+        .background(Color.white)
     }
 
-    private var itemFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .short
-        return formatter
+    // MARK: - Helpers
+
+    private struct TaxRow { let label: String; let amount: Double }
+
+    private func taxBreakdown() -> [TaxRow] {
+        var buckets: [String: Double] = [:]
+        for item in table.items {
+            let bandName = item.menuItem.getTaxBandName(using: posData.taxBands)
+            let rate     = item.menuItem.getTaxRate(using: posData.taxBands)
+            let price    = item.finalPrice
+            let tax      = price - (price / (1 + rate))
+            buckets[bandName, default: 0] += tax
+        }
+        return buckets
+            .map { TaxRow(label: "Tax (\($0.key))", amount: $0.value) }
+            .sorted { $0.label < $1.label }
     }
+
+    private func totalRow(
+        label: String,
+        value: Double,
+        bold: Bool,
+        secondary: Bool = false,
+        large: Bool = false
+    ) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: large ? 14 : 12, weight: bold ? .bold : .regular))
+                .foregroundColor(secondary ? .secondary : .primary)
+            Spacer()
+            Text(value, format: .currency(code: currencyCode))
+                .font(.system(size: large ? 14 : 12, weight: bold ? .bold : .regular))
+                .foregroundColor(secondary ? .secondary : .primary)
+        }
+    }
+
+    private let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
 }
 
-// Preview Provider for PDFReceiptView
-struct PDFReceiptView_Previews: PreviewProvider {
-    static var previews: some View {
-        let table = Table(
+// MARK: - Preview
+
+#Preview {
+    PDFReceiptView(
+        table: Table(
             id: 5,
             items: [
-                OrderItem(menuItem: MenuItem(name: "Craft Burger", price: 18.99, taxCategory: .nonAlcoholic, unitCost: 8.50), timestamp: Date()),
-                OrderItem(menuItem: MenuItem(name: "IPA Beer", price: 7.50, taxCategory: .alcoholic, unitCost: 3.00), timestamp: Date()),
-                OrderItem(menuItem: MenuItem(name: "Truffle Fries", price: 12.49, taxCategory: .nonAlcoholic, unitCost: 4.50), timestamp: Date())
+                OrderItem(
+                    menuItem: MenuItem(name: "Negroni", price: 11.00, taxCategory: .alcoholic, unitCost: 3.20, category: .cocktails),
+                    timestamp: Date(),
+                    appliedModifiers: [],
+                    note: "no ice"
+                ),
+                OrderItem(
+                    menuItem: MenuItem(name: "Draught Pils", price: 5.50, taxCategory: .alcoholic, unitCost: 1.50, category: .beer),
+                    timestamp: Date()
+                ),
+                OrderItem(
+                    menuItem: MenuItem(name: "Sparkling Water", price: 3.00, taxCategory: .nonAlcoholic, unitCost: 0.50, category: .softDrinks),
+                    timestamp: Date()
+                ),
             ],
-            guestCount: 4,
-            openedAt: Date()
-        )
-
-        PDFReceiptView(table: table, posData: POSData())
-    }
+            guestCount: 2,
+            openedAt: Date().addingTimeInterval(-3600)
+        ),
+        posData: POSData(),
+        tipAmount: 2.50
+    )
 }

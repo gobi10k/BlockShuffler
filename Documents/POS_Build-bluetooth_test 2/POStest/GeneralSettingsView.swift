@@ -9,6 +9,7 @@ import SwiftUI
 import SumUpSDK
 
 struct GeneralSettingsView: View {
+    @AppStorage("businessName") private var businessName: String = "Five Points Cocktail Bar"
     @AppStorage("location") private var location: String = ""
     @AppStorage("profitMargin") private var profitMargin: Double = 0.0
     @AppStorage("currencyCode") private var currencyCode: String = "EUR"
@@ -32,6 +33,7 @@ struct GeneralSettingsView: View {
             }
 
             Section(header: Text("Business Details")) {
+                TextField("Business Name", text: $businessName)
                 TextField("Location", text: $location)
                 TextField("Profit Margin", value: $profitMargin, format: .percent)
                     #if os(iOS)

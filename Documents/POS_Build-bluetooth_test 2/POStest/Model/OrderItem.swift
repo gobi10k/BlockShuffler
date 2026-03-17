@@ -12,12 +12,20 @@ struct OrderItem: Identifiable, Codable {
     let menuItem: MenuItem
     let timestamp: Date
     var appliedModifiers: [MenuItemModifier] = []
+    var note: String? = nil  // Free-text note, e.g. "no ice", "extra lime"
 
-    init(id: UUID = UUID(), menuItem: MenuItem, timestamp: Date, appliedModifiers: [MenuItemModifier] = []) {
+    init(
+        id: UUID = UUID(),
+        menuItem: MenuItem,
+        timestamp: Date,
+        appliedModifiers: [MenuItemModifier] = [],
+        note: String? = nil
+    ) {
         self.id = id
         self.menuItem = menuItem
         self.timestamp = timestamp
         self.appliedModifiers = appliedModifiers
+        self.note = note
     }
     
     // Calculate the final price including modifiers

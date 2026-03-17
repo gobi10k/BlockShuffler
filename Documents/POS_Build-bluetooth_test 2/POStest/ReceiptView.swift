@@ -314,7 +314,7 @@ struct ReceiptView: View {
     private func sendReceipt() {
         guard isValidEmail(customerEmail) else { return }
 
-        let pdfView = PDFReceiptView(table: table, posData: posData)
+        let pdfView = PDFReceiptView(table: table, posData: posData, tipAmount: tipAmount)
         let data = PDFGenerator.generate(from: pdfView)
 
         guard !data.isEmpty else {
