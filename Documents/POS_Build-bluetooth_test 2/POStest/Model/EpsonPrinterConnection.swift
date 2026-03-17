@@ -1,17 +1,21 @@
 import Foundation
-import libepos2
 
 // MARK: - Epson ePOS SDK implementation
 //
-// Uses Epos2Printer to connect over Bluetooth and send raw ESC/POS data
-// via addCommand(). The printer series is stored on POSPrinter so the
-// correct Epos2PrinterSeries constant is used for each device.
+// Requires the Epson ePOS SDK to be added to the Xcode project:
+//   1. Download from https://download.epson-biz.com/modules/pos/index.php?page=single_soft&cid=6836
+//   2. Drag ePOS-Print_SDK_iOS/lib/libepos2.xcframework into the Xcode project
+//   3. In Target → General → Frameworks, Libraries, and Embedded Content
+//      set libepos2.xcframework to "Embed & Sign"
 //
-// Connection string format for Bluetooth: "BT:<DeviceName or MAC>"
+// Until the framework is linked the connection always returns failure,
+// so the rest of the app continues to compile and run normally.
+//
+// Connection string format: "BT:<DeviceName or MAC>"
 // e.g. "BT:EPSON_TM_T88" or "BT:00:01:02:03:04:05"
-//
-// All SDK calls are performed on a background thread. The completion
-// callback is dispatched to the main thread by the caller (PrinterService).
+
+#if canImport(libepos2)
+import libepos2
 
 class EpsonPrinterConnection: PrinterConnection {
 
@@ -32,8 +36,6 @@ class EpsonPrinterConnection: PrinterConnection {
         let target = "BT:\(identifier)"
 
         DispatchQueue.global(qos: .userInitiated).async {
-            // Create printer object for the configured series.
-            // lang: EPOS2_MODEL_ANK (0) covers most Latin-alphabet receipt printers.
             guard let eposPrinter = Epos2Printer(
                 printerSeries: series,
                 lang: EPOS2_MODEL_ANK.rawValue
@@ -43,7 +45,6 @@ class EpsonPrinterConnection: PrinterConnection {
                 return
             }
 
-            // Load raw ESC/POS bytes as a command buffer entry.
             let addResult = eposPrinter.addCommand(data)
             guard addResult == EPOS2_SUCCESS.rawValue else {
                 print("[Epson] addCommand failed: \(addResult)")
@@ -52,7 +53,6 @@ class EpsonPrinterConnection: PrinterConnection {
                 return
             }
 
-            // Connect (blocking, 15-second timeout).
             let connectResult = eposPrinter.connect(target, timeout: 15000)
             guard connectResult == EPOS2_SUCCESS.rawValue else {
                 print("[Epson] connect('\(target)') failed: \(connectResult)")
@@ -61,20 +61,35 @@ class EpsonPrinterConnection: PrinterConnection {
                 return
             }
 
-            // Send the buffered command.
             eposPrinter.beginTransaction()
             let sendResult = eposPrinter.sendData(Int32(EPOS2_PARAM_DEFAULT))
             eposPrinter.endTransaction()
 
-            // Disconnect and clean up regardless of send result.
             eposPrinter.disconnect()
             eposPrinter.clearCommandBuffer()
 
             let success = sendResult == EPOS2_SUCCESS.rawValue
-            if !success {
-                print("[Epson] sendData failed: \(sendResult)")
-            }
+            if !success { print("[Epson] sendData failed: \(sendResult)") }
             completion(success)
         }
     }
 }
+
+#else
+
+// Stub used when the Epson SDK is not yet linked.
+class EpsonPrinterConnection: PrinterConnection {
+
+    private let printer: POSPrinter
+
+    init(printer: POSPrinter) {
+        self.printer = printer
+    }
+
+    func send(data: Data, completion: @escaping (Bool) -> Void) {
+        print("[Epson] SDK not linked — add libepos2.xcframework to the Xcode project.")
+        completion(false)
+    }
+}
+
+#endif
