@@ -25,6 +25,9 @@ struct ReceiptView: View {
     @State private var mailAlertTitle = ""
     @State private var mailAlertMessage = ""
 
+    // Split bill
+    @State private var showSplitBill = false
+
     // MARK: - Computed Properties
     private var tipAmount: Double {
         Double(tipAmountString) ?? 0.0
@@ -293,19 +296,32 @@ struct ReceiptView: View {
     }
     
     private var paymentButtonsSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             Button("Pay with Cash") { completePayment(method: "Cash") }
                 .buttonStyle(PrimaryButtonStyle())
 
-            Button("Pay with SumUp") {
+            Button("Pay with Card (SumUp)") {
                 SumUpAPIManager.shared.processPayment(amount: grandTotal, currency: currencyCode) { success in
                     if success { completePayment(method: "SumUp") }
                 }
             }
             .buttonStyle(PrimaryButtonStyle())
-            
+
+            Button {
+                showSplitBill = true
+            } label: {
+                Label("Split Bill", systemImage: "divide.circle")
+            }
+            .buttonStyle(SecondaryButtonStyle())
+
             Button("Cancel") { isPresented = false }
                 .buttonStyle(SecondaryButtonStyle())
+        }
+        .sheet(isPresented: $showSplitBill) {
+            SplitBillView(table: table, tipAmount: tipAmount) { paymentSummary in
+                completePayment(method: paymentSummary)
+            }
+            .environmentObject(posData)
         }
     }
     
