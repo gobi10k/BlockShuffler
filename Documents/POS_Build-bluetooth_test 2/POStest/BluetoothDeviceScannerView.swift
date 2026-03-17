@@ -240,11 +240,9 @@ struct BluetoothDeviceScannerView: View {
 
     private func signalIcon(rssi: Int) -> some View {
         let (icon, color): (String, Color) = {
-            switch rssi {
-            case -60...: return ("wifi",             POSColors.success)
-            case -80...: return ("wifi",             POSColors.warning)
-            default:     return ("wifi.exclamationmark", POSColors.error)
-            }
+            if rssi >= -60 { return ("wifi",              POSColors.success) }
+            if rssi >= -80 { return ("wifi",              POSColors.warning) }
+            return ("wifi.exclamationmark", POSColors.error)
         }()
         return Image(systemName: icon)
             .font(.caption)
