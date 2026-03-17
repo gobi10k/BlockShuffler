@@ -6,22 +6,29 @@ import SumUpSDK
 struct POStestApp: App {
     @StateObject private var posData = POSData()
     @State private var isDayStarted = false
+    @AppStorage("sumupAPIKey") private var sumupAPIKey: String = ""
 
     init() {
         let apiKey = UserDefaults.standard.string(forKey: "sumupAPIKey") ?? ""
-        SumUpSDK.setup(withAPIKey: apiKey)
+        if !apiKey.isEmpty {
+            SumUpSDK.setup(withAPIKey: apiKey)
+        }
     }
 
     var body: some Scene {
         WindowGroup {
-            if isDayStarted {
-                InteractionView(isDayStarted: $isDayStarted)
-                    .environmentObject(posData)
-                    .preferredColorScheme(.dark) // Add this line
-            } else {
-                MainView(isDayStarted: $isDayStarted)
-                    .environmentObject(posData)
-                    .preferredColorScheme(.dark) // Add this line
+            Group {
+                if isDayStarted {
+                    InteractionView(isDayStarted: $isDayStarted)
+                        .environmentObject(posData)
+                } else {
+                    MainView(isDayStarted: $isDayStarted)
+                        .environmentObject(posData)
+                }
+            }
+            .preferredColorScheme(.dark)
+            .onChange(of: sumupAPIKey) { newKey in
+                SumUpAPIManager.shared.setup(withAPIKey: newKey)
             }
         }
     }

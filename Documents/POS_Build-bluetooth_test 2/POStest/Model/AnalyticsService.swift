@@ -111,6 +111,14 @@ struct AnalyticsService {
         }
     }
 
+    func totalTips(from: Date, to: Date) -> Double {
+        closedTables(from: from, to: to).reduce(0) { $0 + $1.tipAmount }
+    }
+
+    func tablesServed(from: Date, to: Date) -> Int {
+        closedTables(from: from, to: to).count
+    }
+
     // MARK: - Sales Analytics
     func alcoholicSales(from: Date, to: Date) -> Double {
         let tables = closedTables(from: from, to: to)

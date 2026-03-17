@@ -24,7 +24,7 @@ struct PrinterSettingsView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         case .epsonBluetooth:
-                            Text("Epson (Bluetooth)")
+                            Text("Epson \(printer.epsonSeries.displayName) (Bluetooth)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -76,7 +76,10 @@ struct AddPrinterView: View {
     @State private var port: String = "9100"
     @State private var selectedBluetoothIdentifier: String?
     @State private var selectedBluetoothName: String?
+    @State private var epsonSeries: EpsonPrinterSeries = .tmT88
+    @State private var epsonBTAddress: String = ""
     @State private var isScanning = false
+    @State private var isEpsonScanning = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -84,7 +87,7 @@ struct AddPrinterView: View {
         NavigationView {
             Form {
                 Section(header: Text("Printer Details")) {
-                    TextField("Printer Name (e.g., Kitchen Printer)", text: $name)
+                    TextField("Printer Name (e.g., Receipt Printer)", text: $name)
 
                     Picker("Connection Type", selection: $connectionType) {
                         ForEach(PrinterConnectionType.allCases, id: \.self) { type in
@@ -113,8 +116,26 @@ struct AddPrinterView: View {
                         }
                     }
                 } else if connectionType == .epsonBluetooth {
-                    Section(header: Text("Epson Bluetooth Settings")) {
-                        TextField("Device Name or BT Address", text: $ipAddress)
+                    Section(header: Text("Epson Model")) {
+                        Picker("Printer Series", selection: $epsonSeries) {
+                            ForEach(EpsonPrinterSeries.allCases) { series in
+                                Text(series.displayName).tag(series)
+                            }
+                        }
+                    }
+                    Section(header: Text("Epson Bluetooth")) {
+                        if let deviceName = selectedBluetoothName {
+                            Text("Selected: \(deviceName)")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("No device selected.")
+                                .foregroundColor(.secondary)
+                        }
+                        TextField("Or enter BT address / device name", text: $epsonBTAddress)
+                            .autocapitalization(.none)
+                        Button("Scan for Devices") {
+                            isEpsonScanning = true
+                        }
                     }
                 }
 
@@ -130,7 +151,22 @@ struct AddPrinterView: View {
                 dismiss()
             })
             .sheet(isPresented: $isScanning) {
-                BluetoothDeviceScannerView(selectedPeripheralIdentifier: $selectedBluetoothIdentifier, selectedPeripheralName: $selectedBluetoothName)
+                BluetoothDeviceScannerView(
+                    selectedPeripheralIdentifier: $selectedBluetoothIdentifier,
+                    selectedPeripheralName: $selectedBluetoothName
+                )
+            }
+            .sheet(isPresented: $isEpsonScanning) {
+                BluetoothDeviceScannerView(
+                    selectedPeripheralIdentifier: $selectedBluetoothIdentifier,
+                    selectedPeripheralName: $selectedBluetoothName
+                )
+                .onDisappear {
+                    // Populate the manual field if user selected via scanner
+                    if let name = selectedBluetoothName, epsonBTAddress.isEmpty {
+                        epsonBTAddress = name
+                    }
+                }
             }
         }
     }
@@ -146,9 +182,15 @@ struct AddPrinterView: View {
             guard let identifier = selectedBluetoothIdentifier else { return }
             newPrinter = POSPrinter(name: name, connectionType: .bluetooth, bluetoothIdentifier: identifier)
         case .epsonBluetooth:
-            guard !ipAddress.isEmpty else { return }
-            // The ipAddress state now holds the BT Address for Epson printers
-            newPrinter = POSPrinter(name: name, connectionType: .epsonBluetooth, bluetoothIdentifier: ipAddress)
+            // Prefer scanned BT identifier; fall back to manually typed address/name
+            let btID = selectedBluetoothName ?? epsonBTAddress
+            guard !btID.isEmpty else { return }
+            newPrinter = POSPrinter(
+                name: name,
+                connectionType: .epsonBluetooth,
+                bluetoothIdentifier: btID,
+                epsonSeries: epsonSeries
+            )
         }
 
         posData.addPrinter(newPrinter)

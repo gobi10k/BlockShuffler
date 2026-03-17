@@ -2,6 +2,7 @@ import SwiftUI
 
 struct EmployeeSettingsView: View {
     @EnvironmentObject var posData: POSData
+    @AppStorage("currencyCode") private var currencyCode: String = "EUR"
     @State private var newEmployeeName: String = ""
     @State private var newEmployeeRate: String = ""
     @State private var newEmployeeVATInclusive: Bool = false
@@ -76,7 +77,7 @@ struct EmployeeSettingsView: View {
                 Spacer()
                 
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(employee.hourlyRate.formatted(.currency(code: "USD")))
+                    Text(employee.hourlyRate.formatted(.currency(code: currencyCode)))
                         .font(.title3.weight(.bold))
                         .foregroundColor(POSColors.goldPrimary)
                     
@@ -91,7 +92,7 @@ struct EmployeeSettingsView: View {
                     Text("Actual Cost:")
                         .font(.caption.weight(.medium))
                         .foregroundColor(POSColors.textSecondary)
-                    Text(employee.actualHourlyCost.formatted(.currency(code: "USD")))
+                    Text(employee.actualHourlyCost.formatted(.currency(code: currencyCode)))
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(POSColors.textPrimary)
                 }
@@ -102,7 +103,7 @@ struct EmployeeSettingsView: View {
                     Text("VAT (21%):")
                         .font(.caption.weight(.medium))
                         .foregroundColor(POSColors.textSecondary)
-                    Text(employee.hourlyVATCost.formatted(.currency(code: "USD")))
+                    Text(employee.hourlyVATCost.formatted(.currency(code: currencyCode)))
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(POSColors.warning)
                 }

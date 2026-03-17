@@ -267,7 +267,7 @@ struct AnalyticsView: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(POSColors.goldPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                
+
                 LazyVGrid(columns: [
                     GridItem(.flexible()),
                     GridItem(.flexible())
@@ -278,26 +278,26 @@ struct AnalyticsView: View {
                         icon: "wineglass.fill",
                         color: POSColors.info
                     )
-                    
+
                     metricCard(
                         title: "Non-Alcoholic Sales",
                         value: analyticsService.nonAlcoholicSales(from: selectedDateRange.start, to: selectedDateRange.end).formatted(.currency(code: currencyCode)),
-                        icon: "fork.knife",
+                        icon: "cup.and.saucer.fill",
                         color: POSColors.success
                     )
-                    
+
                     metricCard(
-                        title: "Avg Order Value",
-                        value: analyticsService.averageOrderValue(from: selectedDateRange.start, to: selectedDateRange.end).formatted(.currency(code: currencyCode)),
-                        icon: "cart.circle.fill",
+                        title: "Total Tips",
+                        value: analyticsService.totalTips(from: selectedDateRange.start, to: selectedDateRange.end).formatted(.currency(code: currencyCode)),
+                        icon: "heart.fill",
                         color: POSColors.goldPrimary
                     )
-                    
+
                     metricCard(
-                        title: "Avg Items/Guest",
-                        value: String(format: "%.1f", analyticsService.averageItemsPerGuest(from: selectedDateRange.start, to: selectedDateRange.end)),
-                        icon: "list.bullet.circle.fill",
-                        color: POSColors.info
+                        title: "Tables Served",
+                        value: "\(analyticsService.tablesServed(from: selectedDateRange.start, to: selectedDateRange.end))",
+                        icon: "table.furniture.fill",
+                        color: POSColors.warning
                     )
                 }
             }

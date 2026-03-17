@@ -5,7 +5,7 @@ struct InteractionView: View {
     @Binding var isDayStarted: Bool
 
     enum AppView {
-        case tables, reports
+        case tables, reports, analytics
     }
 
     @State private var selectedView: AppView = .tables
@@ -18,41 +18,32 @@ struct InteractionView: View {
                     NavigationStack {
                         TableView()
                     }
-                } else {
+                } else if selectedView == .reports {
                     NavigationStack {
                         DailyReportView()
+                    }
+                } else {
+                    NavigationStack {
+                        AnalyticsView()
                     }
                 }
             }
 
-            // Custom Footer with Dark Sophisticated Design
+            // Custom Footer
             customFooter
         }
         .background(POSColors.backgroundDark)
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .preferredColorScheme(.dark)
     }
-    
+
     // MARK: - Custom Footer
+
     private var customFooter: some View {
         HStack(spacing: 0) {
-            // Tables Tab
-            tabButton(
-                icon: "table.furniture",
-                title: "Tables",
-                isSelected: selectedView == .tables,
-                action: { selectedView = .tables }
-            )
-            
-            // Reports Tab
-            tabButton(
-                icon: "doc.text.magnifyingglass",
-                title: "Reports",
-                isSelected: selectedView == .reports,
-                action: { selectedView = .reports }
-            )
-            
-            // End Day Tab
+            tabButton(icon: "table.furniture",          title: "Tables",    tab: .tables)
+            tabButton(icon: "doc.text.magnifyingglass", title: "Report",    tab: .reports)
+            tabButton(icon: "chart.bar.xaxis",          title: "Analytics", tab: .analytics)
             endDayButton
         }
         .padding(.top, 12)
@@ -63,14 +54,15 @@ struct InteractionView: View {
                 .shadow(color: POSShadows.card.color, radius: 8, x: 0, y: -4)
         )
     }
-    
-    private func tabButton(icon: String, title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+
+    private func tabButton(icon: String, title: String, tab: AppView) -> some View {
+        let isSelected = selectedView == tab
+        return Button { selectedView = tab } label: {
             VStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.title2.weight(isSelected ? .semibold : .medium))
                     .foregroundColor(isSelected ? POSColors.goldPrimary : POSColors.textMuted)
-                
+
                 Text(title)
                     .font(.caption.weight(isSelected ? .semibold : .medium))
                     .foregroundColor(isSelected ? POSColors.goldPrimary : POSColors.textMuted)
@@ -84,17 +76,17 @@ struct InteractionView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
-    
+
     private var endDayButton: some View {
-        Button(action: {
+        Button {
             posData.endDay()
             isDayStarted = false
-        }) {
+        } label: {
             VStack(spacing: 6) {
                 Image(systemName: posData.hasOpenTables ? "xmark.circle" : "power.circle")
                     .font(.title2.weight(.medium))
                     .foregroundColor(posData.hasOpenTables ? POSColors.textDisabled : POSColors.error)
-                
+
                 Text("End Day")
                     .font(.caption.weight(.medium))
                     .foregroundColor(posData.hasOpenTables ? POSColors.textDisabled : POSColors.error)

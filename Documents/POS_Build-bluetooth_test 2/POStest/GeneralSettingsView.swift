@@ -2,32 +2,29 @@
 //  GeneralSettingsView.swift
 //  POStest
 //
-//  Created by Jules on 12/08/2025.
-//
 
 import SwiftUI
 import SumUpSDK
 
 struct GeneralSettingsView: View {
-    @AppStorage("businessName") private var businessName: String = "Five Points Cocktail Bar"
-    @AppStorage("location") private var location: String = ""
-    @AppStorage("profitMargin") private var profitMargin: Double = 0.0
-    @AppStorage("currencyCode") private var currencyCode: String = "EUR"
+    @AppStorage("businessName")      private var businessName: String  = "Five Points Cocktail Bar"
+    @AppStorage("location")          private var location: String      = ""
+    @AppStorage("profitMargin")      private var profitMargin: Double  = 0.0
+    @AppStorage("currencyCode")      private var currencyCode: String  = "EUR"
+    @AppStorage("tableLayoutType")   private var tableLayoutType: String = "Grid"
+    @AppStorage("sumupAPIKey")       private var sumupAPIKey: String   = ""
+    @AppStorage("defaultEmailBody")  private var defaultEmailBody: String = "Thank you for your purchase. Please find your receipt attached."
 
-    @AppStorage("tableLayoutType") private var tableLayoutType: String = "Grid"
     private let currencyCodes = ["EUR", "USD", "GBP"]
-    private let layoutTypes = ["Grid", "Custom"]
+    private let layoutTypes   = ["Grid", "Custom"]
 
-    @AppStorage("sumupAPIKey") private var sumupAPIKey: String = ""
-    @AppStorage("defaultEmailBody") private var defaultEmailBody: String = "Thank you for your purchase. Please find your receipt attached."
+    @State private var isSumUpLoggedIn = false
 
     var body: some View {
         Form {
             Section(header: Text("Table View")) {
                 Picker("Layout Style", selection: $tableLayoutType) {
-                    ForEach(layoutTypes, id: \.self) {
-                        Text($0)
-                    }
+                    ForEach(layoutTypes, id: \.self) { Text($0) }
                 }
                 .pickerStyle(SegmentedPickerStyle())
             }
@@ -66,23 +63,36 @@ struct GeneralSettingsView: View {
                     .frame(height: 100)
             }
 
-            Section(header: Text("SumUp API")) {
+            Section(header: Text("SumUp")) {
                 TextField("API Key", text: $sumupAPIKey)
-
-                Button("Login to SumUp") {
-                    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                          let rootViewController = windowScene.windows.first?.rootViewController else {
-                        return
+                    .autocapitalization(.none)
+                    .onChange(of: sumupAPIKey) { newKey in
+                        SumUpAPIManager.shared.setup(withAPIKey: newKey)
+                        isSumUpLoggedIn = SumUpAPIManager.shared.isLoggedIn
                     }
-                    SumUpSDK.presentLogin(from: rootViewController, animated: true) { (success, error) in
-                        if let error = error {
-                            print("Error logging in to SumUp: \(error.localizedDescription)")
+
+                HStack {
+                    Button("Login to SumUp") {
+                        SumUpAPIManager.shared.presentLogin { success in
+                            isSumUpLoggedIn = success
                         }
+                    }
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(isSumUpLoggedIn ? Color.green : Color.red)
+                            .frame(width: 10, height: 10)
+                        Text(isSumUpLoggedIn ? "Logged in" : "Not logged in")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
             }
         }
         .navigationTitle("General Settings")
+        .onAppear {
+            isSumUpLoggedIn = SumUpAPIManager.shared.isLoggedIn
+        }
     }
 }
 

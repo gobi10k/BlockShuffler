@@ -28,6 +28,10 @@ struct ReceiptView: View {
     // Split bill
     @State private var showSplitBill = false
 
+    // Print
+    @State private var showPrinterPicker = false
+    private let printerService = PrinterService()
+
     // MARK: - Computed Properties
     private var tipAmount: Double {
         Double(tipAmountString) ?? 0.0
@@ -93,6 +97,12 @@ struct ReceiptView: View {
         }
         .alert(isPresented: $showMailAlert) {
             Alert(title: Text(mailAlertTitle), message: Text(mailAlertMessage), dismissButton: .default(Text("OK")))
+        }
+        .confirmationDialog("Select Printer", isPresented: $showPrinterPicker, titleVisibility: .visible) {
+            ForEach(posData.printers) { printer in
+                Button(printer.name) { printReceipt(to: printer) }
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .preferredColorScheme(.dark)
     }
@@ -301,11 +311,22 @@ struct ReceiptView: View {
                 .buttonStyle(PrimaryButtonStyle())
 
             Button("Pay with Card (SumUp)") {
-                SumUpAPIManager.shared.processPayment(amount: grandTotal, currency: currencyCode) { success in
+                SumUpAPIManager.shared.processPayment(
+                    amount: grandTotal,
+                    currency: currencyCode,
+                    title: "Table \(table.id) — \(grandTotal.formatted(.currency(code: currencyCode)))"
+                ) { success in
                     if success { completePayment(method: "SumUp") }
                 }
             }
             .buttonStyle(PrimaryButtonStyle())
+
+            Button {
+                handlePrintReceiptTap()
+            } label: {
+                Label("Print Receipt", systemImage: "printer")
+            }
+            .buttonStyle(SecondaryButtonStyle())
 
             Button {
                 showSplitBill = true
@@ -394,6 +415,34 @@ struct ReceiptView: View {
             paymentMethod: method
         )
         isPresented = false
+    }
+
+    private func handlePrintReceiptTap() {
+        guard !posData.printers.isEmpty else {
+            mailAlertTitle = "No Printers"
+            mailAlertMessage = "Add a printer in Settings > General > Manage Printers."
+            showMailAlert = true
+            return
+        }
+        if posData.printers.count == 1 {
+            printReceipt(to: posData.printers[0])
+        } else {
+            showPrinterPicker = true
+        }
+    }
+
+    private func printReceipt(to printer: POSPrinter) {
+        printerService.printReceipt(
+            table: table,
+            tip: tipAmount,
+            businessName: UserDefaults.standard.string(forKey: "businessName") ?? "Five Points Cocktail Bar",
+            currencyCode: currencyCode,
+            to: printer
+        ) { success, message in
+            mailAlertTitle = success ? "Print Sent" : "Print Failed"
+            mailAlertMessage = message
+            showMailAlert = true
+        }
     }
 
     private func summaryRow(label: String, value: String, isHighlighted: Bool = false) -> some View {
