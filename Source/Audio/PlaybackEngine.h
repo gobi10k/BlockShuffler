@@ -1,0 +1,52 @@
+#pragma once
+#include <juce_audio_basics/juce_audio_basics.h>
+#include "ArrangementResolver.h"
+
+namespace BlockShuffler {
+
+/**
+ * Mixes a ResolvedArrangement into an audio output stream.
+ *
+ * Thread safety:
+ *   play() / stop() / rewind() are called on the UI thread.
+ *   getNextAudioBlock() is called on the audio thread.
+ *   A CriticalSection guards the arrangement and playhead.
+ */
+class PlaybackEngine {
+public:
+    PlaybackEngine();
+    ~PlaybackEngine() = default;
+
+    // Called by PluginProcessor
+    void prepareToPlay(double sampleRate, int samplesPerBlock);
+    void releaseResources();
+    void getNextAudioBlock(juce::AudioBuffer<float>& buffer, int numSamples);
+
+    // UI-thread transport controls
+    void play(ResolvedArrangement arrangement);
+    void stop();
+    void rewind();
+
+    // Query (approximate, may be off by one block)
+    bool   isPlaying()         const { return playing.load(); }
+    double getPlayheadSeconds() const;
+    double getTotalSeconds()    const;
+
+private:
+    juce::CriticalSection lock;
+    ResolvedArrangement   arrangement;
+
+    std::atomic<bool>    playing    { false };
+    std::atomic<int64_t> playheadSamples { 0 };
+
+    double outputSampleRate = 48000.0;
+
+    void mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
+                            int numSamples,
+                            const ResolvedEntry& entry,
+                            int64_t currentHead) const;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlaybackEngine)
+};
+
+} // namespace BlockShuffler
