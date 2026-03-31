@@ -4,7 +4,14 @@ project(BlockShuffler VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_subdirectory(/Users/alecgordon/JUCE libs/JUCE)
+include(FetchContent)
+FetchContent_Declare(
+    JUCE
+    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+    GIT_TAG        8.0.6
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(JUCE)
 
 juce_add_plugin(BlockShuffler
     COMPANY_NAME "gobi10k"
@@ -81,12 +88,14 @@ target_compile_definitions(BlockShuffler PUBLIC
     JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
 )
 
-# Re-sign the Standalone app with ad-hoc signature after build
-add_custom_command(TARGET BlockShuffler_Standalone POST_BUILD
-    COMMAND codesign --force --deep --sign -
-            "$<TARGET_BUNDLE_DIR:BlockShuffler_Standalone>"
-    COMMENT "Ad-hoc signing BlockShuffler.app"
-)
+# Re-sign the Standalone app with ad-hoc signature after build (macOS only)
+if(APPLE)
+    add_custom_command(TARGET BlockShuffler_Standalone POST_BUILD
+        COMMAND codesign --force --deep --sign -
+                "$<TARGET_BUNDLE_DIR:BlockShuffler_Standalone>"
+        COMMENT "Ad-hoc signing BlockShuffler.app"
+    )
+endif()
 
 target_link_libraries(BlockShuffler
     PRIVATE
