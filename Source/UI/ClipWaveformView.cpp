@@ -338,9 +338,10 @@ ClipWaveformView::ClipWaveformView() {
     viewport.onZoomScroll = [this](float deltaY) {
         float delta = deltaY > 0 ? 1.25f : 0.8f;
         zoomFactor  = juce::jlimit(1.0f, 32.0f, zoomFactor * delta);
+        juce::Component::SafePointer<ClipWaveformView> safeThis(this);
         juce::MessageManager::callAsync(
-            [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
-                if (safe) safe->resized();
+            [safeThis] {
+                if (safeThis) safeThis->resized();
             });
     };
     addAndMakeVisible(viewport);

@@ -112,9 +112,10 @@ InspectorPanel::InspectorPanel() {
         spc.values.add(newCount);
         spc.weights.add(10.0f);
         project->applyExternalMutation(pre);
+        juce::Component::SafePointer<InspectorPanel> safeThis(this);
         juce::MessageManager::callAsync(
-            [safe = juce::Component::SafePointer<InspectorPanel>(this)] {
-                if (safe) { safe->rebuildStackCountRows(); safe->resized(); }
+            [safeThis] {
+                if (safeThis) { safeThis->rebuildStackCountRows(); safeThis->resized(); }
             });
     };
     addStackCountBtn.setTooltip("Add another count option with its own probability weight");
@@ -334,9 +335,10 @@ void InspectorPanel::rebuildStackCountRows() {
             // Defer rebuild: rebuildStackCountRows() destroys the StackCountRow that owns
             // this button. Doing it synchronously would destroy the button while JUCE's
             // click handler is still running (use-after-free → juce_String assertion crash).
+            juce::Component::SafePointer<InspectorPanel> safeThis(this);
             juce::MessageManager::callAsync(
-                [safe = juce::Component::SafePointer<InspectorPanel>(this)] {
-                    if (safe) { safe->rebuildStackCountRows(); safe->resized(); }
+                [safeThis] {
+                    if (safeThis) { safeThis->rebuildStackCountRows(); safeThis->resized(); }
                 });
         };
 
