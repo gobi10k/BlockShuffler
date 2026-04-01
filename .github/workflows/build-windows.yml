@@ -24,10 +24,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BlockShuffler-VST3-Windows
-          path: build/BlockShuffler_artefacts/VST3/
+          path: build/BlockShuffler_artefacts/Release/VST3/
 
       - name: Upload Standalone artifact
         uses: actions/upload-artifact@v4
         with:
           name: BlockShuffler-Standalone-Windows
-          path: build/BlockShuffler_artefacts/Standalone/
+          path: build/BlockShuffler_artefacts/Release/Standalone/
