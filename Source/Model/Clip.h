@@ -76,11 +76,13 @@ public:
         if (targetSampleRate > 0.0 && nativeSampleRate > 0.0
             && std::abs(nativeSampleRate - targetSampleRate) > 0.5)
         {
-            // LagrangeInterpolator: ratio = inputRate / outputRate.
-            // ratio > 1 → fewer output samples (speeding up, e.g. 96000→48000).
-            // ratio < 1 → more output samples (slowing down, e.g. 44100→48000).
+            // LagrangeInterpolator::process(speedRatio, input, output, numOutput):
+            //   speedRatio = inputSamplesConsumedPerOutputSample = nativeRate / targetRate
+            //   numOutput = numInput / speedRatio  (= numInput * targetRate / nativeRate)
+            // ratio > 1 (e.g. 96000→48000): speedRatio=2.0 → half as many output samples
+            // ratio < 1 (e.g. 44100→48000): speedRatio≈0.92 → more output samples
             double ratio  = nativeSampleRate / targetSampleRate;
-            int    outLen = juce::jmax(1, (int)((double)reader->lengthInSamples * ratio + 0.5));
+            int    outLen = juce::jmax(1, (int)((double)reader->lengthInSamples / ratio + 0.5));
             int    numCh  = audioBuffer.getNumChannels();
 
             juce::AudioBuffer<float> resampled(numCh, outLen);

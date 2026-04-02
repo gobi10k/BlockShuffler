@@ -168,15 +168,30 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component* origi
     }
     if (key.isKeyCode('Z') && key.getModifiers().isCommandDown() &&
         !key.getModifiers().isShiftDown()) {
+        // Stop engine first: stop() acquires the audio-thread lock and blocks until
+        // the current callback finishes, so resetAndLoad's blocks.clear() cannot
+        // race with an in-progress getNextAudioBlock that holds raw Clip pointers.
+        engine.stop();
+        transportBar.setIsPlaying(false);
+        blockStrip.setPlayingBlock({});
+        currentArrangement = {};
         project->undoManager.undo();
         return true;
     }
     if (key.isKeyCode('Z') && key.getModifiers().isCommandDown() &&
         key.getModifiers().isShiftDown()) {
+        engine.stop();
+        transportBar.setIsPlaying(false);
+        blockStrip.setPlayingBlock({});
+        currentArrangement = {};
         project->undoManager.redo();
         return true;
     }
     if (key.isKeyCode('Y') && key.getModifiers().isCommandDown()) {
+        engine.stop();
+        transportBar.setIsPlaying(false);
+        blockStrip.setPlayingBlock({});
+        currentArrangement = {};
         project->undoManager.redo();
         return true;
     }

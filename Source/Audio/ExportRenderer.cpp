@@ -43,9 +43,13 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
                                0));
     if (!writer) return false;
 
-    DBG("Export: writer sampleRate=" + juce::String(arrangement.sampleRate)
-        + " totalDurationSamples=" + juce::String(arrangement.totalDurationSamples)
-        + " numEntries=" + juce::String(arrangement.entries.size()));
+    // All three should be identical.  Any mismatch here is the export pitch bug.
+    double renderSampleRate  = arrangement.sampleRate;   // rate of clip PCM data
+    double writerSampleRate  = arrangement.sampleRate;   // rate passed to format writer
+    double projectSampleRate = arrangement.sampleRate;   // project model rate (= arrangement.sampleRate)
+    DBG("EXPORT: renderSampleRate=" + juce::String(renderSampleRate)
+        + " writerSampleRate=" + juce::String(writerSampleRate)
+        + " projectSampleRate=" + juce::String(projectSampleRate));
 
     return writer->writeFromAudioSampleBuffer(output, 0, numSamples);
 }

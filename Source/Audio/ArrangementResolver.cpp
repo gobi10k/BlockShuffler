@@ -360,17 +360,32 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
     result.totalDurationSamples = cursor;
 
-    DBG("=== Resolved Arrangement ===");
-    DBG("Total entries: " + juce::String(result.entries.size()));
-    for (int i = 0; i < result.entries.size(); ++i) {
+    DBG("========== RESOLVED ARRANGEMENT ==========");
+    DBG("Project sampleRate: " + juce::String(project.sampleRate));
+    DBG("Blocks in project: " + juce::String(project.blocks.size()));
+    for (auto* b : project.blocks)
+        DBG("  Block: " + b->name + " pos=" + juce::String(b->position)
+            + " clips=" + juce::String(b->clips.size())
+            + " isDone=" + juce::String(b->isDone ? 1 : 0)
+            + " stackGroup=" + juce::String(b->stackGroup)
+            + " isOverlapping=" + juce::String(b->isOverlapping ? 1 : 0));
+    DBG("---");
+    DBG("Resolved entries: " + juce::String((int)result.entries.size()));
+    for (int i = 0; i < (int)result.entries.size(); ++i) {
         auto& e = result.entries.getReference(i);
-        DBG("Entry " + juce::String(i)
-            + " blockId=" + e.blockId
-            + " clipName=" + (e.clip ? e.clip->name : "NULL")
-            + " timelinePos=" + juce::String(e.timelinePos)
-            + " bodyLen=" + juce::String(e.clip ? (e.clip->endMark - e.clip->startMark) : 0));
+        auto bodyLen = e.clip ? (e.clip->endMark - e.clip->startMark) : 0;
+        DBG("  [" + juce::String(i) + "] block=" + e.blockId
+            + " clip=" + (e.clip ? e.clip->name : "NULL")
+            + " timeline=" + juce::String((int64_t)e.timelinePos)
+            + " body=" + juce::String((int64_t)bodyLen)
+            + " overlay=" + juce::String(e.isOverlay ? 1 : 0)
+            + " startMark=" + juce::String(e.clip ? (int64_t)e.clip->startMark : 0)
+            + " endMark=" + juce::String(e.clip ? (int64_t)e.clip->endMark : 0)
+            + " clipSR=" + juce::String(e.clip ? e.clip->nativeSampleRate : 0)
+            + " bufferLen=" + juce::String(e.clip ? (int64_t)e.clip->audioBuffer.getNumSamples() : 0));
     }
-    DBG("totalDurationSamples: " + juce::String(result.totalDurationSamples));
+    DBG("totalDuration=" + juce::String((int64_t)result.totalDurationSamples));
+    DBG("===========================================");
 
     return result;
 }

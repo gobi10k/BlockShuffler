@@ -64,8 +64,19 @@ public:
         {
             setUsingNativeTitleBar(true);
 
-            // Set up audio device to drive the playback engine
+            // Set up audio device to drive the playback engine.
+            // Request the project's default sample rate (48 kHz) so that the device
+            // and clip buffers run at the same rate and no pitch shift occurs during
+            // playback.  If the hardware doesn't support 48 kHz, JUCE will choose
+            // the nearest available rate; the diagnostic logging will show the
+            // actual rate chosen vs. project.sampleRate.
             deviceManager.initialiseWithDefaultDevices(0, 2);
+            {
+                juce::AudioDeviceManager::AudioDeviceSetup setup;
+                deviceManager.getAudioDeviceSetup(setup);
+                setup.sampleRate = 48000.0;
+                deviceManager.setAudioDeviceSetup(setup, true);
+            }
             deviceManager.addAudioCallback(&audioSourcePlayer);
             audioSourcePlayer.setSource(&engineSource);
 
