@@ -6,7 +6,7 @@ InspectorPanel::InspectorPanel() {
     auto setupLabel = [this](juce::Label& lbl, const juce::String& text,
                              float fontSize, bool secondary = false) {
         lbl.setText(text, juce::dontSendNotification);
-        lbl.setFont(juce::Font(fontSize, secondary ? juce::Font::bold : juce::Font::plain));
+        lbl.setFont(juce::Font(juce::FontOptions(fontSize).withStyle(secondary ? "Bold" : "Plain")));
         lbl.setColour(juce::Label::textColourId,
                       secondary ? juce::Colour(LookAndFeel_BlockShuffler::textSecondary)
                                 : juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
@@ -25,13 +25,13 @@ InspectorPanel::InspectorPanel() {
 
     playsOverHint.setText("Stack with a block to configure clip targeting.",
                           juce::dontSendNotification);
-    playsOverHint.setFont(juce::Font(11.0f));
+    playsOverHint.setFont(juce::Font(juce::FontOptions(11.0f)));
     playsOverHint.setColour(juce::Label::textColourId,
                             juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
     playsOverHint.setJustificationType(juce::Justification::topLeft);
     addAndMakeVisible(playsOverHint);
 
-    effectiveProbLabel.setFont(juce::Font(11.0f));
+    effectiveProbLabel.setFont(juce::Font(juce::FontOptions(11.0f)));
     effectiveProbLabel.setColour(juce::Label::textColourId,
                                  juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
     effectiveProbLabel.setJustificationType(juce::Justification::centredRight);
@@ -231,7 +231,7 @@ void InspectorPanel::rebuildLinkRows() {
 
         row->label.setText("<-> " + otherName,
                            juce::dontSendNotification);
-        row->label.setFont(juce::Font(12.0f));
+        row->label.setFont(juce::Font(juce::FontOptions(12.0f)));
         row->label.setColour(juce::Label::textColourId,
                              juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
 
@@ -268,7 +268,7 @@ void InspectorPanel::rebuildStackCountRows() {
         ++lastBuiltStackCountRows;
 
         row->countLbl.setText(juce::String(spc.values[i]), juce::dontSendNotification);
-        row->countLbl.setFont(juce::Font(13.0f, juce::Font::bold));
+        row->countLbl.setFont(juce::Font(juce::FontOptions(13.0f).withStyle("Bold")));
         row->countLbl.setColour(juce::Label::textColourId,
                                 juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
         row->countLbl.setJustificationType(juce::Justification::centred);

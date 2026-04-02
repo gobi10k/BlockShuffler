@@ -30,7 +30,7 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
 
     // Mode label is added last so it renders on top of the viewport/blocks
     modeLabel.setJustificationType(juce::Justification::centred);
-    modeLabel.setFont(juce::Font(12.0f, juce::Font::italic));
+    modeLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Italic")));
     modeLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::accentCol));
     modeLabel.setColour(juce::Label::backgroundColourId,
@@ -170,8 +170,10 @@ void BlockStrip::rebuildBlocks() {
 
 void BlockStrip::selectBlock(Block* block) {
     selectedBlockId = block ? block->id : juce::String{};
-    for (auto* bc : blockComponents)
-        bc->setSelected(bc->getBlock().id == selectedBlockId);
+    for (auto* bc : blockComponents) {
+        auto* bPtr = bc->getBlock();
+        bc->setSelected(bPtr && bPtr->id == selectedBlockId);
+    }
 
     // Scroll the viewport so the selected block is visible
     if (block) {
@@ -214,8 +216,10 @@ void BlockStrip::enterLinkMode(const juce::String& fromBlockId) {
     pendingMode    = PendingMode::Link;
     pendingBlockId = fromBlockId;
     // Highlight all other blocks as potential targets
-    for (auto* bc : blockComponents)
-        bc->setHighlighted(bc->getBlock().id != fromBlockId);
+    for (auto* bc : blockComponents) {
+        auto* bPtr = bc->getBlock();
+        bc->setHighlighted(bPtr && bPtr->id != fromBlockId);
+    }
     if (overlay) {
         int idx = 0;
         for (auto* b : project->blocks) { if (b->id == fromBlockId) break; ++idx; }
@@ -231,8 +235,10 @@ void BlockStrip::enterLinkMode(const juce::String& fromBlockId) {
 void BlockStrip::enterStackMode(const juce::String& fromBlockId) {
     pendingMode    = PendingMode::Stack;
     pendingBlockId = fromBlockId;
-    for (auto* bc : blockComponents)
-        bc->setHighlighted(bc->getBlock().id != fromBlockId);
+    for (auto* bc : blockComponents) {
+        auto* bPtr = bc->getBlock();
+        bc->setHighlighted(bPtr && bPtr->id != fromBlockId);
+    }
     modeLabel.setText("Click a block to stack with it  (Esc to cancel)",
                       juce::dontSendNotification);
     modeLabel.setVisible(true);
@@ -279,8 +285,10 @@ void BlockStrip::updateOverlay() {
 void BlockStrip::setPlayingBlock(const juce::String& blockId) {
     if (playingBlockId == blockId) return;
     playingBlockId = blockId;
-    for (auto* bc : blockComponents)
-        bc->setPlaying(bc->getBlock().id == playingBlockId);
+    for (auto* bc : blockComponents) {
+        auto* bPtr = bc->getBlock();
+        bc->setPlaying(bPtr && bPtr->id == playingBlockId);
+    }
 }
 
 Block* BlockStrip::getBlockAtLocalPoint(juce::Point<int> localPt) const {

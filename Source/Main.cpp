@@ -88,6 +88,9 @@ public:
 
         ~MainWindow() override {
             stopTimer();
+            // Clear MainComponent BEFORE audio callback stops to ensure
+            // PlaybackEngine is no longer being actively driven by it
+            mainComponent = nullptr;
             audioSourcePlayer.setSource(nullptr);
             deviceManager.removeAudioCallback(&audioSourcePlayer);
             deviceManager.closeAudioDevice();

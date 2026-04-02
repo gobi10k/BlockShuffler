@@ -17,7 +17,7 @@ BlockComponent::BlockComponent(Block& block_,
       onStackRequested(std::move(onStackRequested_))
 {
     nameLabel.setText(block ? block->name : "", juce::dontSendNotification);
-    nameLabel.setFont(juce::Font(12.0f, juce::Font::bold));
+    nameLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
     nameLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
     nameLabel.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
@@ -147,7 +147,7 @@ void BlockComponent::mouseDrag(const juce::MouseEvent& e) {
                     ig.setColour(block->color.withAlpha(0.75f));
                     ig.fillRoundedRectangle(img.getBounds().toFloat().reduced(1.0f), 5.0f);
                     ig.setColour(juce::Colours::white);
-                    ig.setFont(juce::Font(12.0f, juce::Font::bold));
+                    ig.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
                     ig.drawText(block->name, img.getBounds(), juce::Justification::centred);
                 }
                 dc->startDragging("block:" + block->id, this, juce::ScaledImage(img));
