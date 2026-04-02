@@ -9,22 +9,24 @@ namespace BlockShuffler {
 //==============================================================================
 
 ClipRowComponent::ClipRowComponent(Clip& c,
+                                   double psr,
                                    std::function<void()> onSel,
                                    std::function<void()> onRepaint,
                                    std::function<void()> onRemove)
-    : clip(c),
+    : clip(&c),
+      projectSampleRate(psr),
       onSelectedCallback(std::move(onSel)),
       onRepaintCallback(std::move(onRepaint)),
       onRemoveCallback(std::move(onRemove))
 {
-    nameLabel.setText(clip.name, juce::dontSendNotification);
-    nameLabel.setFont(juce::Font(12.0f, juce::Font::bold));
+    nameLabel.setText(clip ? clip->name : "", juce::dontSendNotification);
+    nameLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
     nameLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
     nameLabel.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     nameLabel.setEditable(false, true, false); // double-click editable
     nameLabel.onTextChange = [this] {
-        clip.name = nameLabel.getText();
+        if (clip) clip->name = nameLabel.getText();
         if (onRepaintCallback) onRepaintCallback();
         // Record rename as undoable (pre was captured when the editor was opened)
         if (onUndoableMutation && nameLabelEditPre.isObject()) {
@@ -51,14 +53,16 @@ juce::Rectangle<int> ClipRowComponent::waveArea() const {
 
 int ClipRowComponent::sampleToX(int64_t sample) const {
     auto wa     = waveArea();
-    int64_t tot = (int64_t)clip.audioBuffer.getNumSamples();
+    if (!clip || !clip->audioBuffer) return wa.getX();
+    int64_t tot = (int64_t)clip->audioBuffer->getNumSamples();
     if (tot <= 0 || wa.getWidth() <= 0) return wa.getX();
     return wa.getX() + (int)((double)sample / (double)tot * wa.getWidth());
 }
 
 int64_t ClipRowComponent::xToSample(int x) const {
     auto wa     = waveArea();
-    int64_t tot = (int64_t)clip.audioBuffer.getNumSamples();
+    if (!clip || !clip->audioBuffer) return 0;
+    int64_t tot = (int64_t)clip->audioBuffer->getNumSamples();
     if (wa.getWidth() <= 0 || tot <= 0) return 0;
     double t = (double)(x - wa.getX()) / (double)wa.getWidth();
     return (int64_t)(juce::jlimit(0.0, 1.0, t) * (double)tot);
@@ -69,16 +73,23 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
     g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight));
     g.fillRect(area);
 
-    const auto& buf = clip.audioBuffer;
-    if (buf.getNumSamples() == 0 || buf.getNumChannels() == 0) {
+    if (!clip || !clip->audioBuffer) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(11.0f);
+        g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText("No audio loaded", area, juce::Justification::centred);
         return;
     }
 
+    const auto& buf = *(clip->audioBuffer);
     const int numSamples  = buf.getNumSamples();
     const int numChannels = buf.getNumChannels();
+    if (numSamples == 0 || numChannels == 0) {
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
+        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.drawText("No audio loaded", area, juce::Justification::centred);
+        return;
+    }
+
     const int w  = area.getWidth();
     const int cy = area.getCentreY();
     const int halfH = area.getHeight() / 2;
@@ -106,6 +117,7 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
 }
 
 void ClipRowComponent::paint(juce::Graphics& g) {
+    if (!clip) return;
     auto bg = selected
         ? juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.18f)
         : juce::Colour(LookAndFeel_BlockShuffler::bgMedium);
@@ -113,30 +125,30 @@ void ClipRowComponent::paint(juce::Graphics& g) {
 
     // Header
     auto headerRect = getLocalBounds().removeFromTop(headerH);
-    g.setColour(clip.color.withAlpha(0.85f));
+    g.setColour(clip->color.withAlpha(0.85f));
     g.fillRect(headerRect);
 
     // Pick black or white text depending on header luminance so it's always readable
-    float lum = clip.color.getFloatRed()   * 0.299f
-              + clip.color.getFloatGreen() * 0.587f
-              + clip.color.getFloatBlue()  * 0.114f;
+    float lum = clip->color.getFloatRed()   * 0.299f
+              + clip->color.getFloatGreen() * 0.587f
+              + clip->color.getFloatBlue()  * 0.114f;
     auto headerTextCol = (lum > 0.55f) ? juce::Colours::black : juce::Colours::white;
     nameLabel.setColour(juce::Label::textColourId, headerTextCol);
 
     // Effective (normalized) probability on right of header
     juce::String probText;
-    if (clip.isDone) {
+    if (clip->isDone) {
         probText = "excl.";
     } else if (ownerBlock) {
         float totalWeight = 0.0f;
         for (auto* c : ownerBlock->clips)
             if (!c->isDone) totalWeight += c->probability;
-        float eff = (totalWeight > 0.0f) ? (clip.probability / totalWeight) * 100.0f : 0.0f;
+        float eff = (totalWeight > 0.0f) ? (clip->probability / totalWeight) * 100.0f : 0.0f;
         probText = "eff: " + juce::String(eff, 1) + "%";
     } else {
-        probText = juce::String((int)(clip.probability * 100.0f)) + "%";
+        probText = juce::String((int)(clip->probability * 100.0f)) + "%";
     }
-    g.setFont(11.0f);
+    g.setFont(juce::Font(juce::FontOptions(11.0f)));
     g.setColour(headerTextCol);
     g.drawText(probText, headerRect.withTrimmedRight(4), juce::Justification::centredRight);
 
@@ -145,11 +157,11 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     renderWaveform(g, wa);
 
     // Grid lines — offset by gridOffsetSamples so the nudge is visible
-    if (clip.tempo > 0.0 && clip.nativeSampleRate > 0.0) {
-        double spb   = (clip.nativeSampleRate * 60.0) / clip.tempo;
-        int64_t total = (int64_t)clip.audioBuffer.getNumSamples();
+    if (clip->tempo > 0.0 && projectSampleRate > 0.0) {
+        double spb   = (projectSampleRate * 60.0) / clip->tempo;
+        int64_t total = (clip->audioBuffer) ? (int64_t)clip->audioBuffer->getNumSamples() : 0;
         // Wrap the offset into [0, spb) so lines start at the right phase
-        double offset = std::fmod((double)clip.gridOffsetSamples, spb);
+        double offset = std::fmod((double)clip->gridOffsetSamples, spb);
         if (offset < 0.0) offset += spb;
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::gridLineColor));
         for (double s = offset; s < (double)total; s += spb) {
@@ -162,21 +174,21 @@ void ClipRowComponent::paint(juce::Graphics& g) {
 
     // Lead-in dim
     {
-        int sx = sampleToX(clip.startMark);
+        int sx = sampleToX(clip->startMark);
         auto r = juce::Rectangle<int>(wa.getX(), wa.getY(),
                                       juce::jmax(0, sx - wa.getX()), wa.getHeight());
         if (r.getWidth() > 0) { g.setColour(juce::Colours::black.withAlpha(0.38f)); g.fillRect(r); }
     }
     // Tail dim
     {
-        int ex = sampleToX(clip.endMark);
+        int ex = sampleToX(clip->endMark);
         auto r = juce::Rectangle<int>(ex, wa.getY(), juce::jmax(0, wa.getRight() - ex), wa.getHeight());
         if (r.getWidth() > 0) { g.setColour(juce::Colours::black.withAlpha(0.38f)); g.fillRect(r); }
     }
 
     // Start marker
     {
-        int sx = sampleToX(clip.startMark);
+        int sx = sampleToX(clip->startMark);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol));
         g.drawLine((float)sx, (float)wa.getY(), (float)sx, (float)wa.getBottom(), 2.0f);
         juce::Path tri;
@@ -186,7 +198,7 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     }
     // End marker
     {
-        int ex = sampleToX(clip.endMark);
+        int ex = sampleToX(clip->endMark);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::endMarkerCol));
         g.drawLine((float)ex, (float)wa.getY(), (float)ex, (float)wa.getBottom(), 2.0f);
         juce::Path tri;
@@ -216,9 +228,9 @@ void ClipRowComponent::mouseDown(const juce::MouseEvent& e) {
 
     // Check marker hit in wave area
     auto wa = waveArea();
-    if (!wa.contains(e.x, e.y)) { activeDrag = DragTarget::None; return; }
-    int sx = sampleToX(clip.startMark);
-    int ex = sampleToX(clip.endMark);
+    if (!wa.contains(e.x, e.y) || !clip) { activeDrag = DragTarget::None; return; }
+    int sx = sampleToX(clip->startMark);
+    int ex = sampleToX(clip->endMark);
     if (std::abs(e.x - sx) <= markerHit)      activeDrag = DragTarget::StartMarker;
     else if (std::abs(e.x - ex) <= markerHit) activeDrag = DragTarget::EndMarker;
     else                                        activeDrag = DragTarget::None;
@@ -241,21 +253,21 @@ void ClipRowComponent::mouseDrag(const juce::MouseEvent& e) {
 
     // Snap to tempo grid unless Shift is held (Shift = free drag)
     auto applySnap = [&](int64_t raw) -> int64_t {
-        if (e.mods.isShiftDown()) return raw;
-        if (clip.tempo > 0.0 && clip.nativeSampleRate > 0.0)
-            return snapToGrid(raw, clip.tempo, clip.nativeSampleRate);
+        if (e.mods.isShiftDown() || !clip) return raw;
+        if (clip->tempo > 0.0 && projectSampleRate > 0.0)
+            return snapToGrid(raw, clip->tempo, projectSampleRate);
         return raw;
     };
 
-    if (activeDrag == DragTarget::StartMarker) {
+    if (activeDrag == DragTarget::StartMarker && clip) {
         int64_t np = applySnap(xToSample(e.x));
-        clip.startMark = juce::jlimit((int64_t)0, clip.endMark - 1, np);
+        clip->startMark = juce::jlimit((int64_t)0, clip->endMark - 1, np);
         repaint();
         if (onRepaintCallback) onRepaintCallback();
-    } else if (activeDrag == DragTarget::EndMarker) {
-        int64_t tot = (int64_t)clip.audioBuffer.getNumSamples();
+    } else if (activeDrag == DragTarget::EndMarker && clip) {
+        int64_t tot = (clip->audioBuffer) ? (int64_t)clip->audioBuffer->getNumSamples() : 0;
         int64_t np  = applySnap(xToSample(e.x));
-        clip.endMark = juce::jlimit(clip.startMark + 1, tot, np);
+        clip->endMark = juce::jlimit(clip->startMark + 1, tot, np);
         repaint();
         if (onRepaintCallback) onRepaintCallback();
     }
@@ -275,14 +287,14 @@ void ClipRowComponent::showContextMenu() {
                                     "Cyan","Blue","Purple","Pink" };
     juce::PopupMenu colourMenu;
     for (int i = 0; i < palette.size() && i < colourNames.size(); ++i)
-        colourMenu.addItem(30 + i, colourNames[i], true, clip.color == palette[i]);
+        colourMenu.addItem(30 + i, colourNames[i], true, clip && clip->color == palette[i]);
 
     juce::PopupMenu menu;
     menu.addItem(1, "Rename");
     menu.addSubMenu("Set Color", colourMenu);
     menu.addSeparator();
-    menu.addItem(2, "Song Ender",  true, clip.isSongEnder);
-    menu.addItem(3, "Mark as Done", true, clip.isDone);
+    menu.addItem(2, "Song Ender",  true, clip && clip->isSongEnder);
+    menu.addItem(3, "Mark as Done", true, clip && clip->isDone);
     menu.addSeparator();
     menu.addItem(4, "Remove Clip");
 
@@ -299,18 +311,18 @@ void ClipRowComponent::showContextMenu() {
             // Rename: capture pre for the editor-commit callback
             if (self->onCaptureSnapshot) self->nameLabelEditPre = self->onCaptureSnapshot();
             self->nameLabel.showEditor();
-        } else if (result >= 30 && result < 30 + palette.size()) {
-            self->clip.color = palette[result - 30];
+        } else if (result >= 30 && result < 30 + palette.size() && self->clip) {
+            self->clip->color = palette[result - 30];
             self->repaint();
             if (self->onRepaintCallback) self->onRepaintCallback();
             if (self->onUndoableMutation && pre.isObject()) self->onUndoableMutation(pre);
-        } else if (result == 2) {
-            self->clip.isSongEnder = !self->clip.isSongEnder;
+        } else if (result == 2 && self->clip) {
+            self->clip->isSongEnder = !self->clip->isSongEnder;
             self->repaint();
             if (self->onRepaintCallback) self->onRepaintCallback();
             if (self->onUndoableMutation && pre.isObject()) self->onUndoableMutation(pre);
-        } else if (result == 3) {
-            self->clip.isDone = !self->clip.isDone;
+        } else if (result == 3 && self->clip) {
+            self->clip->isDone = !self->clip->isDone;
             self->repaint();
             if (self->onRepaintCallback) self->onRepaintCallback();
             if (self->onUndoableMutation && pre.isObject()) self->onUndoableMutation(pre);
@@ -354,9 +366,10 @@ ClipWaveformView::~ClipWaveformView() {
     if (currentBlock) currentBlock->removeChangeListener(this);
 }
 
-void ClipWaveformView::setBlock(Block* block, juce::AudioFormatManager* fmtMgr) {
+void ClipWaveformView::setBlock(Block* block, double sampleRate, juce::AudioFormatManager* fmtMgr) {
     if (currentBlock) currentBlock->removeChangeListener(this);
     currentBlock  = block;
+    projectSampleRate = sampleRate;
     selectedClip  = nullptr;
     if (fmtMgr) formatManager = fmtMgr;
     if (currentBlock) currentBlock->addChangeListener(this);
@@ -377,26 +390,27 @@ void ClipWaveformView::rebuildRows() {
     clipRows.clear();
     if (!currentBlock) return;
 
-    for (auto* clip : currentBlock->clips) {
+    for (auto* clipPtr : currentBlock->clips) {
         auto* row = clipRows.add(new ClipRowComponent(
-            *clip,
-            [this, clip] { selectClip(clip); },
+            *clipPtr,
+            projectSampleRate,
+            [this, clipPtr] { selectClip(clipPtr); },
             [this]       { repaint(); },
-            [this, clip] { removeClip(clip); }
+            [this, clipPtr] { removeClip(clipPtr); }
         ));
         row->onCaptureSnapshot  = onCaptureSnapshot;
         row->onUndoableMutation = onUndoableMutation;
-        row->ownerBlock = currentBlock;
-        row->setSelected(clip == selectedClip);
+        row->ownerBlock = currentBlock.get();
+        row->setSelected(clipPtr == selectedClip);
         contentArea.addAndMakeVisible(row);
     }
 }
 
-void ClipWaveformView::selectClip(Clip* clip) {
-    selectedClip = clip;
+void ClipWaveformView::selectClip(Clip* clipPtr) {
+    selectedClip = clipPtr;
     for (auto* row : clipRows)
-        row->setSelected(&row->getClip() == selectedClip);
-    if (onClipSelected) onClipSelected(clip);
+        row->setSelected(row->getClip() == selectedClip);
+    if (onClipSelected) onClipSelected(clipPtr);
     // Defer focus grab to the next message loop iteration. Grabbing inside a
     // mouseDown handler gets overridden by JUCE's post-click focus reassignment.
     juce::MessageManager::callAsync(
@@ -405,11 +419,11 @@ void ClipWaveformView::selectClip(Clip* clip) {
         });
 }
 
-void ClipWaveformView::removeClip(Clip* clip) {
+void ClipWaveformView::removeClip(Clip* clipPtr) {
     if (!currentBlock) return;
     for (int i = 0; i < currentBlock->clips.size(); ++i) {
-        if (currentBlock->clips[i] == clip) {
-            if (selectedClip == clip) {
+        if (currentBlock->clips[i] == clipPtr) {
+            if (selectedClip == clipPtr) {
                 selectedClip = nullptr;
                 if (onClipSelected) onClipSelected(nullptr);
             }
@@ -438,9 +452,9 @@ void ClipWaveformView::browseForClip() {
             bool anyAdded = false;
             for (auto& f : results) {
                 if (f.existsAsFile()) {
-                    auto clip = std::make_unique<Clip>();
-                    if (clip->loadFromFile(f, *formatManager)) {
-                        currentBlock->addClip(std::move(clip));
+                    auto clipPtr = std::make_unique<Clip>();
+                    if (clipPtr->loadFromFile(f, *formatManager, projectSampleRate)) {
+                        currentBlock->addClip(std::move(clipPtr));
                         anyAdded = true;
                     }
                 }
@@ -463,7 +477,7 @@ bool ClipWaveformView::keyPressed(const juce::KeyPress& key) {
     const bool isLeft  = (key.getKeyCode() == juce::KeyPress::leftKey);
     const bool isRight = (key.getKeyCode() == juce::KeyPress::rightKey);
     if (isLeft || isRight) {
-        const double sr    = selectedClip->nativeSampleRate > 0.0 ? selectedClip->nativeSampleRate : 48000.0;
+        const double sr    = projectSampleRate > 0.0 ? projectSampleRate : 48000.0;
         const double tempo = selectedClip->tempo > 0.0            ? selectedClip->tempo             : 120.0;
         // Use subdivision=4 (quarter-beat steps) so each press produces a visible
         // grid shift. Nudging by a full beat (subdivision=1) would fmod back to the
@@ -505,7 +519,7 @@ void ClipWaveformView::paint(juce::Graphics& g) {
     g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
     if (!currentBlock || currentBlock->clips.isEmpty()) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(14.0f);
+        g.setFont(juce::Font(juce::FontOptions(14.0f)));
         g.drawText(currentBlock ? "Drop audio files here or click  \"+Add Clip\""
                                 : "Select a block to view clips",
                    getLocalBounds().withTrimmedBottom(btnH + 4),

@@ -24,6 +24,7 @@ juce::var projectToJSON(const Project& project) {
                                                   ? "sequential" : "simultaneous");
         bObj->setProperty("isOverlapping",    block->isOverlapping);
         bObj->setProperty("overlapProb",      (double)block->overlapProbability);
+        bObj->setProperty("probability",      (double)block->probability);
 
         juce::Array<juce::var> apciArr;
         for (auto& s : block->allowedParentClipIds) apciArr.add(juce::var(s));
@@ -103,6 +104,7 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                                         : StackPlayMode::Sequential;
             block->isOverlapping  = (bool)  bVar.getProperty("isOverlapping",  false);
             block->overlapProbability = (float)(double)bVar.getProperty("overlapProb", 0.5);
+            block->probability    = (float)(double)bVar.getProperty("probability", 1.0);
 
             block->allowedParentClipIds.clear();
             if (auto* apciArr = bVar.getProperty("allowedParentClipIds", juce::var()).getArray())
@@ -147,11 +149,20 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                     }
 
                     // Compute scale from saved native SR to current project SR.
-                    // Falls back to file's native SR, then to project SR (scale=1).
-                    double savedNativeSR = (double)cVar.getProperty("nativeSampleRate",
-                                            clip->nativeSampleRate > 0.0
-                                                ? clip->nativeSampleRate
-                                                : project.sampleRate);
+                    // Priority:
+                    // 1. nativeSampleRate field from JSON (if present and > 0)
+                    // 2. clip->nativeSampleRate (if file loaded successfully)
+                    // 3. Fallback to project.sampleRate (scale = 1.0)
+                    double savedNativeSR = 0.0;
+                    if (cVar.hasProperty("nativeSampleRate"))
+                        savedNativeSR = (double)cVar.getProperty("nativeSampleRate", 0.0);
+
+                    if (savedNativeSR <= 0.0)
+                        savedNativeSR = clip->nativeSampleRate;
+
+                    if (savedNativeSR <= 0.0)
+                        savedNativeSR = project.sampleRate;
+
                     double markScale = (savedNativeSR > 0.0 && project.sampleRate > 0.0
                                         && std::abs(savedNativeSR - project.sampleRate) > 0.5)
                                        ? project.sampleRate / savedNativeSR
@@ -168,7 +179,7 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                         * markScale + 0.5);
 
                     // Clamp marks to buffer bounds (handles missing-file case gracefully)
-                    int bufLen = clip->audioBuffer.getNumSamples();
+                    int bufLen = clip->audioBuffer ? clip->audioBuffer->getNumSamples() : 0;
                     clip->startMark = juce::jlimit((int64_t)0, (int64_t)juce::jmax(0, bufLen - 1), clip->startMark);
                     clip->endMark   = juce::jlimit(clip->startMark, (int64_t)bufLen, clip->endMark);
 
@@ -186,7 +197,8 @@ bool projectFromJSON(const juce::var& json, Project& project) {
             project.addLink(
                 lVar.getProperty("blockA", "").toString(),
                 lVar.getProperty("blockB", "").toString(),
-                (float)(double)lVar.getProperty("swapProbability", 0.5f));
+                (float)(double)lVar.getProperty("swapProbability", 0.5f),
+                false);
         }
     }
 

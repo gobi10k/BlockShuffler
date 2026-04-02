@@ -15,6 +15,12 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
     const int64_t totalSamples = arrangement.totalDurationSamples;
     if (totalSamples <= 0) return false;
 
+    // Warn if arrangement is too long for a single AudioBuffer (~12h at 48kHz)
+    if (totalSamples > (int64_t)std::numeric_limits<int>::max())
+    {
+        DBG("Warning: Arrangement exceeds INT_MAX samples. Truncating to " + juce::String(std::numeric_limits<int>::max()) + " samples.");
+    }
+
     const int numChannels = 2;
     const int numSamples  = (int)juce::jmin(totalSamples, (int64_t)std::numeric_limits<int>::max());
 
@@ -53,15 +59,16 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
 void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
                                const ResolvedEntry& entry)
 {
-    const auto& src  = entry.clip->audioBuffer;
+    if (!entry.audioBuffer) return;
+    const auto& src  = *entry.audioBuffer;
     const int srcCh  = src.getNumChannels();
     const int srcLen = src.getNumSamples();
     const int dstCh  = dest.getNumChannels();
     const int dstLen = dest.getNumSamples();
     if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
 
-    const int64_t startMark = entry.clip->startMark;
-    const int64_t endMark   = entry.clip->endMark;
+    const int64_t startMark = entry.startMark;
+    const int64_t endMark   = entry.endMark;
     const int64_t bodyLen   = endMark - startMark;
     const int64_t leadInLen = startMark;
     const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
@@ -153,7 +160,7 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
     if (tailLen > 0)
     {
         // retainTailTempo=true → always use original clip audio at 1:1.
-        if (entry.clip->retainTailTempo || !entry.stretchedTail)
+        if (entry.retainTailTempo || !entry.stretchedTail)
         {
             mixBufRange(src, bodyEnd, bodyEnd + tailLen, endMark, 1.0f, 0.0f);
         }
@@ -167,7 +174,8 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
 }
 
 bool ExportRenderer::writeClipFlac(const Clip& clip, const juce::File& dest, int bitDepth, double sampleRate) {
-    const auto& buf = clip.audioBuffer;
+    if (!clip.audioBuffer) return false;
+    const auto& buf = *(clip.audioBuffer);
     const int64_t bodyLen = clip.endMark - clip.startMark;
     if (bodyLen <= 0 || buf.getNumSamples() == 0) return false;
 
@@ -199,11 +207,17 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
     if (arrangement.isEmpty()) return false;
 
     // ── 1. Collect unique clips ───────────────────────────────────────────────
-    // Map clip pointer → stable index for naming
-    juce::Array<const Clip*> uniqueClips;
+    // Track unique clips by ID and store their audio buffers for export
+    struct UniqueClipEntry { juce::String id; std::shared_ptr<juce::AudioBuffer<float>> buffer; int64_t start, end; };
+    juce::Array<UniqueClipEntry> uniqueClips;
+
     for (const auto& entry : arrangement.entries) {
-        if (!uniqueClips.contains(entry.clip))
-            uniqueClips.add(entry.clip);
+        bool alreadyFound = false;
+        for (const auto& uc : uniqueClips) {
+            if (uc.id == entry.clipId) { alreadyFound = true; break; }
+        }
+        if (!alreadyFound)
+            uniqueClips.add({entry.clipId, entry.audioBuffer, entry.startMark, entry.endMark});
     }
 
     // ── 2. Write per-clip FLACs to a temp directory ───────────────────────────
@@ -219,17 +233,34 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
     clipMeta.resize(uniqueClips.size());
 
     for (int i = 0; i < uniqueClips.size(); ++i) {
-        const auto* clip = uniqueClips[i];
+        const auto& uc = uniqueClips[i];
         juce::String clipId = "clip_" + juce::String(i + 1).paddedLeft('0', 3);
         juce::String filename = "clips/" + clipId + ".flac";
         auto dest = tmpDir.getChildFile(filename);
 
-        if (!writeClipFlac(*clip, dest, bitDepth, arrangement.sampleRate)) {
+        const int numCh  = uc.buffer ? juce::jmax(1, uc.buffer->getNumChannels()) : 1;
+        const int srcLen = uc.buffer ? uc.buffer->getNumSamples() : 0;
+        const int start  = (int)juce::jlimit((int64_t)0, (int64_t)juce::jmax(0, srcLen - 1), uc.start);
+        const int count  = (int)juce::jmin(uc.end - uc.start, (int64_t)juce::jmax(0, srcLen - start));
+
+        bool writeOk = false;
+        if (uc.buffer && count > 0) {
+            dest.deleteFile();
+            auto outStream = dest.createOutputStream();
+            if (outStream) {
+                juce::FlacAudioFormat flac;
+                std::unique_ptr<juce::AudioFormatWriter> writer(
+                    flac.createWriterFor(outStream.release(), arrangement.sampleRate, (unsigned)numCh, bitDepth, {}, 0));
+                if (writer) writeOk = writer->writeFromAudioSampleBuffer(*(uc.buffer), start, count);
+            }
+        }
+
+        if (!writeOk) {
             tmpDir.deleteRecursively();
             return false;
         }
 
-        clipMeta.set(i, { clipId, filename, clip->endMark - clip->startMark });
+        clipMeta.set(i, { clipId, filename, uc.end - uc.start });
 
         if (progress)
             progress(0.5f * (float)(i + 1) / (float)uniqueClips.size());
@@ -256,8 +287,12 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
 
     juce::Array<juce::var> arrangementArray;
     for (const auto& entry : arrangement.entries) {
-        int idx = uniqueClips.indexOf(entry.clip);
+        int idx = -1;
+        for (int k = 0; k < uniqueClips.size(); ++k) {
+            if (uniqueClips[k].id == entry.clipId) { idx = k; break; }
+        }
         if (idx < 0) continue;
+
         auto* a = new juce::DynamicObject();
         a->setProperty("clipId",    clipMeta[idx].id);
         a->setProperty("startTime", juce::String(entry.timelinePos));
@@ -278,7 +313,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
         // Map Clip UUID → embedded BSF filename for clips in this resolution
         std::unordered_map<std::string, std::string> clipUuidToEmbedded;
         for (int i = 0; i < uniqueClips.size(); ++i)
-            clipUuidToEmbedded[uniqueClips[i]->id.toStdString()]
+            clipUuidToEmbedded[uniqueClips[i].id.toStdString()]
                 = clipMeta[i].filename.toStdString();
 
         auto* model = new juce::DynamicObject();
