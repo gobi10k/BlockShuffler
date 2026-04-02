@@ -358,8 +358,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             // Actually, we can get tempos from the project during resolve()
             auto* bA = blockById.find(entA.blockId.toStdString())->second;
             auto* bB = blockById.find(entB.blockId.toStdString())->second;
-            Clip* cA = bA->getClipById(entA.clipId);
-            Clip* cB = bB->getClipById(entB.clipId);
+            const Clip* cA = bA->getClipById(entA.clipId);
+            const Clip* cB = bB->getClipById(entB.clipId);
 
             if (cA && cB) {
                 if (!cA->retainTailTempo && cA->tempo > 0.0 && cB->tempo > 0.0)

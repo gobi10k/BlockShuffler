@@ -66,6 +66,12 @@ public:
         sendChangeMessage();
     }
 
+    const Clip* getClipById(const juce::String& clipId) const {
+        for (const auto* c : clips)
+            if (c->id == clipId) return c;
+        return nullptr;
+    }
+
     Clip* getClipById(const juce::String& clipId) {
         for (auto* c : clips)
             if (c->id == clipId) return c;
