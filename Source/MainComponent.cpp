@@ -333,7 +333,7 @@ void MainComponent::updateTimeDisplay() {
         int64_t headSamples = (int64_t)(current * currentArrangement.sampleRate);
         juce::String nowPlayingId;
         for (const auto& entry : currentArrangement.entries) {
-            int64_t bodyLen = entry.clip->endMark - entry.clip->startMark;
+            int64_t bodyLen = entry.endMark - entry.startMark;
             if (headSamples >= entry.timelinePos &&
                 headSamples <  entry.timelinePos + bodyLen) {
                 nowPlayingId = entry.blockId;
