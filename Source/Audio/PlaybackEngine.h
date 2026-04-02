@@ -34,9 +34,8 @@ public:
     double getTotalSeconds()    const;
 
 private:
-    // Arrangement swapping
-    std::unique_ptr<ResolvedArrangement> arrangement;
-    std::atomic<ResolvedArrangement*> activeArrangement { nullptr };
+    juce::CriticalSection arrangementLock;
+    std::shared_ptr<const ResolvedArrangement> activeArrangement;
 
     std::atomic<bool>    playing    { false };
     std::atomic<int64_t> playheadSamples { 0 };
@@ -46,7 +45,9 @@ private:
     void mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
                             int numSamples,
                             const ResolvedEntry& entry,
-                            int64_t currentHead) const;
+                            int64_t currentHead,
+                            double pToH,
+                            double hToP) const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlaybackEngine)
 };

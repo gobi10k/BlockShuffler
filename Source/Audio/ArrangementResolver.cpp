@@ -52,6 +52,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
     // ── 4. Group into slots by stackGroup ────────────────────────────────────
     // A slot is one or more blocks sharing the same stackGroup.
+    // Blocks NOT in a stack (stackGroup < 0) each occupy their own slot.
+    // Stacks (stackGroup >= 0) occupy a single slot at the position of the first
+    // block encountered in that stack.
     struct Slot { std::vector<Block*> blocks; };
     std::vector<Slot> slots;
     std::unordered_map<int, size_t> sgToSlot;
@@ -69,6 +72,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 slots.push_back({{b}});
             }
         }
+    }
+
+    DBG("=== Slots after grouping ===");
+    for (size_t i = 0; i < slots.size(); ++i) {
+        juce::String names;
+        for (auto* b : slots[i].blocks) names += b->name + " ";
+        DBG("Slot " + juce::String(i) + ": [" + names + "]");
     }
 
     // ── 5. Walk slots and build timeline ─────────────────────────────────────

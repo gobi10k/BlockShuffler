@@ -83,7 +83,7 @@ Block* Project::addBlock(const juce::String& blockName) {
     };
     block->color = blockPalette[blocks.size() % 8];
 
-    block->position = blocks.size();
+    block->position = blocks.isEmpty() ? 0 : blocks.getLast()->position + 1;
     auto* ptr = block.get();
     blocks.add(block.release());
     sendChangeMessage();

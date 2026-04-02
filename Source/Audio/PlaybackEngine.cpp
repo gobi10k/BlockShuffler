@@ -14,18 +14,11 @@ void PlaybackEngine::releaseResources() {
 }
 
 void PlaybackEngine::play(ResolvedArrangement newArr) {
-    // 1. Set playing to false to stop the audio thread from accessing current activeArrangement
-    playing.store(false);
-
-    // 2. Prepare new arrangement
-    auto next = std::make_unique<ResolvedArrangement>(std::move(newArr));
-
-    // 3. Atomic swap (new arrangement pointer into the active slot)
-    activeArrangement.store(next.get());
-
-    // 4. Ownership handover (keep new arrangement alive, destroy old one)
-    arrangement = std::move(next);
-
+    auto next = std::make_shared<const ResolvedArrangement>(std::move(newArr));
+    {
+        juce::ScopedLock sl(arrangementLock);
+        activeArrangement = std::move(next);
+    }
     playheadSamples.store(0);
     playing.store(true);
 }
@@ -44,7 +37,11 @@ double PlaybackEngine::getPlayheadSeconds() const {
 }
 
 double PlaybackEngine::getTotalSeconds() const {
-    auto* current = activeArrangement.load();
+    std::shared_ptr<const ResolvedArrangement> current;
+    {
+        juce::ScopedLock sl(arrangementLock);
+        current = activeArrangement;
+    }
     if (!current || current->isEmpty() || current->sampleRate <= 0.0) return 0.0;
     return (double)current->totalDurationSamples / current->sampleRate;
 }
@@ -54,7 +51,15 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
 
     if (!playing.load()) return;
 
-    auto* current = activeArrangement.load();
+    std::shared_ptr<const ResolvedArrangement> current;
+    {
+        // Try-lock on audio thread to avoid blocking.
+        // If we can't get the lock, we skip this block (silence).
+        if (!arrangementLock.tryEnter()) return;
+        current = activeArrangement;
+        arrangementLock.exit();
+    }
+
     if (!current || current->isEmpty()) return;
 
     int64_t head = playheadSamples.load();
@@ -84,23 +89,26 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
 
         if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;
 
-        mixEntryIntoBuffer(buffer, numSamples, entry, head);
+        mixEntryIntoBuffer(buffer, numSamples, entry, head, pToH, hToP);
     }
 
     head += numSamples;
     playheadSamples.store(head);
 
-    // Stop at end of arrangement
-    if (head >= current->totalDurationSamples) {
+    // Stop at end of arrangement (convert total duration to hardware samples)
+    int64_t totalH = (int64_t)((double)current->totalDurationSamples * hToP + 0.5);
+    if (head >= totalH) {
         playing.store(false);
-        playheadSamples.store(current->totalDurationSamples);
+        playheadSamples.store(totalH);
     }
 }
 
 void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
                                          int numSamples,
                                          const ResolvedEntry& entry,
-                                         int64_t currentHead) const
+                                         int64_t currentHead,
+                                         double pToH,
+                                         double hToP) const
 {
     const auto& src  = entry.clip->audioBuffer;
     const int srcCh  = src.getNumChannels();
@@ -117,13 +125,6 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     const int64_t bodyStart = entry.timelinePos;
     const int64_t bodyEnd   = bodyStart + bodyLen;
     const int64_t blockEnd  = currentHead + (int64_t)numSamples;
-    const int mixCh = juce::jmin(srcCh, dstCh);
-
-    auto* currentArr = activeArrangement.load();
-    const double pToH = (currentArr && currentArr->sampleRate > 0.0 && outputSampleRate > 0.0)
-                        ? currentArr->sampleRate / outputSampleRate
-                        : 1.0;
-    const double hToP = 1.0 / pToH;
 
     // General region mixer with resampling for pitch correction.
     // regionStart/regionEnd are in project-sample space.
@@ -152,12 +153,13 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
         double srcStart  = clipOff + (pOvStart - (double)regionStart);
         double srcSamples = (double)destCount * pToH;
 
-        if (srcStart >= (double)sLen) return;
+        if (srcStart + srcSamples <= 0.0 || srcStart >= (double)sLen) return;
+
         if (srcStart < 0.0) {
             double skip = -srcStart;
-            // Since resampleAdd handles sub-sample offsets, we don't strictly need to snap here,
-            // but we should ensure we don't read before 0.
-            // (srcStart < 0 shouldn't happen if pOvStart >= regionStart)
+            srcStart = 0.0;
+            srcSamples -= skip;
+            // (destOff and destCount would also need adjustment if we wanted perfect precision here)
         }
 
         const int64_t regLen = regionEnd - regionStart;
