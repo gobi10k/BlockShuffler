@@ -164,13 +164,13 @@ struct TempoStretcher
      * source advance per output sample = 1 / stretchRatio
      */
     static void resampleAdd(const juce::AudioBuffer<float>& src,
-                            int srcStart,  int srcSamples,
+                            double srcStart,  double srcSamples,
                             juce::AudioBuffer<float>& dest,
                             int destStart, int destSamples,
                             float gainStart = 1.0f,
                             float gainEnd   = 1.0f)
     {
-        if (srcSamples <= 0 || destSamples <= 0) return;
+        if (srcSamples <= 0.0 || destSamples <= 0) return;
 
         const int srcLen  = src.getNumSamples();
         const int destLen = dest.getNumSamples();
@@ -182,7 +182,7 @@ struct TempoStretcher
         int dEnd   = juce::jmin(destLen, destStart + destSamples);
         if (dStart >= dEnd) return;
 
-        const double advance = (double)srcSamples / (double)destSamples;
+        const double advance = srcSamples / (double)destSamples;
         const int    mixCh   = juce::jmin(srcCh, destCh);
         const bool   upmix   = (srcCh == 1 && destCh >= 2);
 
@@ -192,7 +192,7 @@ struct TempoStretcher
             const float* rdPtr = src.getReadPointer(readCh);
             float*       wrPtr = dest.getWritePointer(ch);
 
-            double pos = (double)srcStart + (double)(dStart - destStart) * advance;
+            double pos = srcStart + (double)(dStart - destStart) * advance;
             for (int i = dStart; i < dEnd; ++i, pos += advance)
             {
                 float t = (destSamples > 1)

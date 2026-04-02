@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <atomic>
 #include "ArrangementResolver.h"
 
 namespace BlockShuffler {
@@ -10,7 +11,7 @@ namespace BlockShuffler {
  * Thread safety:
  *   play() / stop() / rewind() are called on the UI thread.
  *   getNextAudioBlock() is called on the audio thread.
- *   A CriticalSection guards the arrangement and playhead.
+ *   Uses atomic pointer swap for the arrangement to avoid locks on audio thread.
  */
 class PlaybackEngine {
 public:
@@ -33,8 +34,9 @@ public:
     double getTotalSeconds()    const;
 
 private:
-    juce::CriticalSection lock;
-    ResolvedArrangement   arrangement;
+    // Arrangement swapping
+    std::unique_ptr<ResolvedArrangement> arrangement;
+    std::atomic<ResolvedArrangement*> activeArrangement { nullptr };
 
     std::atomic<bool>    playing    { false };
     std::atomic<int64_t> playheadSamples { 0 };

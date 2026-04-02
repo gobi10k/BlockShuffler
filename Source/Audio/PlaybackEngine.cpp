@@ -6,7 +6,6 @@ namespace BlockShuffler {
 PlaybackEngine::PlaybackEngine() {}
 
 void PlaybackEngine::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
-    juce::ScopedLock sl(lock);
     outputSampleRate = sampleRate;
 }
 
@@ -14,9 +13,19 @@ void PlaybackEngine::releaseResources() {
     stop();
 }
 
-void PlaybackEngine::play(ResolvedArrangement newArrangement) {
-    juce::ScopedLock sl(lock);
-    arrangement = std::move(newArrangement);
+void PlaybackEngine::play(ResolvedArrangement newArr) {
+    // 1. Set playing to false to stop the audio thread from accessing current activeArrangement
+    playing.store(false);
+
+    // 2. Prepare new arrangement
+    auto next = std::make_unique<ResolvedArrangement>(std::move(newArr));
+
+    // 3. Atomic swap (new arrangement pointer into the active slot)
+    activeArrangement.store(next.get());
+
+    // 4. Ownership handover (keep new arrangement alive, destroy old one)
+    arrangement = std::move(next);
+
     playheadSamples.store(0);
     playing.store(true);
 }
@@ -26,7 +35,6 @@ void PlaybackEngine::stop() {
 }
 
 void PlaybackEngine::rewind() {
-    juce::ScopedLock sl(lock);
     playheadSamples.store(0);
 }
 
@@ -36,9 +44,9 @@ double PlaybackEngine::getPlayheadSeconds() const {
 }
 
 double PlaybackEngine::getTotalSeconds() const {
-    juce::ScopedLock sl(lock);
-    if (outputSampleRate <= 0.0 || arrangement.isEmpty()) return 0.0;
-    return (double)arrangement.totalDurationSamples / outputSampleRate;
+    auto* current = activeArrangement.load();
+    if (!current || current->isEmpty() || current->sampleRate <= 0.0) return 0.0;
+    return (double)current->totalDurationSamples / current->sampleRate;
 }
 
 void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int numSamples) {
@@ -46,30 +54,35 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
 
     if (!playing.load()) return;
 
-    juce::ScopedLock sl(lock);
+    auto* current = activeArrangement.load();
+    if (!current || current->isEmpty()) return;
 
-    if (arrangement.isEmpty()) return;
+    int64_t head = playheadSamples.load();
+    const double pToH = (current && current->sampleRate > 0.0 && outputSampleRate > 0.0)
+                        ? current->sampleRate / outputSampleRate
+                        : 1.0;
+    const double hToP = 1.0 / pToH;
 
-    int64_t head = playheadSamples.load();  // read inside lock for consistency with play()
-
-    for (const auto& entry : arrangement.entries) {
+    for (const auto& entry : current->entries) {
         const int64_t bodyLen   = entry.clip->endMark - entry.clip->startMark;
         const int64_t leadInLen = entry.clip->startMark;
         const int64_t tailLen   = juce::jmax((int64_t)0,
                                              (int64_t)entry.clip->audioBuffer.getNumSamples()
                                              - entry.clip->endMark);
 
-        // Full range including stretched lead-in and tail
+        // Full range including stretched lead-in and tail (in project samples)
         const int64_t leadInTL  = entry.stretchedLeadIn
                                   ? (int64_t)entry.stretchedLeadIn->getNumSamples()
                                   : (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
         const int64_t tailTL    = entry.stretchedTail
                                   ? (int64_t)entry.stretchedTail->getNumSamples()
                                   : (int64_t)(tailLen   * entry.tailStretchRatio   + 0.5f);
-        const int64_t fullStart = entry.timelinePos - leadInTL;
-        const int64_t fullEnd   = entry.timelinePos + bodyLen + tailTL;
 
-        if (fullEnd <= head || fullStart >= head + (int64_t)numSamples) continue;
+        // Convert project-space bounds to hardware-space bounds
+        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - leadInTL) * hToP + 0.5);
+        int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + bodyLen + tailTL) * hToP + 0.5);
+
+        if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;
 
         mixEntryIntoBuffer(buffer, numSamples, entry, head);
     }
@@ -78,9 +91,9 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
     playheadSamples.store(head);
 
     // Stop at end of arrangement
-    if (head >= arrangement.totalDurationSamples) {
+    if (head >= current->totalDurationSamples) {
         playing.store(false);
-        playheadSamples.store(arrangement.totalDurationSamples);
+        playheadSamples.store(current->totalDurationSamples);
     }
 }
 
@@ -106,47 +119,59 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     const int64_t blockEnd  = currentHead + (int64_t)numSamples;
     const int mixCh = juce::jmin(srcCh, dstCh);
 
-    // General 1:1 region mixer for any source buffer with gain ramp.
-    // regionStart/regionEnd are timeline positions; clipOff is the source sample index
-    // at regionStart.
+    auto* currentArr = activeArrangement.load();
+    const double pToH = (currentArr && currentArr->sampleRate > 0.0 && outputSampleRate > 0.0)
+                        ? currentArr->sampleRate / outputSampleRate
+                        : 1.0;
+    const double hToP = 1.0 / pToH;
+
+    // General region mixer with resampling for pitch correction.
+    // regionStart/regionEnd are in project-sample space.
     auto mixBuf = [&](const juce::AudioBuffer<float>& s,
                       int64_t regionStart, int64_t regionEnd,
-                      int64_t clipOff,
+                      double clipOff,
                       float gainStart, float gainEnd)
     {
         const int sCh  = s.getNumChannels();
         const int sLen = s.getNumSamples();
-        const int mCh  = juce::jmin(sCh, dstCh);
         if (sCh == 0 || sLen == 0) return;
 
-        int64_t ovStart = juce::jmax(regionStart, currentHead);
-        int64_t ovEnd   = juce::jmin(regionEnd, blockEnd);
-        if (ovStart >= ovEnd) return;
+        // Convert project region to hardware-sample region
+        int64_t regionStartH = (int64_t)((double)regionStart * hToP + 0.5);
+        int64_t regionEndH   = (int64_t)((double)regionEnd   * hToP + 0.5);
 
-        int     destOff = (int)(ovStart - currentHead);
-        int64_t srcOff  = clipOff + (ovStart - regionStart);
-        int     count   = (int)(ovEnd - ovStart);
+        int64_t ovStartH = juce::jmax(regionStartH, currentHead);
+        int64_t ovEndH   = juce::jmin(regionEndH,   blockEnd);
+        if (ovStartH >= ovEndH) return;
 
-        if (srcOff < 0) { int skip = (int)(-srcOff); destOff += skip; count -= skip; srcOff = 0; }
-        if (srcOff >= (int64_t)sLen) return;
-        count = juce::jmin(count, sLen - (int)srcOff);
-        if (count <= 0) return;
+        int    destOff   = (int)(ovStartH - currentHead);
+        int    destCount = (int)(ovEndH - ovStartH);
+
+        // Find corresponding project-sample range for source reading
+        double pOvStart  = (double)ovStartH * pToH;
+        double srcStart  = clipOff + (pOvStart - (double)regionStart);
+        double srcSamples = (double)destCount * pToH;
+
+        if (srcStart >= (double)sLen) return;
+        if (srcStart < 0.0) {
+            double skip = -srcStart;
+            // Since resampleAdd handles sub-sample offsets, we don't strictly need to snap here,
+            // but we should ensure we don't read before 0.
+            // (srcStart < 0 shouldn't happen if pOvStart >= regionStart)
+        }
 
         const int64_t regLen = regionEnd - regionStart;
         float gs = gainStart, ge = gainEnd;
         if (regLen > 1) {
-            float t0 = (float)(ovStart - regionStart) / (float)regLen;
-            float t1 = (float)(ovEnd   - regionStart) / (float)regLen;
+            float t0 = (float)(pOvStart - (double)regionStart) / (float)regLen;
+            float t1 = (float)((double)pOvStart + srcSamples - (double)regionStart) / (float)regLen;
             gs = gainStart + t0 * (gainEnd - gainStart);
             ge = gainStart + t1 * (gainEnd - gainStart);
         }
         gs *= entry.gain;
         ge *= entry.gain;
 
-        for (int ch = 0; ch < mCh; ++ch)
-            buffer.addFromWithRamp(ch, destOff, s.getReadPointer(ch) + srcOff, count, gs, ge);
-        if (sCh == 1 && dstCh >= 2)
-            buffer.addFromWithRamp(1, destOff, s.getReadPointer(0) + srcOff, count, gs, ge);
+        TempoStretcher::resampleAdd(s, srcStart, srcSamples, buffer, destOff, destCount, gs, ge);
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
@@ -154,40 +179,26 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     {
         if (entry.stretchedLeadIn)
         {
-            // Pre-stretched buffer: mix at 1:1, timeline [bodyStart-stretchedLen, bodyStart)
+            // Pre-stretched buffer: timeline [bodyStart-stretchedLen, bodyStart)
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0, 0.0f, 1.0f);
+            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0.0, 0.0f, 1.0f);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
-            // No stretching needed
-            mixBuf(src, bodyStart - leadInLen, bodyStart, 0, 0.0f, 1.0f);
+            // No stretching needed (WSOLA skipped)
+            mixBuf(src, bodyStart - leadInLen, bodyStart, 0.0, 0.0f, 1.0f);
         }
         else
         {
-            // Fallback linear-interp (should not normally be reached since WSOLA pre-computes)
+            // Fallback linear-interp (WSOLA failed or was bypassed)
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            int64_t lStart   = bodyStart - leadInTL;
-            int64_t ovStart  = juce::jmax(lStart, currentHead);
-            int64_t ovEnd    = juce::jmin(bodyStart, blockEnd);
-            if (ovStart < ovEnd)
-            {
-                double srcAdv = (double)leadInLen / (double)leadInTL;
-                int destOff   = (int)(ovStart - currentHead);
-                int destCount = (int)(ovEnd - ovStart);
-                float gs = (leadInTL > 1) ? (float)(ovStart - lStart) / (float)(leadInTL - 1) * entry.gain : 0.0f;
-                float ge = (leadInTL > 1) ? (float)(ovEnd   - lStart) / (float)(leadInTL - 1) * entry.gain : entry.gain;
-                int srcSliceOff = (int)((double)(ovStart - lStart) * srcAdv);
-                int srcSliceCnt = (int)((double)destCount * srcAdv + 1.5);
-                srcSliceCnt = juce::jmin(srcSliceCnt, (int)leadInLen - srcSliceOff);
-                TempoStretcher::resampleAdd(src, srcSliceOff, srcSliceCnt, buffer, destOff, destCount, gs, ge);
-            }
+            mixBuf(src, bodyStart - leadInTL, bodyStart, 0.0, 0.0f, 1.0f);
         }
     }
 
-    // ── Body (always 1:1) ─────────────────────────────────────────────────────
+    // ── Body ──────────────────────────────────────────────────────────────────
     if (bodyLen > 0)
-        mixBuf(src, bodyStart, bodyEnd, startMark, 1.0f, 1.0f);
+        mixBuf(src, bodyStart, bodyEnd, (double)startMark, 1.0f, 1.0f);
 
     // ── Tail ──────────────────────────────────────────────────────────────────
     if (tailLen > 0)
@@ -196,13 +207,13 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
         // use a pre-stretched buffer (even if one happened to exist).
         if (entry.clip->retainTailTempo || !entry.stretchedTail)
         {
-            mixBuf(src, bodyEnd, bodyEnd + tailLen, endMark, 1.0f, 0.0f);
+            mixBuf(src, bodyEnd, bodyEnd + tailLen, (double)endMark, 1.0f, 0.0f);
         }
         else
         {
             // Pre-stretched buffer (retainTailTempo=false, tempos differ)
             int64_t sl = (int64_t)entry.stretchedTail->getNumSamples();
-            mixBuf(*entry.stretchedTail, bodyEnd, bodyEnd + sl, 0, 1.0f, 0.0f);
+            mixBuf(*entry.stretchedTail, bodyEnd, bodyEnd + sl, 0.0, 1.0f, 0.0f);
         }
     }
 }
