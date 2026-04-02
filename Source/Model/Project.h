@@ -32,7 +32,7 @@ public:
     Block* getBlockById(const juce::String& blockId);
 
     // Link operations
-    BlockLink* addLink(const juce::String& blockA, const juce::String& blockB, float probability = 0.5f);
+    BlockLink* addLink(const juce::String& blockA, const juce::String& blockB, float probability = 0.5f, bool sendNotification = true);
     void       removeLink(const juce::String& blockA, const juce::String& blockB);
     void       removeLinksForBlock(const juce::String& blockId);
     void       setLinkProbability(const juce::String& blockA, const juce::String& blockB, float prob);

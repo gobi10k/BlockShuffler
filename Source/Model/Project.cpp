@@ -52,11 +52,15 @@ void Project::applyExternalMutation(const juce::var& preSnapshot) {
 }
 
 void Project::resetAndLoad(const juce::var& snapshot) {
-    suppressUndo = true;
+    struct Guard {
+        Project& p;
+        Guard(Project& proj) : p(proj) { p.suppressUndo = true; }
+        ~Guard() { p.suppressUndo = false; }
+    } guard(*this);
+
     blocks.clear();
     links.clear();
     fromJSON(snapshot);
-    suppressUndo = false;
     sendChangeMessage();
 }
 
@@ -139,19 +143,23 @@ void Project::stackBlocks(const juce::String& blockIdA, const juce::String& bloc
     recordMutation(pre);
 }
 
-BlockLink* Project::addLink(const juce::String& blockA, const juce::String& blockB, float probability) {
+BlockLink* Project::addLink(const juce::String& blockA, const juce::String& blockB, float probability, bool sendNotification) {
     // Don't snapshot if link already exists (no-op)
     for (auto* link : links)
         if ((link->blockA == blockA && link->blockB == blockB) ||
             (link->blockA == blockB && link->blockB == blockA))
             return link;
 
-    auto pre = toJSON();
+    juce::var pre;
+    if (sendNotification)
+        pre = toJSON();
     auto link = std::make_unique<BlockLink>(blockA, blockB, probability);
     auto* ptr = link.get();
     links.add(link.release());
-    sendChangeMessage();
-    recordMutation(pre);
+    if (sendNotification) {
+        sendChangeMessage();
+        recordMutation(pre);
+    }
     return ptr;
 }
 

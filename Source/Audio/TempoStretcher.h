@@ -72,13 +72,19 @@ struct TempoStretcher
                     int testPos = nominalPos + delta;
                     if (testPos < 0 || testPos + overlapLen > srcLen) continue;
 
-                    const float* rd = src.getReadPointer(0) + testPos;
                     float corr = 0.0f, na = 0.0f, nb = 0.0f;
-                    for (int k = 0; k < overlapLen; ++k)
+                    for (int ch = 0; ch < numCh; ++ch)
                     {
-                        corr += prevOverlap[(size_t)k] * rd[k];
-                        na   += prevOverlap[(size_t)k] * prevOverlap[(size_t)k];
-                        nb   += rd[k] * rd[k];
+                        const float* rd = src.getReadPointer(ch) + testPos;
+                        for (int k = 0; k < overlapLen; ++k)
+                        {
+                            // Using ch0 of prevOverlap as the reference for similarity
+                            // (WSOLA typically correlates a single reference, but here
+                            // we sum correlation across all channels for the candidate).
+                            corr += prevOverlap[(size_t)k] * rd[k];
+                            na   += prevOverlap[(size_t)k] * prevOverlap[(size_t)k];
+                            nb   += rd[k] * rd[k];
+                        }
                     }
                     float norm = std::sqrt(na * nb);
                     if (norm > 1.0e-10f) corr /= norm;

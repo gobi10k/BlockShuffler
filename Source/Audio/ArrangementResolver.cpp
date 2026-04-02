@@ -153,17 +153,30 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 playCount = normal[0]->stackPlayCount.pick(rng);
             playCount = juce::jlimit(1, (int)normal.size(), playCount);
 
-            // Sample playCount blocks from normal pool with equal probability
-            std::vector<size_t> indices(normal.size());
-            std::iota(indices.begin(), indices.end(), 0);
-            for (int i = (int)indices.size() - 1; i > 0; --i) {
-                int j = rng.nextInt(i + 1);
-                std::swap(indices[(size_t)i], indices[(size_t)j]);
-            }
-
+            // Sample playCount blocks from normal pool with weighted probability
             std::vector<Block*> picked;
-            for (int k = 0; k < playCount; ++k)
-                picked.push_back(normal[indices[(size_t)k]]);
+            std::vector<Block*> pool = normal;
+            for (int k = 0; k < playCount && !pool.empty(); ++k) {
+                float totalWeight = 0.0f;
+                for (auto* b : pool) totalWeight += b->probability;
+
+                if (totalWeight <= 0.0f) {
+                    int idx = rng.nextInt((int)pool.size());
+                    picked.push_back(pool[(size_t)idx]);
+                    pool.erase(pool.begin() + idx);
+                } else {
+                    float roll = rng.nextFloat() * totalWeight;
+                    float cum = 0.0f;
+                    for (size_t i = 0; i < pool.size(); ++i) {
+                        cum += pool[i]->probability;
+                        if (roll <= cum || i == pool.size() - 1) {
+                            picked.push_back(pool[i]);
+                            pool.erase(pool.begin() + i);
+                            break;
+                        }
+                    }
+                }
+            }
 
             const bool isSimultaneous =
                 (normal[0]->stackPlayMode == StackPlayMode::Simultaneous);
@@ -173,6 +186,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 const int64_t slotStart = cursor;
                 int64_t maxLen = 0;
 
+                const float stackGain = 1.0f / (float)juce::jmax(1, (int)picked.size());
+
                 // Collect picked clips so overlapping-block targeting can check them
                 juce::Array<Clip*> simultaneousClips;
                 for (auto* b : picked) {
@@ -181,7 +196,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     if (!clip) continue;
                     int64_t bodyLen = clip->endMark - clip->startMark;
                     if (bodyLen <= 0) continue;
-                    result.entries.add({clip, slotStart, 1.0f, b->id});
+                    result.entries.add({clip, slotStart, stackGain, b->id});
                     maxLen = std::max(maxLen, bodyLen);
                     simultaneousClips.add(clip);
                     if (clip->isSongEnder) songEnded = true;

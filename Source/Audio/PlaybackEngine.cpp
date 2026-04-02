@@ -53,9 +53,6 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
     int64_t head = playheadSamples.load();  // read inside lock for consistency with play()
 
     for (const auto& entry : arrangement.entries) {
-        DBG("MIXING: entry blockId=" + entry.blockId
-            + " isOverlay=" + juce::String(entry.isOverlay ? 1 : 0)
-            + " timelinePos=" + juce::String(entry.timelinePos));
         const int64_t bodyLen   = entry.clip->endMark - entry.clip->startMark;
         const int64_t leadInLen = entry.clip->startMark;
         const int64_t tailLen   = juce::jmax((int64_t)0,
@@ -79,18 +76,6 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
 
     head += numSamples;
     playheadSamples.store(head);
-
-    static int64_t lastLoggedHead = -1;
-    if (head / 44100 != lastLoggedHead / 44100) {
-        lastLoggedHead = head;
-        juce::String mixing;
-        for (const auto& e : arrangement.entries) {
-            int64_t b = e.clip->endMark - e.clip->startMark;
-            if (head >= e.timelinePos && head < e.timelinePos + b)
-                mixing += e.blockId.substring(0,8) + " ";
-        }
-        DBG("head=" + juce::String(head) + " total=" + juce::String(arrangement.totalDurationSamples) + " mixing=[" + mixing + "]");
-    }
 
     // Stop at end of arrangement
     if (head >= arrangement.totalDurationSamples) {

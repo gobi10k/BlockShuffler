@@ -62,7 +62,7 @@ MainComponent::~MainComponent() {
 void MainComponent::applyBlockSelection(Block* block) {
     selectedBlock   = block;
     selectedBlockId = block ? block->id : juce::String{};
-    waveformView.setBlock(block, block ? &project->formatManager : nullptr);
+    waveformView.setBlock(block, project->sampleRate, block ? &project->formatManager : nullptr);
     inspectorPanel.setBlock(block);
 }
 
@@ -133,7 +133,7 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) 
     if (found != selectedBlock) {
         // Block changed (deleted, recreated, or new project) — full refresh
         selectedBlock = found;
-        waveformView.setBlock(found, found ? &project->formatManager : nullptr);
+        waveformView.setBlock(found, project->sampleRate, found ? &project->formatManager : nullptr);
         inspectorPanel.setBlock(selectedBlock);
     } else {
         // Same block, possibly different values/link structure — lightweight refresh
@@ -181,26 +181,36 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component* origi
         return true;
     }
     if (key.isKeyCode('N') && key.getModifiers().isCommandDown()) {
-        engine.stop();
-        // Clear UI state BEFORE destroying old project to avoid dangling pointers.
-        // waveformView holds a Block* (currentBlock) and ClipRowComponents hold Clip&
-        // refs — clearing them while the old project still exists prevents a crash in
-        // ClipWaveformView::setBlock's removeChangeListener call on freed memory.
-        selectedBlock   = nullptr;
-        selectedBlockId = {};
-        waveformView.setBlock(nullptr);
-        inspectorPanel.setClip(nullptr, nullptr);
-        inspectorPanel.setBlock(nullptr);
-        project->removeChangeListener(this);
-        project = std::make_unique<Project>();
-        project->name = "Untitled Project";
-        project->addChangeListener(this);
-        currentProjectFile = juce::File{};
-        inspectorPanel.setProject(project.get());
-        blockStrip.init(*project, &linkOverlay);
-        auto* b = project->addBlock("Block 1");
-        project->undoManager.clearUndoHistory();
-        blockStrip.selectBlock(b);  // fires onBlockSelected → applyBlockSelection
+        juce::NativeMessageBox::showOkCancelBox(
+            juce::MessageBoxIconType::QuestionIcon,
+            "New Project",
+            "Are you sure you want to create a new project? Any unsaved changes will be lost.",
+            nullptr,
+            juce::ModalCallbackFunction::create([this](int result) {
+                if (result == 1) { // OK
+                    engine.stop();
+                    // Clear UI state BEFORE destroying old project to avoid dangling pointers.
+                    // waveformView holds a Block* (currentBlock) and ClipRowComponents hold Clip&
+                    // refs — clearing them while the old project still exists prevents a crash in
+                    // ClipWaveformView::setBlock's removeChangeListener call on freed memory.
+                    selectedBlock   = nullptr;
+                    selectedBlockId = {};
+                    waveformView.setBlock(nullptr, 48000.0);
+                    inspectorPanel.setClip(nullptr, nullptr);
+                    inspectorPanel.setBlock(nullptr);
+                    project->removeChangeListener(this);
+                    project = std::make_unique<Project>();
+                    project->name = "Untitled Project";
+                    project->addChangeListener(this);
+                    currentProjectFile = juce::File{};
+                    inspectorPanel.setProject(project.get());
+                    blockStrip.init(*project, &linkOverlay);
+                    auto* b = project->addBlock("Block 1");
+                    project->undoManager.clearUndoHistory();
+                    blockStrip.selectBlock(b);  // fires onBlockSelected → applyBlockSelection
+                }
+            })
+        );
         return true;
     }
     return false;
@@ -300,7 +310,7 @@ void MainComponent::loadProject(const juce::File& file) {
     selectedBlock   = nullptr;
     selectedBlockId = {};
     blockStrip.init(*project, &linkOverlay);
-    waveformView.setBlock(nullptr);
+    waveformView.setBlock(nullptr, project->sampleRate);
     inspectorPanel.setClip(nullptr, nullptr);
 
     if (!project->blocks.isEmpty()) {

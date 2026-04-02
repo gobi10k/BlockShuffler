@@ -9,10 +9,12 @@ namespace BlockShuffler {
 //==============================================================================
 
 ClipRowComponent::ClipRowComponent(Clip& c,
+                                   double psr,
                                    std::function<void()> onSel,
                                    std::function<void()> onRepaint,
                                    std::function<void()> onRemove)
     : clip(c),
+      projectSampleRate(psr),
       onSelectedCallback(std::move(onSel)),
       onRepaintCallback(std::move(onRepaint)),
       onRemoveCallback(std::move(onRemove))
@@ -145,8 +147,8 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     renderWaveform(g, wa);
 
     // Grid lines — offset by gridOffsetSamples so the nudge is visible
-    if (clip.tempo > 0.0 && clip.nativeSampleRate > 0.0) {
-        double spb   = (clip.nativeSampleRate * 60.0) / clip.tempo;
+    if (clip.tempo > 0.0 && projectSampleRate > 0.0) {
+        double spb   = (projectSampleRate * 60.0) / clip.tempo;
         int64_t total = (int64_t)clip.audioBuffer.getNumSamples();
         // Wrap the offset into [0, spb) so lines start at the right phase
         double offset = std::fmod((double)clip.gridOffsetSamples, spb);
@@ -242,8 +244,8 @@ void ClipRowComponent::mouseDrag(const juce::MouseEvent& e) {
     // Snap to tempo grid unless Shift is held (Shift = free drag)
     auto applySnap = [&](int64_t raw) -> int64_t {
         if (e.mods.isShiftDown()) return raw;
-        if (clip.tempo > 0.0 && clip.nativeSampleRate > 0.0)
-            return snapToGrid(raw, clip.tempo, clip.nativeSampleRate);
+        if (clip.tempo > 0.0 && projectSampleRate > 0.0)
+            return snapToGrid(raw, clip.tempo, projectSampleRate);
         return raw;
     };
 
@@ -354,9 +356,10 @@ ClipWaveformView::~ClipWaveformView() {
     if (currentBlock) currentBlock->removeChangeListener(this);
 }
 
-void ClipWaveformView::setBlock(Block* block, juce::AudioFormatManager* fmtMgr) {
+void ClipWaveformView::setBlock(Block* block, double sampleRate, juce::AudioFormatManager* fmtMgr) {
     if (currentBlock) currentBlock->removeChangeListener(this);
     currentBlock  = block;
+    projectSampleRate = sampleRate;
     selectedClip  = nullptr;
     if (fmtMgr) formatManager = fmtMgr;
     if (currentBlock) currentBlock->addChangeListener(this);
@@ -380,6 +383,7 @@ void ClipWaveformView::rebuildRows() {
     for (auto* clip : currentBlock->clips) {
         auto* row = clipRows.add(new ClipRowComponent(
             *clip,
+            projectSampleRate,
             [this, clip] { selectClip(clip); },
             [this]       { repaint(); },
             [this, clip] { removeClip(clip); }
@@ -439,7 +443,7 @@ void ClipWaveformView::browseForClip() {
             for (auto& f : results) {
                 if (f.existsAsFile()) {
                     auto clip = std::make_unique<Clip>();
-                    if (clip->loadFromFile(f, *formatManager)) {
+                    if (clip->loadFromFile(f, *formatManager, projectSampleRate)) {
                         currentBlock->addClip(std::move(clip));
                         anyAdded = true;
                     }
@@ -463,7 +467,7 @@ bool ClipWaveformView::keyPressed(const juce::KeyPress& key) {
     const bool isLeft  = (key.getKeyCode() == juce::KeyPress::leftKey);
     const bool isRight = (key.getKeyCode() == juce::KeyPress::rightKey);
     if (isLeft || isRight) {
-        const double sr    = selectedClip->nativeSampleRate > 0.0 ? selectedClip->nativeSampleRate : 48000.0;
+        const double sr    = projectSampleRate > 0.0 ? projectSampleRate : 48000.0;
         const double tempo = selectedClip->tempo > 0.0            ? selectedClip->tempo             : 120.0;
         // Use subdivision=4 (quarter-beat steps) so each press produces a visible
         // grid shift. Nudging by a full beat (subdivision=1) would fmod back to the
