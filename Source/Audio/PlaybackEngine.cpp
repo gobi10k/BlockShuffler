@@ -17,7 +17,7 @@ void PlaybackEngine::play(ResolvedArrangement newArr) {
     auto next = std::make_shared<const ResolvedArrangement>(std::move(newArr));
     {
         juce::ScopedLock sl(arrangementLock);
-        activeArrangement = std::move(next);
+        activeArrangement = next;
     }
     playheadSamples.store(0);
     playing.store(true);
@@ -69,11 +69,11 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
     const double hToP = 1.0 / pToH;
 
     for (const auto& entry : current->entries) {
-        const int64_t bodyLen   = entry.clip->endMark - entry.clip->startMark;
-        const int64_t leadInLen = entry.clip->startMark;
-        const int64_t tailLen   = juce::jmax((int64_t)0,
-                                             (int64_t)entry.clip->audioBuffer.getNumSamples()
-                                             - entry.clip->endMark);
+        const int64_t bodyLen   = entry.endMark - entry.startMark;
+        const int64_t leadInLen = entry.startMark;
+        const int64_t tailLen   = (entry.audioBuffer) ? juce::jmax((int64_t)0,
+                                             (int64_t)entry.audioBuffer->getNumSamples()
+                                             - entry.endMark) : 0;
 
         // Full range including stretched lead-in and tail (in project samples)
         const int64_t leadInTL  = entry.stretchedLeadIn
@@ -110,14 +110,15 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
                                          double pToH,
                                          double hToP) const
 {
-    const auto& src  = entry.clip->audioBuffer;
+    if (!entry.audioBuffer) return;
+    const auto& src  = *entry.audioBuffer;
     const int srcCh  = src.getNumChannels();
     const int srcLen = src.getNumSamples();
     const int dstCh  = buffer.getNumChannels();
     if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
 
-    const int64_t startMark = entry.clip->startMark;
-    const int64_t endMark   = entry.clip->endMark;
+    const int64_t startMark = entry.startMark;
+    const int64_t endMark   = entry.endMark;
     const int64_t bodyLen   = endMark - startMark;
     const int64_t leadInLen = startMark;
     const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
@@ -159,7 +160,6 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
             double skip = -srcStart;
             srcStart = 0.0;
             srcSamples -= skip;
-            // (destOff and destCount would also need adjustment if we wanted perfect precision here)
         }
 
         const int64_t regLen = regionEnd - regionStart;
@@ -207,7 +207,7 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     {
         // retainTailTempo=true → always use original clip audio at 1:1, never
         // use a pre-stretched buffer (even if one happened to exist).
-        if (entry.clip->retainTailTempo || !entry.stretchedTail)
+        if (entry.retainTailTempo || !entry.stretchedTail)
         {
             mixBuf(src, bodyEnd, bodyEnd + tailLen, (double)endMark, 1.0f, 0.0f);
         }

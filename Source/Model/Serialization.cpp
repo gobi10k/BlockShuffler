@@ -179,7 +179,7 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                         * markScale + 0.5);
 
                     // Clamp marks to buffer bounds (handles missing-file case gracefully)
-                    int bufLen = clip->audioBuffer.getNumSamples();
+                    int bufLen = clip->audioBuffer ? clip->audioBuffer->getNumSamples() : 0;
                     clip->startMark = juce::jlimit((int64_t)0, (int64_t)juce::jmax(0, bufLen - 1), clip->startMark);
                     clip->endMark   = juce::jlimit(clip->startMark, (int64_t)bufLen, clip->endMark);
 

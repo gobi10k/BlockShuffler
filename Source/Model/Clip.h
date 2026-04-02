@@ -29,7 +29,7 @@ public:
 
     // Audio
     juce::File audioFile;
-    juce::AudioBuffer<float> audioBuffer;
+    std::shared_ptr<juce::AudioBuffer<float>> audioBuffer;
     double nativeSampleRate = 0.0;
 
     // Markers (in samples, relative to audioBuffer start)
@@ -52,8 +52,8 @@ public:
     // Computed
     int64_t getLeadInLength() const { return startMark; }
     int64_t getBodyLength() const { return endMark - startMark; }
-    int64_t getTailLength() const { return audioBuffer.getNumSamples() - endMark; }
-    int64_t getTotalLength() const { return audioBuffer.getNumSamples(); }
+    int64_t getTailLength() const { return audioBuffer ? audioBuffer->getNumSamples() - endMark : 0; }
+    int64_t getTotalLength() const { return audioBuffer ? audioBuffer->getNumSamples() : 0; }
 
     /** Load audio from file. Returns true on success.
      *  If targetSampleRate > 0 and differs from the file's native rate, the
@@ -63,8 +63,9 @@ public:
         std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
         if (reader == nullptr) return false;
 
-        audioBuffer.setSize((int)reader->numChannels, (int)reader->lengthInSamples);
-        reader->read(&audioBuffer, 0, (int)reader->lengthInSamples, 0, true, true);
+        auto buf = std::make_shared<juce::AudioBuffer<float>>((int)reader->numChannels, (int)reader->lengthInSamples);
+        reader->read(buf.get(), 0, (int)reader->lengthInSamples, 0, true, true);
+        audioBuffer = std::move(buf);
         nativeSampleRate = reader->sampleRate;
         audioFile = file;
         startMark = 0;
@@ -81,18 +82,18 @@ public:
             // ratio < 1 → more output samples (input rate lower than target, e.g. 44.1k -> 48k).
             double ratio  = nativeSampleRate / targetSampleRate;
             int    outLen = juce::jmax(1, (int)((double)reader->lengthInSamples / ratio + 0.5));
-            int    numCh  = audioBuffer.getNumChannels();
+            int    numCh  = audioBuffer->getNumChannels();
 
-            juce::AudioBuffer<float> resampled(numCh, outLen);
-            resampled.clear();
+            auto resampled = std::make_shared<juce::AudioBuffer<float>>(numCh, outLen);
+            resampled->clear();
 
             for (int ch = 0; ch < numCh; ++ch)
             {
                 juce::LagrangeInterpolator interp;
                 interp.reset();
                 interp.process(ratio,
-                               audioBuffer.getReadPointer(ch),
-                               resampled.getWritePointer(ch),
+                               audioBuffer->getReadPointer(ch),
+                               resampled->getWritePointer(ch),
                                outLen);
             }
 
@@ -104,6 +105,7 @@ public:
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Clip)
+    JUCE_DECLARE_WEAK_REFERENCEABLE(Clip)
 };
 
 } // namespace BlockShuffler

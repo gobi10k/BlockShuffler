@@ -136,7 +136,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                 DBG("OVERLAY ENTRY ADDED: clip=" + oc->name
                                     + " timelinePos=" + juce::String(overlayStart)
                                     + " isOverlay=true");
-                                result.entries.add({oc, overlayStart, 1.0f, ob->id, true});
+                                result.entries.add({
+                                    oc->audioBuffer,
+                                    oc->startMark, oc->endMark, oc->retainTailTempo,
+                                    oc->name, oc->id,
+                                    overlayStart, 1.0f, ob->id, true
+                                });
                             }
                         }
                     }
@@ -154,7 +159,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             int64_t bodyLen = clip->endMark - clip->startMark;
             if (bodyLen <= 0) continue;
 
-            result.entries.add({clip, cursor, 1.0f, block->id});
+            result.entries.add({
+                clip->audioBuffer,
+                clip->startMark, clip->endMark, clip->retainTailTempo,
+                clip->name, clip->id,
+                cursor, 1.0f, block->id
+            });
             cursor += bodyLen;
             if (clip->isSongEnder) songEnded = true;
 
@@ -209,7 +219,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     if (!clip) continue;
                     int64_t bodyLen = clip->endMark - clip->startMark;
                     if (bodyLen <= 0) continue;
-                    result.entries.add({clip, slotStart, stackGain, b->id});
+                    result.entries.add({
+                        clip->audioBuffer,
+                        clip->startMark, clip->endMark, clip->retainTailTempo,
+                        clip->name, clip->id,
+                        slotStart, stackGain, b->id
+                    });
                     maxLen = std::max(maxLen, bodyLen);
                     simultaneousClips.add(clip);
                     if (clip->isSongEnder) songEnded = true;
@@ -238,7 +253,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                             DBG("OVERLAY ENTRY ADDED: clip=" + clip->name
                                 + " timelinePos=" + juce::String(slotStart)
                                 + " isOverlay=true");
-                            result.entries.add({clip, slotStart, 1.0f, ob->id, true});
+                            result.entries.add({
+                                clip->audioBuffer,
+                                clip->startMark, clip->endMark, clip->retainTailTempo,
+                                clip->name, clip->id,
+                                slotStart, 1.0f, ob->id, true
+                            });
                         }
                     }
                 }
@@ -256,7 +276,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     if (bodyLen <= 0) continue;
 
                     const int64_t entryStart = cursor;
-                    result.entries.add({clip, entryStart, 1.0f, b->id});
+                    result.entries.add({
+                        clip->audioBuffer,
+                        clip->startMark, clip->endMark, clip->retainTailTempo,
+                        clip->name, clip->id,
+                        entryStart, 1.0f, b->id
+                    });
                     cursor += bodyLen;
 
                     // Layer overlapping blocks on top of this picked block
@@ -285,7 +310,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                 DBG("OVERLAY ENTRY ADDED: clip=" + oc->name
                                     + " timelinePos=" + juce::String(entryStart)
                                     + " isOverlay=true");
-                                result.entries.add({oc, entryStart, 1.0f, ob->id, true});
+                                result.entries.add({
+                                    oc->audioBuffer,
+                                    oc->startMark, oc->endMark, oc->retainTailTempo,
+                                    oc->name, oc->id,
+                                    entryStart, 1.0f, ob->id, true
+                                });
                             }
                         }
                     }
@@ -320,14 +350,24 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             if (entA.timelinePos == entB.timelinePos)
                 continue;
 
-            const Clip* clipA = entA.clip;
-            const Clip* clipB = entB.clip;
+            // NOTE: We need the tempos for stretch calculation.
+            // In a fully robust version, tempo would also be in ResolvedEntry.
+            // For now we look them up via the pointers, which is acceptable on the UI thread
+            // inside resolve().
 
-            if (!clipA->retainTailTempo && clipA->tempo > 0.0 && clipB->tempo > 0.0)
-                entA.tailStretchRatio = (float)(clipA->tempo / clipB->tempo);
+            // Actually, we can get tempos from the project during resolve()
+            auto* bA = blockById.find(entA.blockId.toStdString())->second;
+            auto* bB = blockById.find(entB.blockId.toStdString())->second;
+            Clip* cA = bA->getClipById(entA.clipId);
+            Clip* cB = bB->getClipById(entB.clipId);
 
-            if (!clipB->retainLeadInTempo && clipA->tempo > 0.0 && clipB->tempo > 0.0)
-                entB.leadInStretchRatio = (float)(clipB->tempo / clipA->tempo);
+            if (cA && cB) {
+                if (!cA->retainTailTempo && cA->tempo > 0.0 && cB->tempo > 0.0)
+                    entA.tailStretchRatio = (float)(cA->tempo / cB->tempo);
+
+                if (!cB->retainLeadInTempo && cA->tempo > 0.0 && cB->tempo > 0.0)
+                    entB.leadInStretchRatio = (float)(cB->tempo / cA->tempo);
+            }
         }
     }
 
@@ -335,11 +375,11 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     for (int i = 0; i < result.entries.size(); ++i)
     {
         auto& entry = result.entries.getReference(i);
-        if (entry.isOverlay) continue;  // overlay entries play at original tempo; no stretching
-        const auto& buf = entry.clip->audioBuffer;
-        const int64_t leadInLen = entry.clip->startMark;
+        if (entry.isOverlay || !entry.audioBuffer) continue;  // overlay entries play at original tempo; no stretching
+        const auto& buf = *entry.audioBuffer;
+        const int64_t leadInLen = entry.startMark;
         const int64_t tailLen   = juce::jmax((int64_t)0,
-                                     (int64_t)buf.getNumSamples() - entry.clip->endMark);
+                                     (int64_t)buf.getNumSamples() - entry.endMark);
 
         if (leadInLen > 0 && std::abs(entry.leadInStretchRatio - 1.0f) > 0.001f)
         {
@@ -352,7 +392,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
         if (tailLen > 0 && std::abs(entry.tailStretchRatio - 1.0f) > 0.001f)
         {
-            auto stretched = TempoStretcher::stretch(buf, (int)entry.clip->endMark,
+            auto stretched = TempoStretcher::stretch(buf, (int)entry.endMark,
                                                      (int)tailLen, entry.tailStretchRatio);
             if (stretched.getNumSamples() > 0)
                 entry.stretchedTail =
@@ -372,8 +412,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         }
         const ResolvedEntry& last = result.entries.getReference(lastIdx);
         int64_t tailLen = juce::jmax((int64_t)0,
-                                     (int64_t)last.clip->audioBuffer.getNumSamples()
-                                     - last.clip->endMark);
+                                     (int64_t)last.audioBuffer->getNumSamples()
+                                     - last.endMark);
         // Use the pre-stretched buffer's actual length if it was computed
         int64_t tailTL = last.stretchedTail
                        ? (int64_t)last.stretchedTail->getNumSamples()
@@ -389,9 +429,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         auto& e = result.entries.getReference(i);
         DBG("Entry " + juce::String(i)
             + " blockId=" + e.blockId
-            + " clipName=" + (e.clip ? e.clip->name : "NULL")
+            + " clipName=" + e.clipName
             + " timelinePos=" + juce::String(e.timelinePos)
-            + " bodyLen=" + juce::String(e.clip ? (e.clip->endMark - e.clip->startMark) : 0));
+            + " bodyLen=" + juce::String(e.endMark - e.startMark));
     }
     DBG("totalDurationSamples: " + juce::String(result.totalDurationSamples));
 

@@ -25,13 +25,13 @@ public:
     void mouseUp(const juce::MouseEvent& e) override;
 
     void setSelected(bool sel);
-    Clip& getClip() { return clip; }
+    Clip* getClip() { return clip.get(); }
 
     static constexpr int headerH   = 24;
     static constexpr int markerHit = 7;
 
 private:
-    Clip&  clip;
+    juce::WeakReference<Clip> clip;
     double projectSampleRate = 48000.0;
     bool   selected = false;
 

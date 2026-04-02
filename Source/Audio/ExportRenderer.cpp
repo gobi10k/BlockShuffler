@@ -57,15 +57,16 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
 void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
                                const ResolvedEntry& entry)
 {
-    const auto& src  = entry.clip->audioBuffer;
+    if (!entry.audioBuffer) return;
+    const auto& src  = *entry.audioBuffer;
     const int srcCh  = src.getNumChannels();
     const int srcLen = src.getNumSamples();
     const int dstCh  = dest.getNumChannels();
     const int dstLen = dest.getNumSamples();
     if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
 
-    const int64_t startMark = entry.clip->startMark;
-    const int64_t endMark   = entry.clip->endMark;
+    const int64_t startMark = entry.startMark;
+    const int64_t endMark   = entry.endMark;
     const int64_t bodyLen   = endMark - startMark;
     const int64_t leadInLen = startMark;
     const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
@@ -157,7 +158,7 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
     if (tailLen > 0)
     {
         // retainTailTempo=true → always use original clip audio at 1:1.
-        if (entry.clip->retainTailTempo || !entry.stretchedTail)
+        if (entry.retainTailTempo || !entry.stretchedTail)
         {
             mixBufRange(src, bodyEnd, bodyEnd + tailLen, endMark, 1.0f, 0.0f);
         }

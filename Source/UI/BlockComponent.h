@@ -30,10 +30,10 @@ public:
     void setHighlighted(bool h);  ///< Pending link/stack target highlight
     void setPlaying(bool p);      ///< Currently playing in the arrangement
     bool isSelected()   const { return selected; }
-    Block& getBlock()         { return block; }
+    Block* getBlock()         { return block.get(); }
 
 private:
-    Block& block;
+    juce::WeakReference<Block> block;
     bool selected    = false;
     bool highlighted = false;
     bool playing     = false;
