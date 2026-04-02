@@ -4,6 +4,27 @@ project(BlockShuffler VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Disable optional X11 extension headers so the project builds in environments
+# that only have base X11 libs installed (no -dev packages for Xrandr/Xinerama/etc).
+# These flags must be set globally (before FetchContent_MakeAvailable) because JUCE
+# builds the juceaide host tool in a subprocess during cmake configure — the tool
+# compiles juce_gui_basics and therefore needs these flags too.
+#
+# TRADE-OFF: JUCE_USE_XRANDR=0 disables compile-time Xrandr support which includes
+# multi-monitor awareness code.  In a proper developer environment with
+# libxrandr-dev / libxinerama-dev / libxcursor-dev installed, remove these lines
+# and the corresponding entries in target_compile_definitions below to restore
+# full Linux multi-monitor support.
+if(UNIX AND NOT APPLE)
+    add_compile_definitions(
+        JUCE_USE_XRANDR=0
+        JUCE_USE_XINERAMA=0
+        JUCE_USE_XSHM=0
+        JUCE_USE_XRENDER=0
+        JUCE_USE_XCURSOR=0
+    )
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
     JUCE
@@ -86,6 +107,12 @@ target_compile_definitions(BlockShuffler PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
+    # Mirror the global X11 extension flags (see top of file).
+    JUCE_USE_XRANDR=0
+    JUCE_USE_XINERAMA=0
+    JUCE_USE_XSHM=0
+    JUCE_USE_XRENDER=0
+    JUCE_USE_XCURSOR=0
 )
 
 # Re-sign the Standalone app with ad-hoc signature after build (macOS only)
