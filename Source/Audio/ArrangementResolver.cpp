@@ -18,6 +18,10 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     for (auto* b : project.blocks) sorted.push_back(b);
 
     std::unordered_map<std::string, int> posMap;
+    std::unordered_map<std::string, const Block*> blockById;
+    for (auto* b : project.blocks)
+        blockById[b->id.toStdString()] = b;
+
     for (auto* b : sorted) posMap[b->id.toStdString()] = b->position;
 
     // ── 2. Shuffle links and apply swaps ─────────────────────────────────────
@@ -97,9 +101,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 for (int i = result.entries.size() - 1; i >= 0; --i)
                 {
                     const auto& e = result.entries.getReference(i);
-                    bool isOver = false;
-                    for (auto* b : project.blocks)
-                        if (b->id == e.blockId) { isOver = b->isOverlapping; break; }
+                    auto it = blockById.find(e.blockId.toStdString());
+                    bool isOver = (it != blockById.end() && it->second->isOverlapping);
                     if (!isOver) { overlayStart = e.timelinePos; break; }
                 }
                 if (overlayStart >= 0)
@@ -286,10 +289,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     // "Primary" = non-overlapping blocks. Simultaneous entries sharing the same
     // timelinePos are skipped (no stretch between entries in the same slot).
     {
-        std::unordered_map<std::string, const Block*> blockById;
-        for (auto* b : project.blocks)
-            blockById[b->id.toStdString()] = b;
-
         // Collect primary (non-overlapping, non-simultaneous) entry indices in order
         std::vector<int> primary;
         for (int i = 0; i < result.entries.size(); ++i) {
@@ -357,9 +356,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         int lastIdx = result.entries.size() - 1;
         for (int i = result.entries.size() - 1; i >= 0; --i) {
             const auto& e = result.entries.getReference(i);
-            bool isOver = false;
-            for (auto* b : project.blocks)
-                if (b->id == e.blockId) { isOver = b->isOverlapping; break; }
+            auto it = blockById.find(e.blockId.toStdString());
+            bool isOver = (it != blockById.end() && it->second->isOverlapping);
             if (!isOver) { lastIdx = i; break; }
         }
         const ResolvedEntry& last = result.entries.getReference(lastIdx);
