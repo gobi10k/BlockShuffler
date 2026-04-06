@@ -1,5 +1,5 @@
 #include "ExportRenderer.h"
-#include "TempoStretcher.h"
+#include "EntryMixer.h"
 #include "../Model/Clip.h"
 #include <unordered_map>
 
@@ -28,10 +28,10 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
     juce::AudioBuffer<float> output(numChannels, numSamples);
     output.clear();
 
-    // Mix every entry
+    // Mix every entry (export is 1:1 — project rate == output rate, pToH = hToP = 1.0)
     const int numEntries = arrangement.entries.size();
     for (int i = 0; i < numEntries; ++i) {
-        mixEntry(output, arrangement.entries.getReference(i));
+        mixEntry(output, arrangement.entries.getReference(i), i);
         if (progress) progress((float)(i + 1) / (float)numEntries);
     }
 
@@ -57,120 +57,13 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
 }
 
 void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
-                               const ResolvedEntry& entry)
+                               const ResolvedEntry& entry,
+                               int entryIndex)
 {
-    if (!entry.audioBuffer) return;
-    const auto& src  = *entry.audioBuffer;
-    const int srcCh  = src.getNumChannels();
-    const int srcLen = src.getNumSamples();
-    const int dstCh  = dest.getNumChannels();
-    const int dstLen = dest.getNumSamples();
-    if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
-
-    const int64_t startMark = entry.startMark;
-    const int64_t endMark   = entry.endMark;
-    const int64_t bodyLen   = endMark - startMark;
-    const int64_t leadInLen = startMark;
-    const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
-    const int64_t bodyStart = entry.timelinePos;
-    const int64_t bodyEnd   = bodyStart + bodyLen;
-
-    // General 1:1 additive mixer with gain ramp, from any source buffer.
-    auto mixBufRange = [&](const juce::AudioBuffer<float>& s,
-                            int64_t tlStart, int64_t tlEnd,
-                            int64_t srcOff0,
-                            float gainStart, float gainEnd)
-    {
-        const int sCh  = s.getNumChannels();
-        const int sLen = s.getNumSamples();
-        const int mCh  = juce::jmin(sCh, dstCh);
-        if (sCh == 0 || sLen == 0) return;
-
-        int64_t ovStart = juce::jmax(tlStart, (int64_t)0);
-        int64_t ovEnd   = juce::jmin(tlEnd,   (int64_t)dstLen);
-        if (ovStart >= ovEnd) return;
-
-        int   destOff = (int)ovStart;
-        int64_t srcOff = srcOff0 + (ovStart - tlStart);
-        int   count   = (int)(ovEnd - ovStart);
-        if (srcOff < 0 || srcOff >= (int64_t)sLen) return;
-        count = juce::jmin(count, sLen - (int)srcOff);
-        if (count <= 0) return;
-
-        int64_t regLen = tlEnd - tlStart;
-        float gs = gainStart, ge = gainEnd;
-        if (regLen > 1) {
-            float t0 = (float)(ovStart - tlStart) / (float)regLen;
-            float t1 = (float)(ovEnd   - tlStart) / (float)regLen;
-            gs = gainStart + t0 * (gainEnd - gainStart);
-            ge = gainStart + t1 * (gainEnd - gainStart);
-        }
-        gs *= entry.gain;
-        ge *= entry.gain;
-
-        for (int ch = 0; ch < mCh; ++ch)
-            dest.addFromWithRamp(ch, destOff, s.getReadPointer(ch) + srcOff, count, gs, ge);
-        if (sCh == 1 && dstCh >= 2)
-            dest.addFromWithRamp(1, destOff, s.getReadPointer(0) + srcOff, count, gs, ge);
-    };
-
-    // ── Lead-in ────────────────────────────────────────────────────────────────
-    if (leadInLen > 0)
-    {
-        if (entry.stretchedLeadIn)
-        {
-            int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBufRange(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0, 0.0f, 1.0f);
-        }
-        else
-        {
-            int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            int64_t lStart   = bodyStart - leadInTL;
-            int64_t ovStart  = juce::jmax(lStart, (int64_t)0);
-            int64_t ovEnd    = juce::jmin(bodyStart, (int64_t)dstLen);
-            if (ovStart < ovEnd) {
-                int destOff   = (int)ovStart;
-                int destCount = (int)(ovEnd - ovStart);
-                if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f) {
-                    int srcOff = juce::jmin((int)(ovStart - lStart), srcLen - 1);
-                    int cnt    = juce::jmin(destCount, srcLen - srcOff);
-                    float t0 = (leadInTL>1)?(float)(ovStart-lStart)/(float)(leadInTL-1):0.0f;
-                    float t1 = (leadInTL>1)?(float)(ovEnd-lStart)  /(float)(leadInTL-1):1.0f;
-                    for (int ch=0;ch<juce::jmin(srcCh,dstCh);++ch)
-                        dest.addFromWithRamp(ch,destOff,src.getReadPointer(ch)+srcOff,cnt,t0*entry.gain,t1*entry.gain);
-                    if (srcCh==1&&dstCh>=2)
-                        dest.addFromWithRamp(1,destOff,src.getReadPointer(0)+srcOff,cnt,t0*entry.gain,t1*entry.gain);
-                } else {
-                    double srcAdv = (double)leadInLen/(double)leadInTL;
-                    int srcSliceOff = (int)((double)(ovStart-lStart)*srcAdv);
-                    int srcSliceCnt = juce::jmin((int)((double)destCount*srcAdv+1.5),(int)leadInLen-srcSliceOff);
-                    float t0=(leadInTL>1)?(float)(ovStart-lStart)/(float)(leadInTL-1):0.0f;
-                    float t1=(leadInTL>1)?(float)(ovEnd-lStart)  /(float)(leadInTL-1):1.0f;
-                    TempoStretcher::resampleAdd(src,srcSliceOff,srcSliceCnt,dest,destOff,destCount,t0*entry.gain,t1*entry.gain);
-                }
-            }
-        }
-    }
-
-    // ── Body ──────────────────────────────────────────────────────────────────
-    if (bodyLen > 0)
-        mixBufRange(src, bodyStart, bodyEnd, startMark, 1.0f, 1.0f);
-
-    // ── Tail ──────────────────────────────────────────────────────────────────
-    if (tailLen > 0)
-    {
-        // retainTailTempo=true → always use original clip audio at 1:1.
-        if (entry.retainTailTempo || !entry.stretchedTail)
-        {
-            mixBufRange(src, bodyEnd, bodyEnd + tailLen, endMark, 1.0f, 0.0f);
-        }
-        else
-        {
-            // Pre-stretched buffer (retainTailTempo=false, tempos differ)
-            int64_t sl = (int64_t)entry.stretchedTail->getNumSamples();
-            mixBufRange(*entry.stretchedTail, bodyEnd, bodyEnd + sl, 0, 1.0f, 0.0f);
-        }
-    }
+    // Offline export: project sample rate == output sample rate, so pToH = hToP = 1.0.
+    // destOriginSample = 0 because dest[0] always corresponds to project sample 0.
+    mixEntryToBuffer(entry, dest, /*destOriginSample=*/0, dest.getNumSamples(),
+                     entryIndex, /*pToH=*/1.0, /*hToP=*/1.0);
 }
 
 bool ExportRenderer::writeClipFlac(const Clip& clip, const juce::File& dest, int bitDepth, double sampleRate) {

@@ -226,6 +226,16 @@ bool Project::loadFromFile(const juce::File& file) {
     auto jsonString = file.loadFileAsString();
     auto json = juce::JSON::parse(jsonString);
     if (json.isVoid()) return false;
+
+    // Suppress undo recording for the entire load so that the undo stack is
+    // clean after opening a project (Cmd+Z must not undo the open itself).
+    struct SuppressGuard {
+        Project& p;
+        SuppressGuard(Project& proj) : p(proj) { p.suppressUndo = true; }
+        ~SuppressGuard() { p.suppressUndo = false; }
+    } guard(*this);
+
+    undoManager.clearUndoHistory();
     return fromJSON(json);
 }
 
