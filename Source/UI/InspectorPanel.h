@@ -42,11 +42,11 @@ private:
     Clip*    selectedClip  = nullptr;
     Block*   selectedBlock = nullptr;
 
-    // Clip section
+    // ── Clip section ─────────────────────────────────────────────────────────
     juce::Label  clipTitle;
     juce::Label  probLabel;
     juce::Slider probSlider;
-    juce::Label  effectiveProbLabel;  // shows normalized probability below the slider
+    juce::Label  effectiveProbLabel;
     juce::Label  tempoLabel;
     juce::TextEditor tempoField;
     juce::ToggleButton songEnderToggle { "Song Ender" };
@@ -54,55 +54,13 @@ private:
     juce::ToggleButton retainLeadIn    { "Retain Lead-In Tempo" };
     juce::ToggleButton retainTail      { "Retain Tail Tempo" };
 
-    // Block section
+    // ── Block section ────────────────────────────────────────────────────────
     juce::Label        blockTitle;
     juce::ToggleButton blockDoneToggle  { "Mark Block as Done" };
     juce::Label        overlapLabel;
     juce::Slider       overlapSlider;
 
-    // Stack controls (visible only when block has a stackGroup >= 0)
-    juce::Label        stackPlayCountLabel;
-    juce::Label        stackPlayModeLabel;
-    juce::ToggleButton simultaneousToggle { "Simultaneous" };
-
-    // Weighted stack-count editor rows (rebuilt when stack group changes)
-    struct StackCountRow {
-        juce::TextButton decBtn    { "-" };
-        juce::Label      countLbl;
-        juce::TextButton incBtn    { "+" };
-        juce::Slider     weightSlider;
-        juce::TextButton removeBtn { "x" };
-        juce::var        dragPre;   // pre-snapshot captured at weight-slider drag start
-
-        StackCountRow() {
-            weightSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-            weightSlider.setRange(1.0, 100.0, 1.0);
-            weightSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 38, 18);
-        }
-    };
-    juce::OwnedArray<StackCountRow> stackCountRows;
-    juce::TextButton addStackCountBtn { "+ Entry" };
-    int lastBuiltStackCountRows = -1;
-
-    // Links section — rebuilt each time a block is selected or link structure changes
-    juce::Label  linksTitle;
-    struct LinkRow {
-        juce::String blockA, blockB;
-        juce::Label  label;
-        juce::Slider slider;
-        juce::var    dragPre;  // pre-snapshot captured at slider drag start
-        LinkRow() {
-            slider.setSliderStyle(juce::Slider::LinearHorizontal);
-            slider.setRange(0.0, 100.0, 1.0);
-            slider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 20);
-        }
-    };
-    juce::OwnedArray<LinkRow> linkRows;
-
-    // Tracks link count at last rebuild to detect structural changes
-    int lastBuiltLinkCount = -1;
-
-    // "Plays Over" section — only visible when the selected block has isOverlapping == true
+    // ── "Plays Over" section ─────────────────────────────────────────────────
     juce::Label playsOverTitle;
     juce::Label playsOverHint;
     struct PlaysOverRow {
@@ -114,15 +72,66 @@ private:
 
     void rebuildPlaysOverRows();
 
+    // ── Stack settings section (only when block->stackGroup >= 0) ────────────
+    juce::Label    stackSectionTitle;   ///< "STACK SETTINGS" heading
+    juce::Label    stackInfoLabel;      ///< "Group 1  ·  3 blocks"
+    juce::Label    playModeLabel;       ///< "Play Mode:"
+    juce::ComboBox playModeCombo;       ///< Sequential / Simultaneous
+    juce::Label    stackPlayCountLabel; ///< "How Many to Play:"
+
+    // One row per count entry: [– count +] [weight slider] [×]
+    struct StackCountRow {
+        juce::TextButton decBtn    { "-" };
+        juce::Label      countLbl;
+        juce::TextButton incBtn    { "+" };
+        juce::Slider     weightSlider;
+        juce::TextButton removeBtn { "x" };
+        juce::var        dragPre;
+
+        StackCountRow() {
+            weightSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            weightSlider.setRange(1.0, 100.0, 1.0);
+            weightSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 38, 18);
+        }
+    };
+    juce::OwnedArray<StackCountRow> stackCountRows;
+    juce::TextButton addStackCountBtn { "+ Add" };
+    int lastBuiltStackCountRows = -1;
+
+    juce::Label stackBlocksTitle;                 ///< "Blocks in stack:"
+    juce::OwnedArray<juce::Label> stackBlockLabels; ///< one label per block in group
+    int lastBuiltStackGroup      = -2;            ///< detect group changes for block list
+
+    // Track Y+H of the stack section for paint() tint
+    int stackSectionY = -1;
+    int stackSectionH = 0;
+
+    void rebuildStackCountRows();
+    void rebuildStackBlockLabels();
+
+    // ── Links section ────────────────────────────────────────────────────────
+    juce::Label  linksTitle;
+    struct LinkRow {
+        juce::String blockA, blockB;
+        juce::Label  label;
+        juce::Slider slider;
+        juce::var    dragPre;
+        LinkRow() {
+            slider.setSliderStyle(juce::Slider::LinearHorizontal);
+            slider.setRange(0.0, 100.0, 1.0);
+            slider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 20);
+        }
+    };
+    juce::OwnedArray<LinkRow> linkRows;
+    int lastBuiltLinkCount = -1;
+
     bool updatingFromModel = false;
 
-    // Pre-change snapshots captured at drag-start, used in sliderDragEnded to record undo
     juce::var probSliderDragPre;
     juce::var overlapSliderDragPre;
 
     void updateFromModel();
     void rebuildLinkRows();
-    void rebuildStackCountRows();
     BlockLink* findLinkForRow(const LinkRow* row) const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(InspectorPanel)

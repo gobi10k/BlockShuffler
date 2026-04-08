@@ -199,6 +199,17 @@ bool projectFromJSON(const juce::var& json, Project& project) {
         }
     }
 
+    // Propagate stack settings from first block in each group to all others,
+    // fixing any inconsistency in saved files (e.g. from pre-propagation builds).
+    {
+        juce::SortedSet<int> seen;
+        for (auto* b : project.blocks)
+            if (b->stackGroup >= 0 && !seen.contains(b->stackGroup)) {
+                seen.add(b->stackGroup);
+                project.propagateStackSettings(b->stackGroup);
+            }
+    }
+
     return true;
 }
 

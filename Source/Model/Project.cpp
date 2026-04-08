@@ -116,6 +116,21 @@ void Project::moveBlock(int fromIndex, int toIndex) {
     recordMutation(pre);
 }
 
+void Project::propagateStackSettings(int stackGroup) {
+    if (stackGroup < 0) return;
+    Block* source = nullptr;
+    for (auto* b : blocks) {
+        if (b->stackGroup == stackGroup) { source = b; break; }
+    }
+    if (source == nullptr) return;
+    for (auto* b : blocks) {
+        if (b->stackGroup == stackGroup && b != source) {
+            b->stackPlayCount = source->stackPlayCount;
+            b->stackPlayMode  = source->stackPlayMode;
+        }
+    }
+}
+
 Block* Project::getBlockById(const juce::String& blockId) {
     for (auto* b : blocks)
         if (b->id == blockId) return b;
@@ -139,6 +154,7 @@ void Project::stackBlocks(const juce::String& blockIdA, const juce::String& bloc
         a->stackGroup = maxGroup + 1;
         b->stackGroup = maxGroup + 1;
     }
+    propagateStackSettings(a->stackGroup);
     sendChangeMessage();
     recordMutation(pre);
 }
