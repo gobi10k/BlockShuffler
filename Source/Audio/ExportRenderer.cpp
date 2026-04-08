@@ -69,11 +69,13 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
 
     const int64_t startMark = entry.startMark;
     const int64_t endMark   = entry.endMark;
-    const int64_t bodyLen   = endMark - startMark;
-    const int64_t leadInLen = startMark;
-    const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
-    const int64_t bodyStart = entry.timelinePos;
-    const int64_t bodyEnd   = bodyStart + bodyLen;
+    const int64_t bodyLen    = endMark - startMark;
+    const int64_t leadInLen  = startMark;
+    const int64_t tailLen    = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
+    // New timeline model: timelinePos = lead-in start; body starts at timelinePos + startMark.
+    const int64_t leadInStart = entry.timelinePos;
+    const int64_t bodyStart   = leadInStart + leadInLen;   // = timelinePos + startMark
+    const int64_t bodyEnd     = leadInStart + endMark;     // = timelinePos + endMark
 
     // General 1:1 additive mixer with gain ramp, from any source buffer.
     auto mixBufRange = [&](const juce::AudioBuffer<float>& s,
@@ -115,39 +117,36 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
+    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
+    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
     if (leadInLen > 0)
     {
         if (entry.stretchedLeadIn)
         {
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBufRange(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0, 0.0f, 1.0f);
+            mixBufRange(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0, 0.0f, 1.0f);
+        }
+        else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
+        {
+            // No stretching — source samples [0, leadInLen) map 1:1 to [leadInStart, bodyStart)
+            mixBufRange(src, leadInStart, bodyStart, 0, 0.0f, 1.0f);
         }
         else
         {
+            // Resampled lead-in: source [0, leadInLen) → timeline [leadInStart, leadInStart+leadInTL)
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            int64_t lStart   = bodyStart - leadInTL;
-            int64_t ovStart  = juce::jmax(lStart, (int64_t)0);
-            int64_t ovEnd    = juce::jmin(bodyStart, (int64_t)dstLen);
+            int64_t tlEnd    = leadInStart + leadInTL;
+            int64_t ovStart  = juce::jmax(leadInStart, (int64_t)0);
+            int64_t ovEnd    = juce::jmin(tlEnd, (int64_t)dstLen);
             if (ovStart < ovEnd) {
                 int destOff   = (int)ovStart;
                 int destCount = (int)(ovEnd - ovStart);
-                if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f) {
-                    int srcOff = juce::jmin((int)(ovStart - lStart), srcLen - 1);
-                    int cnt    = juce::jmin(destCount, srcLen - srcOff);
-                    float t0 = (leadInTL>1)?(float)(ovStart-lStart)/(float)(leadInTL-1):0.0f;
-                    float t1 = (leadInTL>1)?(float)(ovEnd-lStart)  /(float)(leadInTL-1):1.0f;
-                    for (int ch=0;ch<juce::jmin(srcCh,dstCh);++ch)
-                        dest.addFromWithRamp(ch,destOff,src.getReadPointer(ch)+srcOff,cnt,t0*entry.gain,t1*entry.gain);
-                    if (srcCh==1&&dstCh>=2)
-                        dest.addFromWithRamp(1,destOff,src.getReadPointer(0)+srcOff,cnt,t0*entry.gain,t1*entry.gain);
-                } else {
-                    double srcAdv = (double)leadInLen/(double)leadInTL;
-                    int srcSliceOff = (int)((double)(ovStart-lStart)*srcAdv);
-                    int srcSliceCnt = juce::jmin((int)((double)destCount*srcAdv+1.5),(int)leadInLen-srcSliceOff);
-                    float t0=(leadInTL>1)?(float)(ovStart-lStart)/(float)(leadInTL-1):0.0f;
-                    float t1=(leadInTL>1)?(float)(ovEnd-lStart)  /(float)(leadInTL-1):1.0f;
-                    TempoStretcher::resampleAdd(src,srcSliceOff,srcSliceCnt,dest,destOff,destCount,t0*entry.gain,t1*entry.gain);
-                }
+                double srcAdv     = (double)leadInLen / (double)leadInTL;
+                int srcSliceOff   = (int)((double)(ovStart - leadInStart) * srcAdv);
+                int srcSliceCnt   = juce::jmin((int)((double)destCount * srcAdv + 1.5), (int)leadInLen - srcSliceOff);
+                float t0 = (leadInTL > 1) ? (float)(ovStart - leadInStart) / (float)(leadInTL - 1) : 0.0f;
+                float t1 = (leadInTL > 1) ? (float)(ovEnd   - leadInStart) / (float)(leadInTL - 1) : 1.0f;
+                TempoStretcher::resampleAdd(src, srcSliceOff, srcSliceCnt, dest, destOff, destCount, t0 * entry.gain, t1 * entry.gain);
             }
         }
     }

@@ -17,7 +17,8 @@ struct ResolvedEntry {
     juce::String clipName;
     juce::String clipId;
 
-    int64_t      timelinePos;         // output timeline sample where clip->startMark lands
+    int64_t      timelinePos;         // output timeline sample where lead-in starts (= body-end of previous entry).
+                                     // Body starts at timelinePos + startMark; tail starts at timelinePos + endMark.
     float        gain;                // mixing gain (1.0 for solo clips, <1.0 for simultaneous layers)
     juce::String blockId;             // id of the Block that produced this entry
 

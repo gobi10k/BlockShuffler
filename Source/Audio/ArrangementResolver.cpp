@@ -165,7 +165,10 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 clip->name, clip->id,
                 cursor, 1.0f, block->id
             });
-            cursor += bodyLen;
+            // Advance cursor by endMark (= startMark + bodyLen) so that the NEXT
+            // block's lead-in starts at this block's body-end (= tail start).
+            // This makes tail of N and lead-in of N+1 overlap at the transition point.
+            cursor += clip->endMark;
             if (clip->isSongEnder) songEnded = true;
 
         } else {
@@ -207,12 +210,11 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             if (isSimultaneous) {
                 // All picked blocks start at the same timeline position
                 const int64_t slotStart = cursor;
-                int64_t maxLen = 0;
-
                 const float stackGain = 1.0f / (float)juce::jmax(1, (int)picked.size());
 
                 // Collect picked clips so overlapping-block targeting can check them
                 juce::Array<Clip*> simultaneousClips;
+                int64_t maxEndMark = 0;
                 for (auto* b : picked) {
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
@@ -225,7 +227,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         clip->name, clip->id,
                         slotStart, stackGain, b->id
                     });
-                    maxLen = std::max(maxLen, bodyLen);
+                    maxEndMark = std::max(maxEndMark, (int64_t)clip->endMark);
                     simultaneousClips.add(clip);
                     if (clip->isSongEnder) songEnded = true;
                 }
@@ -262,7 +264,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         }
                     }
                 }
-                cursor += maxLen;
+                cursor += maxEndMark;  // advance by max(endMark) so next lead-in overlaps at tail start
 
             } else {
                 // Sequential: each picked block occupies its own time slot.
@@ -282,7 +284,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         clip->name, clip->id,
                         entryStart, 1.0f, b->id
                     });
-                    cursor += bodyLen;
+                    cursor += clip->endMark;  // advance by endMark so next lead-in overlaps at tail start
 
                     // Layer overlapping blocks on top of this picked block
                     for (auto* ob : overlapping) {
@@ -434,6 +436,30 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             + " bodyLen=" + juce::String(e.endMark - e.startMark));
     }
     DBG("totalDurationSamples: " + juce::String(result.totalDurationSamples));
+
+    DBG("=== TIMELINE CHECK ===");
+    // New model: timelinePos = lead-in start; bodyStart = timelinePos + startMark;
+    // tail starts at timelinePos + endMark. Adjacent entries' timelinePos should
+    // equal prev's (timelinePos + endMark), i.e. gap = 0 between prev tail-start and next lead-in-start.
+    for (int i = 0; i < (int)result.entries.size(); ++i) {
+        auto& e = result.entries.getReference(i);
+        auto bodyStart2 = e.timelinePos + e.startMark;
+        auto bodyEnd2   = e.timelinePos + e.endMark;
+        auto leadIn2    = e.startMark;
+        DBG("[" + juce::String(i) + "] leadInStart=" + juce::String((int64_t)e.timelinePos)
+            + " bodyStart=" + juce::String((int64_t)bodyStart2)
+            + " bodyEnd=" + juce::String((int64_t)bodyEnd2)
+            + " leadIn=" + juce::String((int64_t)leadIn2));
+        if (i > 0) {
+            auto& prev = result.entries.getReference(i-1);
+            auto prevTailStart = prev.timelinePos + prev.endMark;
+            DBG("  prevTailStart=" + juce::String((int64_t)prevTailStart)
+                + " thisLeadInStart=" + juce::String((int64_t)e.timelinePos)
+                + " gap=" + juce::String((int64_t)(e.timelinePos - prevTailStart)));
+            if (e.timelinePos != prevTailStart)
+                DBG("  *** TAIL/LEAD-IN ALIGNMENT ERROR ***");
+        }
+    }
 
     return result;
 }

@@ -68,28 +68,33 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
                         : 1.0;
     const double hToP = 1.0 / pToH;
 
-    for (const auto& entry : current->entries) {
+    for (int entryIndex = 0; entryIndex < current->entries.size(); ++entryIndex) {
+        const auto& entry = current->entries.getReference(entryIndex);
         const int64_t bodyLen   = entry.endMark - entry.startMark;
         const int64_t leadInLen = entry.startMark;
         const int64_t tailLen   = (entry.audioBuffer) ? juce::jmax((int64_t)0,
                                              (int64_t)entry.audioBuffer->getNumSamples()
                                              - entry.endMark) : 0;
 
-        // Full range including stretched lead-in and tail (in project samples)
-        const int64_t leadInTL  = entry.stretchedLeadIn
-                                  ? (int64_t)entry.stretchedLeadIn->getNumSamples()
-                                  : (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
+        // Full range: lead-in starts at timelinePos, body at timelinePos+startMark,
+        // tail at timelinePos+endMark, tail ends at timelinePos+endMark+tailTL.
         const int64_t tailTL    = entry.stretchedTail
                                   ? (int64_t)entry.stretchedTail->getNumSamples()
                                   : (int64_t)(tailLen   * entry.tailStretchRatio   + 0.5f);
 
         // Convert project-space bounds to hardware-space bounds
-        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - leadInTL) * hToP + 0.5);
-        int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + bodyLen + tailTL) * hToP + 0.5);
+        int64_t fullStartH = (int64_t)((double)entry.timelinePos * hToP + 0.5);
+        int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + entry.endMark + tailTL) * hToP + 0.5);
+
+        if (head < (int64_t)numSamples * 10)  // log only first ~10 blocks
+            DBG("ENGINE entry=" + juce::String(entryIndex)
+                + " fullStartH=" + juce::String((int64_t)fullStartH)
+                + " bodyStartH=" + juce::String((int64_t)((double)(entry.timelinePos + entry.startMark) * hToP + 0.5))
+                + " timelinePos=" + juce::String((int64_t)entry.timelinePos));
 
         if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;
 
-        mixEntryIntoBuffer(buffer, numSamples, entry, head, pToH, hToP);
+        mixEntryIntoBuffer(buffer, numSamples, entry, head, pToH, hToP, entryIndex);
     }
 
     head += numSamples;
@@ -108,7 +113,8 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
                                          const ResolvedEntry& entry,
                                          int64_t currentHead,
                                          double pToH,
-                                         double hToP) const
+                                         double hToP,
+                                         int entryIndex) const
 {
     if (!entry.audioBuffer) return;
     const auto& src  = *entry.audioBuffer;
@@ -123,9 +129,11 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     const int64_t leadInLen = startMark;
     const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
 
-    const int64_t bodyStart = entry.timelinePos;
-    const int64_t bodyEnd   = bodyStart + bodyLen;
-    const int64_t blockEnd  = currentHead + (int64_t)numSamples;
+    // New timeline model: timelinePos = lead-in start; body starts at timelinePos + startMark.
+    const int64_t leadInStart = entry.timelinePos;
+    const int64_t bodyStart   = leadInStart + leadInLen;  // = timelinePos + startMark
+    const int64_t bodyEnd     = leadInStart + endMark;    // = timelinePos + endMark
+    const int64_t blockEnd    = currentHead + (int64_t)numSamples;
 
     // General region mixer with resampling for pitch correction.
     // regionStart/regionEnd are in project-sample space.
@@ -177,28 +185,36 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
+    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
+    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
     if (leadInLen > 0)
     {
         if (entry.stretchedLeadIn)
         {
-            // Pre-stretched buffer: timeline [bodyStart-stretchedLen, bodyStart)
+            // Pre-stretched buffer occupies [leadInStart, leadInStart + sl)
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0.0, 0.0f, 1.0f);
+            mixBuf(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0.0, 0.0f, 1.0f);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
-            // No stretching needed (WSOLA skipped)
-            mixBuf(src, bodyStart - leadInLen, bodyStart, 0.0, 0.0f, 1.0f);
+            // No stretching needed
+            mixBuf(src, leadInStart, bodyStart, 0.0, 0.0f, 1.0f);
         }
         else
         {
             // Fallback linear-interp (WSOLA failed or was bypassed)
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            mixBuf(src, bodyStart - leadInTL, bodyStart, 0.0, 0.0f, 1.0f);
+            mixBuf(src, leadInStart, leadInStart + leadInTL, 0.0, 0.0f, 1.0f);
         }
     }
 
     // ── Body ──────────────────────────────────────────────────────────────────
+    DBG("MIXER entry=" + juce::String(entryIndex)
+        + " leadInStart=" + juce::String((int64_t)leadInStart)
+        + " bodyStart=" + juce::String((int64_t)bodyStart)
+        + " bodyEnd=" + juce::String((int64_t)bodyEnd)
+        + " bodySrcStart=" + juce::String((int64_t)entry.startMark)
+        + " bodySrcEnd=" + juce::String((int64_t)entry.endMark));
     if (bodyLen > 0)
         mixBuf(src, bodyStart, bodyEnd, (double)startMark, 1.0f, 1.0f);
 

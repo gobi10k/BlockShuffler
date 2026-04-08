@@ -47,7 +47,8 @@ private:
                             const ResolvedEntry& entry,
                             int64_t currentHead,
                             double pToH,
-                            double hToP) const;
+                            double hToP,
+                            int entryIndex = -1) const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlaybackEngine)
 };
