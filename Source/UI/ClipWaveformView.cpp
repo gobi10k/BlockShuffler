@@ -484,7 +484,6 @@ bool ClipWaveformView::keyPressed(const juce::KeyPress& key) {
         // same pixel positions with no visual change.
         selectedClip->gridOffsetSamples = nudgeByGridUnits(
             selectedClip->gridOffsetSamples, isRight ? 1 : -1, tempo, sr, 4);
-        DBG("Nudged grid offset to: " + juce::String(selectedClip->gridOffsetSamples));
         // Repaint all clip rows to reflect the offset change
         for (auto* row : clipRows)
             row->repaint();

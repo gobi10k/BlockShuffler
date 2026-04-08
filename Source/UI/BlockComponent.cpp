@@ -101,6 +101,15 @@ void BlockComponent::paint(juce::Graphics& g) {
         g.drawText(juce::String(block->stackGroup + 1), badge, juce::Justification::centred);
     }
 
+    // Drag-target indicator: bright teal border + "STACK" label
+    if (dragTarget) {
+        g.setColour(juce::Colour(0xFF44CCCC).withAlpha(0.9f));
+        g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f, 2.5f);
+        g.setFont(10.0f);
+        g.drawText("STACK", getLocalBounds().withTrimmedTop(getHeight() / 2),
+                   juce::Justification::centred);
+    }
+
     // Done indicator
     if (block->isDone) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
@@ -128,6 +137,12 @@ void BlockComponent::setHighlighted(bool h) {
 void BlockComponent::setPlaying(bool p) {
     if (playing == p) return;
     playing = p;
+    repaint();
+}
+
+void BlockComponent::setDragTarget(bool d) {
+    if (dragTarget == d) return;
+    dragTarget = d;
     repaint();
 }
 
@@ -172,9 +187,12 @@ void BlockComponent::showContextMenu() {
     menu.addItem(1, "Rename");
     menu.addSubMenu("Set Color", colourMenu);
     menu.addSeparator();
+    menu.addItem(8, "Play from Here");
+    menu.addSeparator();
     menu.addItem(2, "Link to...");
     menu.addItem(7, "Remove Links");
     menu.addItem(3, "Stack with...");
+    menu.addItem(9, "Unstack", block && block->stackGroup >= 0);
     menu.addSeparator();
     menu.addItem(6, "Set as Overlapping", true, block && block->isOverlapping);
     menu.addItem(4, "Mark as Done",       true, block && block->isDone);
@@ -210,6 +228,12 @@ void BlockComponent::showContextMenu() {
             if (self->onUndoableMutation) self->onUndoableMutation(pre);
         } else if (result == 7 && self->block) {
             if (self->onRemoveLinksRequested) self->onRemoveLinksRequested(self->block->id);
+        } else if (result == 8 && self->block) {
+            if (self->onPlayFromHereRequested) self->onPlayFromHereRequested(self->block->id);
+        } else if (result == 9 && self->block && self->block->stackGroup >= 0) {
+            self->block->stackGroup = -1;
+            if (self->onMutated) self->onMutated();
+            if (self->onUndoableMutation) self->onUndoableMutation(pre);
         } else if (result == 5 && self->block) {
             if (self->onDeleteRequested) self->onDeleteRequested(self->block->id);
         }

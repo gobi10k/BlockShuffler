@@ -44,12 +44,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         return posMap[a->id.toStdString()] < posMap[b->id.toStdString()];
     });
 
-    DBG("=== Blocks after sort ===");
-    for (auto* block : sorted)
-        DBG("Block: " + block->name + " pos=" + juce::String(block->position)
-            + " clips=" + juce::String(block->clips.size())
-            + " isDone=" + juce::String(block->isDone ? 1 : 0));
-
     // ── 4. Group into slots by stackGroup ────────────────────────────────────
     // A slot is one or more blocks sharing the same stackGroup.
     // Blocks NOT in a stack (stackGroup < 0) each occupy their own slot.
@@ -72,13 +66,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 slots.push_back({{b}});
             }
         }
-    }
-
-    DBG("=== Slots after grouping ===");
-    for (size_t i = 0; i < slots.size(); ++i) {
-        juce::String names;
-        for (auto* b : slots[i].blocks) names += b->name + " ";
-        DBG("Slot " + juce::String(i) + ": [" + names + "]");
     }
 
     // ── 5. Walk slots and build timeline ─────────────────────────────────────
@@ -119,23 +106,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 {
                     for (auto* ob : overlapping)
                     {
-                        DBG("OVERLAP CHECK: block=" + ob->name
-                            + " isOverlapping=" + juce::String(ob->isOverlapping ? 1 : 0)
-                            + " overlapProb=" + juce::String(ob->overlapProbability)
-                            + " numClips=" + juce::String(ob->clips.size()));
                         if (ob->isDone || ob->clips.isEmpty()) continue;
                         float roll = rng.nextFloat();
-                        DBG("Overlap block (standalone): " + ob->name
-                            + " prob=" + juce::String(ob->overlapProbability)
-                            + " rolled=" + juce::String(roll)
-                            + " triggered=" + juce::String(roll < ob->overlapProbability ? 1 : 0));
                         if (roll < ob->overlapProbability)
                         {
                             auto* oc = pickClip(*ob, rng);
                             if (oc && oc->endMark > oc->startMark) {
-                                DBG("OVERLAY ENTRY ADDED: clip=" + oc->name
-                                    + " timelinePos=" + juce::String(overlayStart)
-                                    + " isOverlay=true");
                                 result.entries.add({
                                     oc->audioBuffer,
                                     oc->startMark, oc->endMark, oc->retainTailTempo,
@@ -234,10 +210,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
                 // Overlapping blocks layer on top of this slot
                 for (auto* ob : overlapping) {
-                    DBG("OVERLAP CHECK: block=" + ob->name
-                        + " isOverlapping=" + juce::String(ob->isOverlapping ? 1 : 0)
-                        + " overlapProb=" + juce::String(ob->overlapProbability)
-                        + " numClips=" + juce::String(ob->clips.size()));
                     if (ob->isDone || ob->clips.isEmpty()) continue;
                     // Clip targeting: allow only if at least one simultaneous clip is in the allowed list
                     if (!ob->allowedParentClipIds.isEmpty()) {
@@ -245,16 +217,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         for (auto* sc : simultaneousClips)
                             if (ob->allowedParentClipIds.contains(sc->id)) { anyAllowed = true; break; }
                         if (!anyAllowed) {
-                            DBG("Overlap block skipped (clip targeting): " + ob->name);
                             continue;
                         }
                     }
                     if (rng.nextFloat() < ob->overlapProbability) {
                         auto* clip = pickClip(*ob, rng);
                         if (clip && clip->endMark > clip->startMark) {
-                            DBG("OVERLAY ENTRY ADDED: clip=" + clip->name
-                                + " timelinePos=" + juce::String(slotStart)
-                                + " isOverlay=true");
                             result.entries.add({
                                 clip->audioBuffer,
                                 clip->startMark, clip->endMark, clip->retainTailTempo,
@@ -288,30 +256,17 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
                     // Layer overlapping blocks on top of this picked block
                     for (auto* ob : overlapping) {
-                        DBG("OVERLAP CHECK: block=" + ob->name
-                            + " isOverlapping=" + juce::String(ob->isOverlapping ? 1 : 0)
-                            + " overlapProb=" + juce::String(ob->overlapProbability)
-                            + " numClips=" + juce::String(ob->clips.size()));
                         if (ob->isDone || ob->clips.isEmpty()) continue;
                         // Clip targeting: skip if this overlay isn't allowed over the selected parent clip
                         if (!ob->allowedParentClipIds.isEmpty() &&
                             !ob->allowedParentClipIds.contains(clip->id))
                         {
-                            DBG("Overlap block skipped (clip targeting): " + ob->name
-                                + " parentClip=" + clip->id);
                             continue;
                         }
                         float roll = rng.nextFloat();
-                        DBG("Overlap block: " + ob->name
-                            + " prob=" + juce::String(ob->overlapProbability)
-                            + " rolled=" + juce::String(roll)
-                            + " triggered=" + juce::String(roll < ob->overlapProbability ? 1 : 0));
                         if (roll < ob->overlapProbability) {
                             auto* oc = pickClip(*ob, rng);
                             if (oc && oc->endMark > oc->startMark) {
-                                DBG("OVERLAY ENTRY ADDED: clip=" + oc->name
-                                    + " timelinePos=" + juce::String(entryStart)
-                                    + " isOverlay=true");
                                 result.entries.add({
                                     oc->audioBuffer,
                                     oc->startMark, oc->endMark, oc->retainTailTempo,
@@ -424,42 +379,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     }
 
     result.totalDurationSamples = cursor;
-
-    DBG("=== Resolved Arrangement ===");
-    DBG("Total entries: " + juce::String(result.entries.size()));
-    for (int i = 0; i < result.entries.size(); ++i) {
-        auto& e = result.entries.getReference(i);
-        DBG("Entry " + juce::String(i)
-            + " blockId=" + e.blockId
-            + " clipName=" + e.clipName
-            + " timelinePos=" + juce::String(e.timelinePos)
-            + " bodyLen=" + juce::String(e.endMark - e.startMark));
-    }
-    DBG("totalDurationSamples: " + juce::String(result.totalDurationSamples));
-
-    DBG("=== TIMELINE CHECK ===");
-    // New model: timelinePos = lead-in start; bodyStart = timelinePos + startMark;
-    // tail starts at timelinePos + endMark. Adjacent entries' timelinePos should
-    // equal prev's (timelinePos + endMark), i.e. gap = 0 between prev tail-start and next lead-in-start.
-    for (int i = 0; i < (int)result.entries.size(); ++i) {
-        auto& e = result.entries.getReference(i);
-        auto bodyStart2 = e.timelinePos + e.startMark;
-        auto bodyEnd2   = e.timelinePos + e.endMark;
-        auto leadIn2    = e.startMark;
-        DBG("[" + juce::String(i) + "] leadInStart=" + juce::String((int64_t)e.timelinePos)
-            + " bodyStart=" + juce::String((int64_t)bodyStart2)
-            + " bodyEnd=" + juce::String((int64_t)bodyEnd2)
-            + " leadIn=" + juce::String((int64_t)leadIn2));
-        if (i > 0) {
-            auto& prev = result.entries.getReference(i-1);
-            auto prevTailStart = prev.timelinePos + prev.endMark;
-            DBG("  prevTailStart=" + juce::String((int64_t)prevTailStart)
-                + " thisLeadInStart=" + juce::String((int64_t)e.timelinePos)
-                + " gap=" + juce::String((int64_t)(e.timelinePos - prevTailStart)));
-            if (e.timelinePos != prevTailStart)
-                DBG("  *** TAIL/LEAD-IN ALIGNMENT ERROR ***");
-        }
-    }
 
     return result;
 }

@@ -52,6 +52,8 @@ InspectorPanel::InspectorPanel() {
     // Tempo field
     tempoField.setInputRestrictions(7, "0123456789.");
     tempoField.setText("120.0", false);
+    tempoField.setSelectAllWhenFocused(true);
+    tempoField.setJustification(juce::Justification::centred);
     tempoField.setColour(juce::TextEditor::backgroundColourId,
                          juce::Colour(LookAndFeel_BlockShuffler::bgLight));
     tempoField.setColour(juce::TextEditor::textColourId,

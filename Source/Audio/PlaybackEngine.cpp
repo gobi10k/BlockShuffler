@@ -31,6 +31,20 @@ void PlaybackEngine::rewind() {
     playheadSamples.store(0);
 }
 
+void PlaybackEngine::seekTo(int64_t projectSample) {
+    std::shared_ptr<const ResolvedArrangement> current;
+    {
+        juce::ScopedLock sl(arrangementLock);
+        current = activeArrangement;
+    }
+    if (!current || current->sampleRate <= 0.0 || outputSampleRate <= 0.0) {
+        playheadSamples.store(0);
+        return;
+    }
+    int64_t hw = (int64_t)((double)projectSample * outputSampleRate / current->sampleRate + 0.5);
+    playheadSamples.store(juce::jmax((int64_t)0, hw));
+}
+
 double PlaybackEngine::getPlayheadSeconds() const {
     if (outputSampleRate <= 0.0) return 0.0;
     return (double)playheadSamples.load() / outputSampleRate;
@@ -85,12 +99,6 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
         // Convert project-space bounds to hardware-space bounds
         int64_t fullStartH = (int64_t)((double)entry.timelinePos * hToP + 0.5);
         int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + entry.endMark + tailTL) * hToP + 0.5);
-
-        if (head < (int64_t)numSamples * 10)  // log only first ~10 blocks
-            DBG("ENGINE entry=" + juce::String(entryIndex)
-                + " fullStartH=" + juce::String((int64_t)fullStartH)
-                + " bodyStartH=" + juce::String((int64_t)((double)(entry.timelinePos + entry.startMark) * hToP + 0.5))
-                + " timelinePos=" + juce::String((int64_t)entry.timelinePos));
 
         if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;
 
@@ -209,12 +217,6 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     }
 
     // ── Body ──────────────────────────────────────────────────────────────────
-    DBG("MIXER entry=" + juce::String(entryIndex)
-        + " leadInStart=" + juce::String((int64_t)leadInStart)
-        + " bodyStart=" + juce::String((int64_t)bodyStart)
-        + " bodyEnd=" + juce::String((int64_t)bodyEnd)
-        + " bodySrcStart=" + juce::String((int64_t)entry.startMark)
-        + " bodySrcEnd=" + juce::String((int64_t)entry.endMark));
     if (bodyLen > 0)
         mixBuf(src, bodyStart, bodyEnd, (double)startMark, 1.0f, 1.0f);
 

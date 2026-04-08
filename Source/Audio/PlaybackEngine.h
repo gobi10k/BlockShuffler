@@ -27,6 +27,8 @@ public:
     void play(ResolvedArrangement arrangement);
     void stop();
     void rewind();
+    /** Seek to a position expressed in project samples (converts to hardware samples internally). */
+    void seekTo(int64_t projectSample);
 
     // Query (approximate, may be off by one block)
     bool   isPlaying()         const { return playing.load(); }

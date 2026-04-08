@@ -35,6 +35,21 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     transportBar.onSave   = [this] { saveProject(); };
     transportBar.onOpen   = [this] { openProject(); };
 
+    blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
+        currentArrangement = resolver.resolve(*project, rng);
+        // Find the body start of the target block in the resolved arrangement
+        int64_t seekPos = 0;
+        for (const auto& entry : currentArrangement.entries) {
+            if (entry.blockId == blockId) {
+                seekPos = entry.timelinePos + entry.startMark;
+                break;
+            }
+        }
+        engine.play(currentArrangement);
+        engine.seekTo(seekPos);
+        transportBar.setIsPlaying(true);
+    };
+
     addAndMakeVisible(waveformView);
     addAndMakeVisible(blockStrip);
     addAndMakeVisible(linkOverlay);
@@ -329,13 +344,15 @@ void MainComponent::updateTimeDisplay() {
         transportBar.setIsPlaying(false);
         blockStrip.setPlayingBlock({});
     } else {
-        // Find which entry is at the current playhead position
+        // Find which entry is at the current playhead position.
+        // With the current timeline model: timelinePos = lead-in start,
+        // body occupies [timelinePos + startMark, timelinePos + endMark).
         int64_t headSamples = (int64_t)(current * currentArrangement.sampleRate);
         juce::String nowPlayingId;
         for (const auto& entry : currentArrangement.entries) {
-            int64_t bodyLen = entry.endMark - entry.startMark;
-            if (headSamples >= entry.timelinePos &&
-                headSamples <  entry.timelinePos + bodyLen) {
+            int64_t bodyStart = entry.timelinePos + entry.startMark;
+            int64_t bodyEnd   = entry.timelinePos + entry.endMark;
+            if (headSamples >= bodyStart && headSamples < bodyEnd) {
                 nowPlayingId = entry.blockId;
                 break;
             }

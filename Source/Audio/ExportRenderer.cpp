@@ -15,12 +15,6 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
     const int64_t totalSamples = arrangement.totalDurationSamples;
     if (totalSamples <= 0) return false;
 
-    // Warn if arrangement is too long for a single AudioBuffer (~12h at 48kHz)
-    if (totalSamples > (int64_t)std::numeric_limits<int>::max())
-    {
-        DBG("Warning: Arrangement exceeds INT_MAX samples. Truncating to " + juce::String(std::numeric_limits<int>::max()) + " samples.");
-    }
-
     const int numChannels = 2;
     const int numSamples  = (int)juce::jmin(totalSamples, (int64_t)std::numeric_limits<int>::max());
 
@@ -49,9 +43,6 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
                                0));
     if (!writer) return false;
 
-    DBG("Export: writer sampleRate=" + juce::String(arrangement.sampleRate)
-        + " totalDurationSamples=" + juce::String(arrangement.totalDurationSamples)
-        + " numEntries=" + juce::String(arrangement.entries.size()));
 
     return writer->writeFromAudioSampleBuffer(output, 0, numSamples);
 }

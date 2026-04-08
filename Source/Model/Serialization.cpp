@@ -61,6 +61,9 @@ juce::var projectToJSON(const Project& project) {
             cObj->setProperty("isSongEnder",        clip->isSongEnder);
             cObj->setProperty("isDone",             clip->isDone);
             cObj->setProperty("gridOffsetSamples",  juce::String(clip->gridOffsetSamples));
+            // markerSampleRate records the SR the marker values are in (= project SR at save time).
+            // On load/undo-restore this lets us compute the correct scale even if project SR changes.
+            cObj->setProperty("markerSampleRate",   project.sampleRate);
             clipsArray.add(juce::var(cObj));
         }
         bObj->setProperty("clips", clipsArray);
@@ -148,24 +151,18 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                         project.missingFilesOnLoad.add(clip->audioFile.getFullPathName());
                     }
 
-                    // Compute scale from saved native SR to current project SR.
-                    // Priority:
-                    // 1. nativeSampleRate field from JSON (if present and > 0)
-                    // 2. clip->nativeSampleRate (if file loaded successfully)
-                    // 3. Fallback to project.sampleRate (scale = 1.0)
-                    double savedNativeSR = 0.0;
-                    if (cVar.hasProperty("nativeSampleRate"))
-                        savedNativeSR = (double)cVar.getProperty("nativeSampleRate", 0.0);
+                    // Compute scale for marker values.
+                    // Markers are always saved in project-sample-space (= markerSampleRate).
+                    // If the project SR has changed since save, we rescale.
+                    // Falls back to 1.0 for old files that lack the markerSampleRate field,
+                    // which is correct because those markers were also in project SR.
+                    double markerSR = cVar.hasProperty("markerSampleRate")
+                                      ? (double)cVar.getProperty("markerSampleRate", project.sampleRate)
+                                      : project.sampleRate;  // no field → assume project SR
+                    if (markerSR <= 0.0) markerSR = project.sampleRate;
 
-                    if (savedNativeSR <= 0.0)
-                        savedNativeSR = clip->nativeSampleRate;
-
-                    if (savedNativeSR <= 0.0)
-                        savedNativeSR = project.sampleRate;
-
-                    double markScale = (savedNativeSR > 0.0 && project.sampleRate > 0.0
-                                        && std::abs(savedNativeSR - project.sampleRate) > 0.5)
-                                       ? project.sampleRate / savedNativeSR
+                    double markScale = (std::abs(markerSR - project.sampleRate) > 0.5)
+                                       ? project.sampleRate / markerSR
                                        : 1.0;
 
                     clip->startMark = (int64_t)(

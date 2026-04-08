@@ -132,6 +132,7 @@ void BlockStrip::changeListenerCallback(juce::ChangeBroadcaster*) {
 
 void BlockStrip::rebuildBlocks() {
     if (!project) return;
+    dragOverIndex = -1;  // stale pointer after rebuild
     contentArea.removeAllChildren();
     blockComponents.clear();
 
@@ -157,6 +158,9 @@ void BlockStrip::rebuildBlocks() {
         };
         bc->onRemoveLinksRequested = [this](const juce::String& id) {
             if (project) project->removeLinksForBlock(id);
+        };
+        bc->onPlayFromHereRequested = [this](const juce::String& id) {
+            if (onPlayFromHereRequested) onPlayFromHereRequested(id);
         };
         bc->setSelected(block->id == selectedBlockId);
         bc->setPlaying(block->id == playingBlockId);
@@ -313,20 +317,94 @@ bool BlockStrip::isInterestedInDragSource(const SourceDetails& details) {
     return details.description.toString().startsWith("block:");
 }
 
-void BlockStrip::itemDropped(const SourceDetails& details) {
-    if (!project) return;
-    auto blockId = details.description.toString().substring(6);
+// ── Drag-over helpers ─────────────────────────────────────────────────────────
 
+juce::Point<int> BlockStrip::toContentPos(juce::Point<int> stripLocal) const {
+    return { stripLocal.x - viewport.getX() + viewport.getViewPositionX() - padding,
+             stripLocal.y - viewport.getY() };
+}
+
+int BlockStrip::blockIndexAtContentPos(juce::Point<int> contentPos) const {
+    for (int i = 0; i < blockComponents.size(); ++i) {
+        const auto bounds = blockComponents[i]->getBounds();
+        if (bounds.contains(contentPos))
+            return i;
+    }
+    return -1;
+}
+
+void BlockStrip::setDragOver(int newIndex) {
+    if (newIndex == dragOverIndex) return;
+    // Clear old highlight
+    if (dragOverIndex >= 0 && dragOverIndex < blockComponents.size())
+        blockComponents[dragOverIndex]->setDragTarget(false);
+    dragOverIndex = newIndex;
+    if (dragOverIndex >= 0 && dragOverIndex < blockComponents.size())
+        blockComponents[dragOverIndex]->setDragTarget(true);
+}
+
+void BlockStrip::itemDragEnter(const SourceDetails& details) {
+    if (!project) return;
+    auto blockId   = details.description.toString().substring(6);
+    auto contentPos = toContentPos(details.localPosition);
+    int  over       = blockIndexAtContentPos(contentPos);
+    // Only highlight if it's a DIFFERENT block (not the one being dragged)
+    if (over >= 0 && over < (int)project->blocks.size() &&
+        project->blocks[over]->id != blockId)
+        setDragOver(over);
+    else
+        setDragOver(-1);
+}
+
+void BlockStrip::itemDragMove(const SourceDetails& details) {
+    itemDragEnter(details);  // same logic
+}
+
+void BlockStrip::itemDragExit(const SourceDetails&) {
+    setDragOver(-1);
+}
+
+void BlockStrip::itemDropped(const SourceDetails& details) {
+    setDragOver(-1);  // clear visual before any model mutation
+    if (!project) return;
+
+    auto blockId = details.description.toString().substring(6);
     int fromIndex = -1;
     for (int i = 0; i < project->blocks.size(); ++i)
         if (project->blocks[i]->id == blockId) { fromIndex = i; break; }
     if (fromIndex < 0) return;
 
-    int localX   = details.localPosition.x;
-    int scrollX  = viewport.getViewPositionX();
-    int contentX = localX - viewport.getX() + scrollX - padding;
-    int toIndex  = juce::jlimit(0, project->blocks.size() - 1,
-                                contentX / (blockW + blockGap));
+    // Check if the drop landed on a different block tile → stack instead of reorder
+    auto contentPos   = toContentPos(details.localPosition);
+    int  overIndex    = blockIndexAtContentPos(contentPos);
+    if (overIndex >= 0 && overIndex != fromIndex &&
+        overIndex < (int)project->blocks.size()) {
+        project->stackBlocks(blockId, project->blocks[overIndex]->id);
+        return;
+    }
+
+    // Reorder: build the slot structure (mirrors resized()) to get a correct toIndex
+    // even when stacked blocks occupy the same horizontal slot.
+    struct SlotInfo { juce::Array<int> indices; };
+    juce::Array<SlotInfo> slots;
+    juce::HashMap<int, int> sgToSlot;
+    for (int i = 0; i < project->blocks.size(); ++i) {
+        int sg = project->blocks[i]->stackGroup;
+        if (sg < 0) {
+            SlotInfo s; s.indices.add(i); slots.add(std::move(s));
+        } else {
+            if (sgToSlot.contains(sg)) {
+                slots.getReference(sgToSlot[sg]).indices.add(i);
+            } else {
+                sgToSlot.set(sg, slots.size());
+                SlotInfo s; s.indices.add(i); slots.add(std::move(s));
+            }
+        }
+    }
+
+    int slotIndex = juce::jlimit(0, slots.size() - 1,
+                                 contentPos.x / (blockW + blockGap));
+    int toIndex   = slots[slotIndex].indices[0];
 
     if (fromIndex != toIndex)
         project->moveBlock(fromIndex, toIndex);

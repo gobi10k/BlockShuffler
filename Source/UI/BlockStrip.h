@@ -25,7 +25,8 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
-    std::function<void(Block*)> onBlockSelected;
+    std::function<void(Block*)>              onBlockSelected;
+    std::function<void(const juce::String&)> onPlayFromHereRequested;
 
     /** Programmatic selection (e.g. on startup or project load). */
     void selectBlock(Block* block);
@@ -43,9 +44,9 @@ public:
     // DragAndDropTarget
     bool isInterestedInDragSource(const SourceDetails& details) override;
     void itemDropped(const SourceDetails& details) override;
-    void itemDragEnter(const SourceDetails&) override {}
-    void itemDragExit(const SourceDetails&) override {}
-    void itemDragMove(const SourceDetails&) override {}
+    void itemDragEnter(const SourceDetails& details) override;
+    void itemDragExit(const SourceDetails& details) override;
+    void itemDragMove(const SourceDetails& details) override;
 
 private:
     Project*          project  = nullptr;
@@ -81,6 +82,9 @@ private:
     // Cache of contentArea-relative centre-X for each block (indexed parallel to project->blocks)
     juce::Array<int> blockCentreXCache;
 
+    // Index (into blockComponents) of the block currently under a drag-to-stack hover; -1 = none
+    int dragOverIndex = -1;
+
     void rebuildBlocks();
     void deleteBlock(const juce::String& blockId);
     void enterLinkMode(const juce::String& fromBlockId);
@@ -88,6 +92,16 @@ private:
     void completePendingMode(const juce::String& targetBlockId);
     void updateOverlay();
     int  blockCentreX(int blockIndex) const;
+
+    /** Returns the contentArea-relative X and Y for a strip-local drag position. */
+    juce::Point<int> toContentPos(juce::Point<int> stripLocal) const;
+
+    /** Returns the block index (into blockComponents/project->blocks) at a contentArea point,
+     *  or -1 if the point is not inside any block tile. */
+    int blockIndexAtContentPos(juce::Point<int> contentPos) const;
+
+    /** Sets the drag-over highlight on the block at dragOverIndex, clearing the previous one. */
+    void setDragOver(int newIndex);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BlockStrip)
 };
