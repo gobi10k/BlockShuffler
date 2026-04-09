@@ -12,6 +12,7 @@ namespace BlockShuffler {
 class ClipRowComponent : public juce::Component {
 public:
     ClipRowComponent(Clip& clip,
+                     double projectSampleRate,
                      std::function<void()> onSelected,
                      std::function<void()> onRepaintNeeded,
                      std::function<void()> onRemoveRequested);
@@ -24,14 +25,15 @@ public:
     void mouseUp(const juce::MouseEvent& e) override;
 
     void setSelected(bool sel);
-    Clip& getClip() { return clip; }
+    Clip* getClip() { return clip.get(); }
 
     static constexpr int headerH   = 24;
     static constexpr int markerHit = 7;
 
 private:
-    Clip& clip;
-    bool  selected = false;
+    juce::WeakReference<Clip> clip;
+    double projectSampleRate = 48000.0;
+    bool   selected = false;
 
     std::function<void()> onSelectedCallback;
     std::function<void()> onRepaintCallback;
@@ -91,7 +93,7 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override;
 
-    void setBlock(Block* block, juce::AudioFormatManager* fmtMgr = nullptr);
+    void setBlock(Block* block, double sampleRate, juce::AudioFormatManager* fmtMgr = nullptr);
     Clip* getSelectedClip() const { return selectedClip; }
 
     /** -1 = hidden; 0.0–1.0 = fraction of total timeline */
@@ -108,9 +110,10 @@ public:
     void paintOverChildren(juce::Graphics& g) override;
 
 private:
-    Block* currentBlock  = nullptr;
+    juce::WeakReference<Block> currentBlock;
     Clip*  selectedClip  = nullptr;
     juce::AudioFormatManager* formatManager = nullptr;
+    double projectSampleRate = 48000.0;
 
     ZoomableViewport viewport;
     juce::Component contentArea;

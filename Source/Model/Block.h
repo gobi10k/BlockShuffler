@@ -20,6 +20,7 @@ public:
           stackPlayMode(StackPlayMode::Sequential),
           isOverlapping(false),
           overlapProbability(0.5f),
+          probability(1.0f),
           isDone(false),
           tempo(120.0) {
         stackPlayCount.values.add(1);
@@ -40,6 +41,7 @@ public:
     // Overlap
     bool isOverlapping;
     float overlapProbability;
+    float probability;     // weight for random selection when in a stack
     // If non-empty, this overlapping block only plays when the selected parent clip
     // is in this list. Empty = play over any parent clip (default / backward-compatible).
     juce::StringArray allowedParentClipIds;
@@ -64,6 +66,12 @@ public:
         sendChangeMessage();
     }
 
+    const Clip* getClipById(const juce::String& clipId) const {
+        for (const auto* c : clips)
+            if (c->id == clipId) return c;
+        return nullptr;
+    }
+
     Clip* getClipById(const juce::String& clipId) {
         for (auto* c : clips)
             if (c->id == clipId) return c;
@@ -71,6 +79,7 @@ public:
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Block)
+    JUCE_DECLARE_WEAK_REFERENCEABLE(Block)
 };
 
 } // namespace BlockShuffler

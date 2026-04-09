@@ -43,9 +43,6 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
                                0));
     if (!writer) return false;
 
-    DBG("Export: writer sampleRate=" + juce::String(arrangement.sampleRate)
-        + " totalDurationSamples=" + juce::String(arrangement.totalDurationSamples)
-        + " numEntries=" + juce::String(arrangement.entries.size()));
 
     return writer->writeFromAudioSampleBuffer(output, 0, numSamples);
 }
@@ -53,20 +50,23 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
 void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
                                const ResolvedEntry& entry)
 {
-    const auto& src  = entry.clip->audioBuffer;
+    if (!entry.audioBuffer) return;
+    const auto& src  = *entry.audioBuffer;
     const int srcCh  = src.getNumChannels();
     const int srcLen = src.getNumSamples();
     const int dstCh  = dest.getNumChannels();
     const int dstLen = dest.getNumSamples();
     if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
 
-    const int64_t startMark = entry.clip->startMark;
-    const int64_t endMark   = entry.clip->endMark;
-    const int64_t bodyLen   = endMark - startMark;
-    const int64_t leadInLen = startMark;
-    const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
-    const int64_t bodyStart = entry.timelinePos;
-    const int64_t bodyEnd   = bodyStart + bodyLen;
+    const int64_t startMark = entry.startMark;
+    const int64_t endMark   = entry.endMark;
+    const int64_t bodyLen    = endMark - startMark;
+    const int64_t leadInLen  = startMark;
+    const int64_t tailLen    = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
+    // New timeline model: timelinePos = lead-in start; body starts at timelinePos + startMark.
+    const int64_t leadInStart = entry.timelinePos;
+    const int64_t bodyStart   = leadInStart + leadInLen;   // = timelinePos + startMark
+    const int64_t bodyEnd     = leadInStart + endMark;     // = timelinePos + endMark
 
     // General 1:1 additive mixer with gain ramp, from any source buffer.
     auto mixBufRange = [&](const juce::AudioBuffer<float>& s,
@@ -108,39 +108,36 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
+    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
+    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
     if (leadInLen > 0)
     {
         if (entry.stretchedLeadIn)
         {
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBufRange(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0, 0.0f, 1.0f);
+            mixBufRange(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0, 0.0f, 1.0f);
+        }
+        else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
+        {
+            // No stretching — source samples [0, leadInLen) map 1:1 to [leadInStart, bodyStart)
+            mixBufRange(src, leadInStart, bodyStart, 0, 0.0f, 1.0f);
         }
         else
         {
+            // Resampled lead-in: source [0, leadInLen) → timeline [leadInStart, leadInStart+leadInTL)
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            int64_t lStart   = bodyStart - leadInTL;
-            int64_t ovStart  = juce::jmax(lStart, (int64_t)0);
-            int64_t ovEnd    = juce::jmin(bodyStart, (int64_t)dstLen);
+            int64_t tlEnd    = leadInStart + leadInTL;
+            int64_t ovStart  = juce::jmax(leadInStart, (int64_t)0);
+            int64_t ovEnd    = juce::jmin(tlEnd, (int64_t)dstLen);
             if (ovStart < ovEnd) {
                 int destOff   = (int)ovStart;
                 int destCount = (int)(ovEnd - ovStart);
-                if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f) {
-                    int srcOff = juce::jmin((int)(ovStart - lStart), srcLen - 1);
-                    int cnt    = juce::jmin(destCount, srcLen - srcOff);
-                    float t0 = (leadInTL>1)?(float)(ovStart-lStart)/(float)(leadInTL-1):0.0f;
-                    float t1 = (leadInTL>1)?(float)(ovEnd-lStart)  /(float)(leadInTL-1):1.0f;
-                    for (int ch=0;ch<juce::jmin(srcCh,dstCh);++ch)
-                        dest.addFromWithRamp(ch,destOff,src.getReadPointer(ch)+srcOff,cnt,t0*entry.gain,t1*entry.gain);
-                    if (srcCh==1&&dstCh>=2)
-                        dest.addFromWithRamp(1,destOff,src.getReadPointer(0)+srcOff,cnt,t0*entry.gain,t1*entry.gain);
-                } else {
-                    double srcAdv = (double)leadInLen/(double)leadInTL;
-                    int srcSliceOff = (int)((double)(ovStart-lStart)*srcAdv);
-                    int srcSliceCnt = juce::jmin((int)((double)destCount*srcAdv+1.5),(int)leadInLen-srcSliceOff);
-                    float t0=(leadInTL>1)?(float)(ovStart-lStart)/(float)(leadInTL-1):0.0f;
-                    float t1=(leadInTL>1)?(float)(ovEnd-lStart)  /(float)(leadInTL-1):1.0f;
-                    TempoStretcher::resampleAdd(src,srcSliceOff,srcSliceCnt,dest,destOff,destCount,t0*entry.gain,t1*entry.gain);
-                }
+                double srcAdv     = (double)leadInLen / (double)leadInTL;
+                int srcSliceOff   = (int)((double)(ovStart - leadInStart) * srcAdv);
+                int srcSliceCnt   = juce::jmin((int)((double)destCount * srcAdv + 1.5), (int)leadInLen - srcSliceOff);
+                float t0 = (leadInTL > 1) ? (float)(ovStart - leadInStart) / (float)(leadInTL - 1) : 0.0f;
+                float t1 = (leadInTL > 1) ? (float)(ovEnd   - leadInStart) / (float)(leadInTL - 1) : 1.0f;
+                TempoStretcher::resampleAdd(src, srcSliceOff, srcSliceCnt, dest, destOff, destCount, t0 * entry.gain, t1 * entry.gain);
             }
         }
     }
@@ -153,7 +150,7 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
     if (tailLen > 0)
     {
         // retainTailTempo=true → always use original clip audio at 1:1.
-        if (entry.clip->retainTailTempo || !entry.stretchedTail)
+        if (entry.retainTailTempo || !entry.stretchedTail)
         {
             mixBufRange(src, bodyEnd, bodyEnd + tailLen, endMark, 1.0f, 0.0f);
         }
@@ -167,7 +164,8 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
 }
 
 bool ExportRenderer::writeClipFlac(const Clip& clip, const juce::File& dest, int bitDepth, double sampleRate) {
-    const auto& buf = clip.audioBuffer;
+    if (!clip.audioBuffer) return false;
+    const auto& buf = *(clip.audioBuffer);
     const int64_t bodyLen = clip.endMark - clip.startMark;
     if (bodyLen <= 0 || buf.getNumSamples() == 0) return false;
 
@@ -199,11 +197,17 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
     if (arrangement.isEmpty()) return false;
 
     // ── 1. Collect unique clips ───────────────────────────────────────────────
-    // Map clip pointer → stable index for naming
-    juce::Array<const Clip*> uniqueClips;
+    // Track unique clips by ID and store their audio buffers for export
+    struct UniqueClipEntry { juce::String id; std::shared_ptr<juce::AudioBuffer<float>> buffer; int64_t start, end; };
+    juce::Array<UniqueClipEntry> uniqueClips;
+
     for (const auto& entry : arrangement.entries) {
-        if (!uniqueClips.contains(entry.clip))
-            uniqueClips.add(entry.clip);
+        bool alreadyFound = false;
+        for (const auto& uc : uniqueClips) {
+            if (uc.id == entry.clipId) { alreadyFound = true; break; }
+        }
+        if (!alreadyFound)
+            uniqueClips.add({entry.clipId, entry.audioBuffer, entry.startMark, entry.endMark});
     }
 
     // ── 2. Write per-clip FLACs to a temp directory ───────────────────────────
@@ -219,17 +223,34 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
     clipMeta.resize(uniqueClips.size());
 
     for (int i = 0; i < uniqueClips.size(); ++i) {
-        const auto* clip = uniqueClips[i];
+        const auto& uc = uniqueClips[i];
         juce::String clipId = "clip_" + juce::String(i + 1).paddedLeft('0', 3);
         juce::String filename = "clips/" + clipId + ".flac";
         auto dest = tmpDir.getChildFile(filename);
 
-        if (!writeClipFlac(*clip, dest, bitDepth, arrangement.sampleRate)) {
+        const int numCh  = uc.buffer ? juce::jmax(1, uc.buffer->getNumChannels()) : 1;
+        const int srcLen = uc.buffer ? uc.buffer->getNumSamples() : 0;
+        const int start  = (int)juce::jlimit((int64_t)0, (int64_t)juce::jmax(0, srcLen - 1), uc.start);
+        const int count  = (int)juce::jmin(uc.end - uc.start, (int64_t)juce::jmax(0, srcLen - start));
+
+        bool writeOk = false;
+        if (uc.buffer && count > 0) {
+            dest.deleteFile();
+            auto outStream = dest.createOutputStream();
+            if (outStream) {
+                juce::FlacAudioFormat flac;
+                std::unique_ptr<juce::AudioFormatWriter> writer(
+                    flac.createWriterFor(outStream.release(), arrangement.sampleRate, (unsigned)numCh, bitDepth, {}, 0));
+                if (writer) writeOk = writer->writeFromAudioSampleBuffer(*(uc.buffer), start, count);
+            }
+        }
+
+        if (!writeOk) {
             tmpDir.deleteRecursively();
             return false;
         }
 
-        clipMeta.set(i, { clipId, filename, clip->endMark - clip->startMark });
+        clipMeta.set(i, { clipId, filename, uc.end - uc.start });
 
         if (progress)
             progress(0.5f * (float)(i + 1) / (float)uniqueClips.size());
@@ -256,8 +277,12 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
 
     juce::Array<juce::var> arrangementArray;
     for (const auto& entry : arrangement.entries) {
-        int idx = uniqueClips.indexOf(entry.clip);
+        int idx = -1;
+        for (int k = 0; k < uniqueClips.size(); ++k) {
+            if (uniqueClips[k].id == entry.clipId) { idx = k; break; }
+        }
         if (idx < 0) continue;
+
         auto* a = new juce::DynamicObject();
         a->setProperty("clipId",    clipMeta[idx].id);
         a->setProperty("startTime", juce::String(entry.timelinePos));
@@ -278,7 +303,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
         // Map Clip UUID → embedded BSF filename for clips in this resolution
         std::unordered_map<std::string, std::string> clipUuidToEmbedded;
         for (int i = 0; i < uniqueClips.size(); ++i)
-            clipUuidToEmbedded[uniqueClips[i]->id.toStdString()]
+            clipUuidToEmbedded[uniqueClips[i].id.toStdString()]
                 = clipMeta[i].filename.toStdString();
 
         auto* model = new juce::DynamicObject();
