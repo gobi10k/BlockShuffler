@@ -17,7 +17,8 @@ public:
                    std::function<void(const juce::String&)> onDeleteRequested,
                    std::function<void()>                    onMutated,
                    std::function<void(const juce::String&)> onLinkRequested,
-                   std::function<void(const juce::String&)> onStackRequested);
+                   std::function<void(const juce::String&)> onStackRequested,
+                   std::function<void(const juce::String&)> onUnstackRequested);
     ~BlockComponent() override = default;
 
     void paint(juce::Graphics& g) override;

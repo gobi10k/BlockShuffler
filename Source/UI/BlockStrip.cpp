@@ -428,13 +428,6 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
 
     // CASE A: Dragged OFF a stack into a new slot position
     if (draggedBlock->stackGroup >= 0 && targetSlotIndex != currentSlotIndex) {
-        auto pre = project->toJSON();
-        // Unstack first
-        draggedBlock->stackGroup = -1;
-        project->cleanupStackGroups();
-
-        // Determine new fromIndex and toIndex for moveBlock
-        // Re-fetch project state for the move (or just perform it manually)
         int newToIdx = 0;
         if (targetSlotIndex >= slots.size()) {
             newToIdx = project->blocks.size() - 1;
@@ -442,13 +435,7 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
             newToIdx = slots[targetSlotIndex].indices[0];
         }
 
-        // We perform the mutation manually here to keep it in a single undo transaction
-        project->blocks.move(fromIndex, newToIdx);
-        for (int i = 0; i < project->blocks.size(); ++i)
-            project->blocks[i]->position = i;
-
-        // Project handles group cleanup and undo recording
-        project->applyExternalMutation(pre);
+        project->unstackAndMoveBlock(fromIndex, newToIdx);
         return;
     }
 

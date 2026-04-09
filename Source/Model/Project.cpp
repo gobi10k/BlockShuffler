@@ -117,6 +117,21 @@ void Project::moveBlock(int fromIndex, int toIndex) {
     recordMutation(pre);
 }
 
+void Project::unstackAndMoveBlock(int fromIndex, int toIndex) {
+    if (fromIndex < 0 || fromIndex >= blocks.size()) return;
+    if (toIndex < 0 || toIndex >= blocks.size()) return;
+
+    auto pre = toJSON();
+    blocks[fromIndex]->stackGroup = -1;
+    blocks.move(fromIndex, toIndex);
+    for (int i = 0; i < blocks.size(); ++i)
+        blocks[i]->position = i;
+
+    cleanupStackGroups();
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
 void Project::propagateStackSettings(int stackGroup) {
     if (stackGroup < 0) return;
     Block* source = nullptr;

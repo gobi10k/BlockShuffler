@@ -28,6 +28,7 @@ public:
     Block* addBlock(const juce::String& name = "New Block");
     void   removeBlock(const juce::String& blockId);
     void   moveBlock(int fromIndex, int toIndex);
+    void   unstackAndMoveBlock(int fromIndex, int toIndex);
     void   stackBlocks(const juce::String& blockIdA, const juce::String& blockIdB);
     void   unstackBlock(const juce::String& blockId);
     void   cleanupStackGroups();
