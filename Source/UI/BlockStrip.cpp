@@ -399,13 +399,16 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
     for (int s = 0; s < slots.size(); ++s)
         if (slots[s].indices.contains(fromIndex)) { fromSlot = s; break; }
 
-    int dropSlot = juce::jlimit(0, slots.size() - 1,
-                                contentPos.x / (blockW + blockGap));
+    // Use pixel bounds of the source slot rather than a clamped slot index.
+    // When all blocks share one stack (1 slot total), jlimit would always return
+    // fromSlot, making droppedInDiffSlot permanently false.
+    int slotLeft = fromSlot * (blockW + blockGap);
+    int slotRight = slotLeft + blockW;
+    bool droppedInDiffSlot = (contentPos.x < slotLeft || contentPos.x >= slotRight);
 
     auto* draggedBlock      = project->blocks[fromIndex];
     bool draggedIsStacked   = (draggedBlock->stackGroup >= 0);
     bool droppedOnDiffBlock = (overIndex >= 0 && overIndex != fromIndex);
-    bool droppedInDiffSlot  = (dropSlot != fromSlot);
 
     if (draggedIsStacked && droppedInDiffSlot) {
         // CASE 3: stacked block dragged to a different slot → unstack first,
@@ -437,8 +440,17 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
             }
             project->propagateStackSettings(draggedBlock->stackGroup);
         } else {
-            // Move to the new slot using the pre-mutation slot structure for index lookup
-            int toIndex = slots[dropSlot].indices[0];
+            // Move to position indicated by raw drop X using the pre-mutation slot list.
+            // rawSlot may be out of [0, slots.size()) — handle both edges explicitly.
+            int rawSlot = contentPos.x / (blockW + blockGap);
+            int toIndex;
+            if (contentPos.x < 0) {
+                toIndex = 0;
+            } else if (rawSlot >= slots.size()) {
+                toIndex = project->blocks.size() - 1;
+            } else {
+                toIndex = slots[rawSlot].indices[0];
+            }
             if (fromIndex != toIndex) {
                 project->blocks.move(fromIndex, toIndex);
                 for (int i = 0; i < project->blocks.size(); ++i)
@@ -454,6 +466,8 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
 
     } else {
         // CASE 2 / plain reorder: same slot or no block under cursor
+        int dropSlot = juce::jlimit(0, slots.size() - 1,
+                                    contentPos.x / (blockW + blockGap));
         int toIndex = slots[dropSlot].indices[0];
         if (fromIndex != toIndex)
             project->moveBlock(fromIndex, toIndex);
