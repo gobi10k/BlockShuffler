@@ -97,6 +97,7 @@ public:
         }
 
         void timerCallback() override {
+            engine.collectGarbage();
             if (mainComponent) mainComponent->updateTimeDisplay();
         }
 

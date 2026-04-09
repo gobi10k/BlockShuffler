@@ -14,13 +14,12 @@ struct ResolvedEntry {
     int64_t      startMark;
     int64_t      endMark;
     bool         retainTailTempo;
-    juce::String clipName;
-    juce::String clipId;
+    std::string  clipId;
 
     int64_t      timelinePos;         // output timeline sample where lead-in starts (= body-end of previous entry).
                                      // Body starts at timelinePos + startMark; tail starts at timelinePos + endMark.
     float        gain;                // mixing gain (1.0 for solo clips, <1.0 for simultaneous layers)
-    juce::String blockId;             // id of the Block that produced this entry
+    std::string  blockId;             // id of the Block that produced this entry
 
     bool         isOverlay = false;  // true = overlapping block, layers on top of primary entry
 

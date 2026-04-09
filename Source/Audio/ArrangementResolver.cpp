@@ -98,7 +98,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 for (int i = result.entries.size() - 1; i >= 0; --i)
                 {
                     const auto& e = result.entries.getReference(i);
-                    auto it = blockById.find(e.blockId.toStdString());
+                    auto it = blockById.find(e.blockId);
                     bool isOver = (it != blockById.end() && it->second->isOverlapping);
                     if (!isOver) { overlayStart = e.timelinePos; break; }
                 }
@@ -115,8 +115,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                 result.entries.add({
                                     oc->audioBuffer,
                                     oc->startMark, oc->endMark, oc->retainTailTempo,
-                                    oc->name, oc->id,
-                                    overlayStart, 1.0f, ob->id, true
+                                    oc->id.toStdString(),
+                                    overlayStart, 1.0f, ob->id.toStdString(), true
                                 });
                             }
                         }
@@ -138,8 +138,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             result.entries.add({
                 clip->audioBuffer,
                 clip->startMark, clip->endMark, clip->retainTailTempo,
-                clip->name, clip->id,
-                cursor, 1.0f, block->id
+                clip->id.toStdString(),
+                cursor, 1.0f, block->id.toStdString()
             });
             // Advance cursor by endMark (= startMark + bodyLen) so that the NEXT
             // block's lead-in starts at this block's body-end (= tail start).
@@ -200,8 +200,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     result.entries.add({
                         clip->audioBuffer,
                         clip->startMark, clip->endMark, clip->retainTailTempo,
-                        clip->name, clip->id,
-                        slotStart, stackGain, b->id
+                        clip->id.toStdString(),
+                        slotStart, stackGain, b->id.toStdString()
                     });
                     maxEndMark = std::max(maxEndMark, (int64_t)clip->endMark);
                     simultaneousClips.add(clip);
@@ -226,8 +226,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                             result.entries.add({
                                 clip->audioBuffer,
                                 clip->startMark, clip->endMark, clip->retainTailTempo,
-                                clip->name, clip->id,
-                                slotStart, 1.0f, ob->id, true
+                                clip->id.toStdString(),
+                                slotStart, 1.0f, ob->id.toStdString(), true
                             });
                         }
                     }
@@ -249,8 +249,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     result.entries.add({
                         clip->audioBuffer,
                         clip->startMark, clip->endMark, clip->retainTailTempo,
-                        clip->name, clip->id,
-                        entryStart, 1.0f, b->id
+                        clip->id.toStdString(),
+                        entryStart, 1.0f, b->id.toStdString()
                     });
                     cursor += clip->endMark;  // advance by endMark so next lead-in overlaps at tail start
 
@@ -270,8 +270,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                 result.entries.add({
                                     oc->audioBuffer,
                                     oc->startMark, oc->endMark, oc->retainTailTempo,
-                                    oc->name, oc->id,
-                                    entryStart, 1.0f, ob->id, true
+                                    oc->id.toStdString(),
+                                    entryStart, 1.0f, ob->id.toStdString(), true
                                 });
                             }
                         }
@@ -290,7 +290,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         std::vector<int> primary;
         for (int i = 0; i < result.entries.size(); ++i) {
             const auto& e = result.entries.getReference(i);
-            auto it = blockById.find(e.blockId.toStdString());
+            auto it = blockById.find(e.blockId);
             if (it != blockById.end() && !it->second->isOverlapping)
                 primary.push_back(i);
         }
@@ -313,8 +313,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             // inside resolve().
 
             // Actually, we can get tempos from the project during resolve()
-            auto* bA = blockById.find(entA.blockId.toStdString())->second;
-            auto* bB = blockById.find(entB.blockId.toStdString())->second;
+            auto* bA = blockById.find(entA.blockId)->second;
+            auto* bB = blockById.find(entB.blockId)->second;
             const Clip* cA = bA->getClipById(entA.clipId);
             const Clip* cB = bB->getClipById(entB.clipId);
 
@@ -363,7 +363,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         int lastIdx = result.entries.size() - 1;
         for (int i = result.entries.size() - 1; i >= 0; --i) {
             const auto& e = result.entries.getReference(i);
-            auto it = blockById.find(e.blockId.toStdString());
+            auto it = blockById.find(e.blockId);
             bool isOver = (it != blockById.end() && it->second->isOverlapping);
             if (!isOver) { lastIdx = i; break; }
         }

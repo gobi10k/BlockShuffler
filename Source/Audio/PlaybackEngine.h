@@ -26,6 +26,9 @@ public:
     // UI-thread transport controls
     void play(ResolvedArrangement arrangement);
     void stop();
+
+    /** Reclaims memory from old arrangements on the UI thread. */
+    void collectGarbage();
     void rewind();
     /** Seek to a position expressed in project samples (converts to hardware samples internally). */
     void seekTo(int64_t projectSample);
@@ -38,6 +41,7 @@ public:
 private:
     juce::CriticalSection arrangementLock;
     std::shared_ptr<const ResolvedArrangement> activeArrangement;
+    std::shared_ptr<const ResolvedArrangement> arrangementToRelease;
 
     std::atomic<bool>    playing    { false };
     std::atomic<int64_t> playheadSamples { 0 };

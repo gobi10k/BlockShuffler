@@ -348,7 +348,7 @@ void MainComponent::updateTimeDisplay() {
         // With the current timeline model: timelinePos = lead-in start,
         // body occupies [timelinePos + startMark, timelinePos + endMark).
         int64_t headSamples = (int64_t)(current * currentArrangement.sampleRate);
-        juce::String nowPlayingId;
+        std::string nowPlayingId;
         for (const auto& entry : currentArrangement.entries) {
             int64_t bodyStart = entry.timelinePos + entry.startMark;
             int64_t bodyEnd   = entry.timelinePos + entry.endMark;
@@ -357,7 +357,7 @@ void MainComponent::updateTimeDisplay() {
                 break;
             }
         }
-        blockStrip.setPlayingBlock(nowPlayingId);
+        blockStrip.setPlayingBlock(juce::String(nowPlayingId));
     }
 
     float fraction = (total > 0.0) ? (float)(current / total) : 0.0f;

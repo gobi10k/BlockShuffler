@@ -17,7 +17,8 @@ void PlaybackEngine::play(ResolvedArrangement newArr) {
     auto next = std::make_shared<const ResolvedArrangement>(std::move(newArr));
     {
         juce::ScopedLock sl(arrangementLock);
-        activeArrangement = next;
+        arrangementToRelease = std::move(activeArrangement);
+        activeArrangement = std::move(next);
     }
     playheadSamples.store(0);
     playing.store(true);
@@ -25,6 +26,11 @@ void PlaybackEngine::play(ResolvedArrangement newArr) {
 
 void PlaybackEngine::stop() {
     playing.store(false);
+}
+
+void PlaybackEngine::collectGarbage() {
+    juce::ScopedLock sl(arrangementLock);
+    arrangementToRelease.reset();
 }
 
 void PlaybackEngine::rewind() {
@@ -74,7 +80,10 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
         arrangementLock.exit();
     }
 
-    if (!current || current->isEmpty()) return;
+    if (!current || current->isEmpty()) {
+        current.reset(); // Release ref before UI-thread lock might fire
+        return;
+    }
 
     int64_t head = playheadSamples.load();
     const double pToH = (current && current->sampleRate > 0.0 && outputSampleRate > 0.0)
@@ -84,6 +93,13 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
 
     for (int entryIndex = 0; entryIndex < current->entries.size(); ++entryIndex) {
         const auto& entry = current->entries.getReference(entryIndex);
+
+        // Early exit: since entries are roughly chronological by timelinePos,
+        // we can stop if the entry's start is beyond our current block.
+        // We add a safety margin of 2 seconds (project samples) for tails/overlaps.
+        if (entry.timelinePos > (int64_t)((double)(head + numSamples) * pToH + 2.0 * current->sampleRate))
+            break;
+
         const int64_t bodyLen   = entry.endMark - entry.startMark;
         const int64_t leadInLen = entry.startMark;
         const int64_t tailLen   = (entry.audioBuffer) ? juce::jmax((int64_t)0,
@@ -114,6 +130,8 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
         playing.store(false);
         playheadSamples.store(totalH);
     }
+
+    current.reset(); // Release ref before audio thread finishes
 }
 
 void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,

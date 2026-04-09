@@ -204,10 +204,10 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
     for (const auto& entry : arrangement.entries) {
         bool alreadyFound = false;
         for (const auto& uc : uniqueClips) {
-            if (uc.id == entry.clipId) { alreadyFound = true; break; }
+            if (uc.id == juce::String(entry.clipId)) { alreadyFound = true; break; }
         }
         if (!alreadyFound)
-            uniqueClips.add({entry.clipId, entry.audioBuffer, entry.startMark, entry.endMark});
+            uniqueClips.add({juce::String(entry.clipId), entry.audioBuffer, entry.startMark, entry.endMark});
     }
 
     // ── 2. Write per-clip FLACs to a temp directory ───────────────────────────
@@ -279,7 +279,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
     for (const auto& entry : arrangement.entries) {
         int idx = -1;
         for (int k = 0; k < uniqueClips.size(); ++k) {
-            if (uniqueClips[k].id == entry.clipId) { idx = k; break; }
+            if (uniqueClips[k].id == juce::String(entry.clipId)) { idx = k; break; }
         }
         if (idx < 0) continue;
 
