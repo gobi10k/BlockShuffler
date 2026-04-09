@@ -365,7 +365,7 @@ void BlockStrip::itemDragExit(const SourceDetails&) {
 }
 
 void BlockStrip::itemDropped(const SourceDetails& details) {
-    setDragOver(-1);  // clear visual before any model mutation
+    setDragOver(-1);
     if (!project) return;
 
     auto blockId = details.description.toString().substring(6);
@@ -374,17 +374,10 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
         if (project->blocks[i]->id == blockId) { fromIndex = i; break; }
     if (fromIndex < 0) return;
 
-    // Check if the drop landed on a different block tile → stack instead of reorder
-    auto contentPos   = toContentPos(details.localPosition);
-    int  overIndex    = blockIndexAtContentPos(contentPos);
-    if (overIndex >= 0 && overIndex != fromIndex &&
-        overIndex < (int)project->blocks.size()) {
-        project->stackBlocks(blockId, project->blocks[overIndex]->id);
-        return;
-    }
+    auto contentPos = toContentPos(details.localPosition);
+    int  overIndex  = blockIndexAtContentPos(contentPos);
 
-    // Reorder: build the slot structure (mirrors resized()) to get a correct toIndex
-    // even when stacked blocks occupy the same horizontal slot.
+    // Build slot structure (mirrors resized()) — needed for all three cases.
     struct SlotInfo { juce::Array<int> indices; };
     juce::Array<SlotInfo> slots;
     juce::HashMap<int, int> sgToSlot;
@@ -402,12 +395,69 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
         }
     }
 
-    int slotIndex = juce::jlimit(0, slots.size() - 1,
-                                 contentPos.x / (blockW + blockGap));
-    int toIndex   = slots[slotIndex].indices[0];
+    int fromSlot = -1;
+    for (int s = 0; s < slots.size(); ++s)
+        if (slots[s].indices.contains(fromIndex)) { fromSlot = s; break; }
 
-    if (fromIndex != toIndex)
-        project->moveBlock(fromIndex, toIndex);
+    int dropSlot = juce::jlimit(0, slots.size() - 1,
+                                contentPos.x / (blockW + blockGap));
+
+    auto* draggedBlock      = project->blocks[fromIndex];
+    bool draggedIsStacked   = (draggedBlock->stackGroup >= 0);
+    bool droppedOnDiffBlock = (overIndex >= 0 && overIndex != fromIndex);
+    bool droppedInDiffSlot  = (dropSlot != fromSlot);
+
+    if (draggedIsStacked && droppedInDiffSlot) {
+        // CASE 3: stacked block dragged to a different slot → unstack first,
+        // then optionally re-stack (if dropped on another block) or plain-move.
+        auto pre = project->toJSON();
+
+        int oldGroup = draggedBlock->stackGroup;
+        draggedBlock->stackGroup = -1;
+
+        // Dissolve old stack if ≤1 block remains in it
+        int remaining = 0;
+        for (auto* b : project->blocks)
+            if (b->stackGroup == oldGroup) ++remaining;
+        if (remaining <= 1)
+            for (auto* b : project->blocks)
+                if (b->stackGroup == oldGroup) b->stackGroup = -1;
+
+        if (droppedOnDiffBlock) {
+            // Re-stack with the block under the cursor
+            auto* targetBlock = project->blocks[overIndex];
+            if (targetBlock->stackGroup >= 0) {
+                draggedBlock->stackGroup = targetBlock->stackGroup;
+            } else {
+                int maxGroup = -1;
+                for (auto* b : project->blocks)
+                    maxGroup = juce::jmax(maxGroup, b->stackGroup);
+                draggedBlock->stackGroup = maxGroup + 1;
+                targetBlock->stackGroup  = maxGroup + 1;
+            }
+            project->propagateStackSettings(draggedBlock->stackGroup);
+        } else {
+            // Move to the new slot using the pre-mutation slot structure for index lookup
+            int toIndex = slots[dropSlot].indices[0];
+            if (fromIndex != toIndex) {
+                project->blocks.move(fromIndex, toIndex);
+                for (int i = 0; i < project->blocks.size(); ++i)
+                    project->blocks[i]->position = i;
+            }
+        }
+
+        project->applyExternalMutation(pre);
+
+    } else if (!draggedIsStacked && droppedOnDiffBlock) {
+        // CASE 1: non-stacked block dropped onto a different block → stack
+        project->stackBlocks(blockId, project->blocks[overIndex]->id);
+
+    } else {
+        // CASE 2 / plain reorder: same slot or no block under cursor
+        int toIndex = slots[dropSlot].indices[0];
+        if (fromIndex != toIndex)
+            project->moveBlock(fromIndex, toIndex);
+    }
 }
 
 } // namespace BlockShuffler
