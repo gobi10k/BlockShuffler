@@ -98,6 +98,7 @@ void Project::removeBlock(const juce::String& blockId) {
             blocks.remove(i);
             for (int j = 0; j < blocks.size(); ++j)
                 blocks[j]->position = j;
+            cleanupStackGroups();
             sendChangeMessage();
             recordMutation(pre);
             return;
@@ -141,6 +142,7 @@ void Project::stackBlocks(const juce::String& blockIdA, const juce::String& bloc
     auto* a = getBlockById(blockIdA);
     auto* b = getBlockById(blockIdB);
     if (a == nullptr || b == nullptr) return;
+    if (a->stackGroup >= 0 && a->stackGroup == b->stackGroup) return;
 
     auto pre = toJSON();
     if (a->stackGroup >= 0) {
@@ -154,9 +156,36 @@ void Project::stackBlocks(const juce::String& blockIdA, const juce::String& bloc
         a->stackGroup = maxGroup + 1;
         b->stackGroup = maxGroup + 1;
     }
+    cleanupStackGroups();
     propagateStackSettings(a->stackGroup);
     sendChangeMessage();
     recordMutation(pre);
+}
+
+void Project::unstackBlock(const juce::String& blockId) {
+    auto* b = getBlockById(blockId);
+    if (b == nullptr || b->stackGroup < 0) return;
+
+    auto pre = toJSON();
+    b->stackGroup = -1;
+    cleanupStackGroups();
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
+void Project::cleanupStackGroups() {
+    juce::HashMap<int, int> groupCounts;
+    for (auto* b : blocks) {
+        if (b->stackGroup >= 0) {
+            groupCounts.set(b->stackGroup, groupCounts[b->stackGroup] + 1);
+        }
+    }
+
+    for (auto* b : blocks) {
+        if (b->stackGroup >= 0 && groupCounts[b->stackGroup] < 2) {
+            b->stackGroup = -1;
+        }
+    }
 }
 
 BlockLink* Project::addLink(const juce::String& blockA, const juce::String& blockB, float probability, bool sendNotification) {

@@ -149,7 +149,8 @@ void BlockStrip::rebuildBlocks() {
             [this](const juce::String& id) { deleteBlock(id); },
             [this] { repaint(); },
             [this](const juce::String& id) { enterLinkMode(id); },
-            [this](const juce::String& id) { enterStackMode(id); }
+            [this](const juce::String& id) { enterStackMode(id); },
+            [this](const juce::String& id) { if (project) project->unstackBlock(id); }
         ));
         // Wire undo callbacks so context-menu changes are undoable
         bc->onCaptureSnapshot  = [this] { return project ? project->toJSON() : juce::var{}; };
@@ -374,37 +375,100 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
         if (project->blocks[i]->id == blockId) { fromIndex = i; break; }
     if (fromIndex < 0) return;
 
-    // Check if the drop landed on a different block tile → stack instead of reorder
-    auto contentPos   = toContentPos(details.localPosition);
-    int  overIndex    = blockIndexAtContentPos(contentPos);
-    if (overIndex >= 0 && overIndex != fromIndex &&
-        overIndex < (int)project->blocks.size()) {
+    auto* draggedBlock = project->blocks[fromIndex];
+    auto contentPos = toContentPos(details.localPosition);
+    int overIndex   = blockIndexAtContentPos(contentPos);
+
+    // 1. Check if the drop landed on a different block tile → stack
+    if (overIndex >= 0 && overIndex != fromIndex && overIndex < project->blocks.size()) {
         project->stackBlocks(blockId, project->blocks[overIndex]->id);
         return;
     }
 
-    // Reorder: build the slot structure (mirrors resized()) to get a correct toIndex
-    // even when stacked blocks occupy the same horizontal slot.
-    struct SlotInfo { juce::Array<int> indices; };
+    // 2. Reorder or Unstack: build the slot structure to determine target slot
+    struct SlotInfo { juce::Array<int> indices; int x; };
     juce::Array<SlotInfo> slots;
     juce::HashMap<int, int> sgToSlot;
     for (int i = 0; i < project->blocks.size(); ++i) {
         int sg = project->blocks[i]->stackGroup;
         if (sg < 0) {
-            SlotInfo s; s.indices.add(i); slots.add(std::move(s));
+            slots.add({ {i}, 0 });
         } else {
-            if (sgToSlot.contains(sg)) {
+            if (sgToSlot.contains(sg))
                 slots.getReference(sgToSlot[sg]).indices.add(i);
-            } else {
+            else {
                 sgToSlot.set(sg, slots.size());
-                SlotInfo s; s.indices.add(i); slots.add(std::move(s));
+                slots.add({ {i}, 0 });
             }
         }
     }
 
-    int slotIndex = juce::jlimit(0, slots.size() - 1,
-                                 contentPos.x / (blockW + blockGap));
-    int toIndex   = slots[slotIndex].indices[0];
+    // Assign x coordinates to slots for distance-based drop targeting
+    for (int i = 0; i < slots.size(); ++i)
+        slots.getReference(i).x = i * (blockW + blockGap);
+
+    int dropX = contentPos.x;
+    int targetSlotIndex = -1;
+
+    // Find the slot index based on X position. If it's far to the right, target the end.
+    if (dropX > slots.getLast().x + blockW) {
+        targetSlotIndex = slots.size();
+    } else {
+        targetSlotIndex = juce::jlimit(0, slots.size() - 1, dropX / (blockW + blockGap));
+    }
+
+    // Find which slot the block is CURRENTLY in
+    int currentSlotIndex = -1;
+    for (int i = 0; i < slots.size(); ++i) {
+        if (slots[i].indices.contains(fromIndex)) {
+            currentSlotIndex = i;
+            break;
+        }
+    }
+
+    // CASE A: Dragged OFF a stack into a new slot position
+    if (draggedBlock->stackGroup >= 0 && targetSlotIndex != currentSlotIndex) {
+        auto pre = project->toJSON();
+        // Unstack first
+        draggedBlock->stackGroup = -1;
+        project->cleanupStackGroups();
+
+        // Determine new fromIndex and toIndex for moveBlock
+        // Re-fetch project state for the move (or just perform it manually)
+        int newToIdx = 0;
+        if (targetSlotIndex >= slots.size()) {
+            newToIdx = project->blocks.size() - 1;
+        } else {
+            newToIdx = slots[targetSlotIndex].indices[0];
+        }
+
+        // We perform the mutation manually here to keep it in a single undo transaction
+        project->blocks.move(fromIndex, newToIdx);
+        for (int i = 0; i < project->blocks.size(); ++i)
+            project->blocks[i]->position = i;
+
+        // Project handles group cleanup and undo recording
+        project->applyExternalMutation(pre);
+        return;
+    }
+
+    // CASE B: Reorder (including vertical reordering within a stack)
+    int toIndex = -1;
+    if (targetSlotIndex >= slots.size()) {
+        toIndex = project->blocks.size() - 1;
+    } else if (targetSlotIndex == currentSlotIndex) {
+        // Vertical reordering within the same stack
+        const auto& indices = slots[targetSlotIndex].indices;
+        int n = indices.size();
+        int totalGaps = (n - 1) * 2;
+        int perH      = (getHeight() - totalGaps) / n;
+        int startY    = (getHeight() - (perH * n + totalGaps)) / 2;
+
+        int subIdx = juce::jlimit(0, n - 1, (contentPos.y - startY) / (perH + 2));
+        toIndex = indices[subIdx];
+    } else {
+        toIndex = slots[targetSlotIndex].indices[0];
+    }
 
     if (fromIndex != toIndex)
         project->moveBlock(fromIndex, toIndex);

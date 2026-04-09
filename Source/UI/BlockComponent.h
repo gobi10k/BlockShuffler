@@ -45,6 +45,7 @@ private:
     std::function<void()>                    onMutated;          ///< visual-only repaint
     std::function<void(const juce::String&)> onLinkRequested;
     std::function<void(const juce::String&)> onStackRequested;
+    std::function<void(const juce::String&)> onUnstackRequested;
 
 public:
     /// Called just before a context-menu action changes the model — returns a project snapshot.

@@ -29,6 +29,8 @@ public:
     void   removeBlock(const juce::String& blockId);
     void   moveBlock(int fromIndex, int toIndex);
     void   stackBlocks(const juce::String& blockIdA, const juce::String& blockIdB);
+    void   unstackBlock(const juce::String& blockId);
+    void   cleanupStackGroups();
     Block* getBlockById(const juce::String& blockId);
 
     /** Copies stackPlayCount and stackPlayMode from the first block in the group to all others.
