@@ -51,8 +51,9 @@ struct TempoStretcher
             window[(size_t)i] = 0.5f * (1.0f - std::cos(
                 2.0f * 3.14159265358979323846f * (float)i / (float)(frameSize - 1)));
 
-        // Windowed tail of previously placed frame (ch0, for correlation)
-        std::vector<float> prevOverlap((size_t)juce::jmax(1, overlapLen), 0.0f);
+        // Windowed tail of previously placed frame for correlation (all channels)
+        juce::AudioBuffer<float> prevOverlap(numCh, juce::jmax(1, overlapLen));
+        prevOverlap.clear();
         bool havePrev = false;
 
         int nominalPos  = srcStart;
@@ -67,23 +68,37 @@ struct TempoStretcher
             if (havePrev && overlapLen > 0)
             {
                 float bestCorr = -1.0e30f;
-                for (int delta = -searchRange; delta <= searchRange; ++delta)
+                float na = 0.0f;
+                for (int ch = 0; ch < numCh; ++ch)
                 {
-                    int testPos = nominalPos + delta;
-                    if (testPos < 0 || testPos + overlapLen > srcLen) continue;
-
-                    const float* rd = src.getReadPointer(0) + testPos;
-                    float corr = 0.0f, na = 0.0f, nb = 0.0f;
+                    const float* po = prevOverlap.getReadPointer(ch);
                     for (int k = 0; k < overlapLen; ++k)
-                    {
-                        corr += prevOverlap[(size_t)k] * rd[k];
-                        na   += prevOverlap[(size_t)k] * prevOverlap[(size_t)k];
-                        nb   += rd[k] * rd[k];
-                    }
-                    float norm = std::sqrt(na * nb);
-                    if (norm > 1.0e-10f) corr /= norm;
+                        na += po[k] * po[k];
+                }
 
-                    if (corr > bestCorr) { bestCorr = corr; actualPos = testPos; }
+                if (na > 1.0e-10f)
+                {
+                    for (int delta = -searchRange; delta <= searchRange; ++delta)
+                    {
+                        int testPos = nominalPos + delta;
+                        if (testPos < 0 || testPos + overlapLen > srcLen) continue;
+
+                        float corr = 0.0f, nb = 0.0f;
+                        for (int ch = 0; ch < numCh; ++ch)
+                        {
+                            const float* rd = src.getReadPointer(ch) + testPos;
+                            const float* po = prevOverlap.getReadPointer(ch);
+                            for (int k = 0; k < overlapLen; ++k)
+                            {
+                                corr += po[k] * rd[k];
+                                nb   += rd[k] * rd[k];
+                            }
+                        }
+                        float norm = std::sqrt(na * nb);
+                        if (norm > 1.0e-10f) corr /= norm;
+
+                        if (corr > bestCorr) { bestCorr = corr; actualPos = testPos; }
+                    }
                 }
             }
 
@@ -114,10 +129,15 @@ struct TempoStretcher
             {
                 int tailStart = actualPos + analysisHop;
                 int tailCount = juce::jmin(overlapLen, juce::jmax(0, srcLen - tailStart));
-                for (int k = 0; k < tailCount; ++k)
-                    prevOverlap[(size_t)k] = src.getReadPointer(0)[tailStart + k] * window[(size_t)(analysisHop + k)];
-                for (int k = tailCount; k < overlapLen; ++k)
-                    prevOverlap[(size_t)k] = 0.0f;
+                for (int ch = 0; ch < numCh; ++ch)
+                {
+                    const float* rd = src.getReadPointer(ch);
+                    float* po = prevOverlap.getWritePointer(ch);
+                    for (int k = 0; k < tailCount; ++k)
+                        po[k] = rd[tailStart + k] * window[(size_t)(analysisHop + k)];
+                    for (int k = tailCount; k < overlapLen; ++k)
+                        po[k] = 0.0f;
+                }
                 havePrev = true;
             }
 
@@ -144,13 +164,13 @@ struct TempoStretcher
      * source advance per output sample = 1 / stretchRatio
      */
     static void resampleAdd(const juce::AudioBuffer<float>& src,
-                            int srcStart,  int srcSamples,
+                            double srcStart,  double srcSamples,
                             juce::AudioBuffer<float>& dest,
                             int destStart, int destSamples,
                             float gainStart = 1.0f,
                             float gainEnd   = 1.0f)
     {
-        if (srcSamples <= 0 || destSamples <= 0) return;
+        if (srcSamples <= 0.0 || destSamples <= 0) return;
 
         const int srcLen  = src.getNumSamples();
         const int destLen = dest.getNumSamples();
@@ -162,7 +182,7 @@ struct TempoStretcher
         int dEnd   = juce::jmin(destLen, destStart + destSamples);
         if (dStart >= dEnd) return;
 
-        const double advance = (double)srcSamples / (double)destSamples;
+        const double advance = srcSamples / (double)destSamples;
         const int    mixCh   = juce::jmin(srcCh, destCh);
         const bool   upmix   = (srcCh == 1 && destCh >= 2);
 
@@ -172,7 +192,7 @@ struct TempoStretcher
             const float* rdPtr = src.getReadPointer(readCh);
             float*       wrPtr = dest.getWritePointer(ch);
 
-            double pos = (double)srcStart + (double)(dStart - destStart) * advance;
+            double pos = srcStart + (double)(dStart - destStart) * advance;
             for (int i = dStart; i < dEnd; ++i, pos += advance)
             {
                 float t = (destSamples > 1)

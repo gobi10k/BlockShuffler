@@ -35,16 +35,36 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     transportBar.onSave   = [this] { saveProject(); };
     transportBar.onOpen   = [this] { openProject(); };
 
+    blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
+        currentArrangement = resolver.resolve(*project, rng);
+        // Find the body start of the target block in the resolved arrangement
+        int64_t seekPos = 0;
+        for (const auto& entry : currentArrangement.entries) {
+            if (entry.blockId == blockId) {
+                seekPos = entry.timelinePos + entry.startMark;
+                break;
+            }
+        }
+        engine.play(currentArrangement);
+        engine.seekTo(seekPos);
+        transportBar.setIsPlaying(true);
+    };
+
     addAndMakeVisible(waveformView);
     addAndMakeVisible(blockStrip);
     addAndMakeVisible(linkOverlay);
-    addAndMakeVisible(inspectorPanel);
     addAndMakeVisible(transportBar);
+
+    inspectorViewport.setViewedComponent(&inspectorPanel);
+    inspectorViewport.setScrollBarsShown(true, true, false, false);
+    inspectorViewport.setColour(juce::ScrollBar::backgroundColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
+    inspectorViewport.setColour(juce::ScrollBar::thumbColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::bgLight));
+    addAndMakeVisible(inspectorViewport);
 
     linkOverlay.setAlwaysOnTop(true);
     linkOverlay.setInterceptsMouseClicks(false, false);
-
-    addKeyListener(this);
 
     auto* defaultBlock = project->addBlock("Block 1");
     // The initial block creation should not be in undo history — Cmd+Z on the very
@@ -54,7 +74,6 @@ MainComponent::MainComponent(PlaybackEngine& eng)
 }
 
 MainComponent::~MainComponent() {
-    removeKeyListener(this);
     project->removeChangeListener(this);
     setLookAndFeel(nullptr);
 }
@@ -62,7 +81,7 @@ MainComponent::~MainComponent() {
 void MainComponent::applyBlockSelection(Block* block) {
     selectedBlock   = block;
     selectedBlockId = block ? block->id : juce::String{};
-    waveformView.setBlock(block, block ? &project->formatManager : nullptr);
+    waveformView.setBlock(block, project->sampleRate, block ? &project->formatManager : nullptr);
     inspectorPanel.setBlock(block);
 }
 
@@ -81,7 +100,13 @@ void MainComponent::resized() {
     }
     auto area = getLocalBounds();
     transportBar  .setBounds(area.removeFromBottom(transportHeight));
-    inspectorPanel.setBounds(area.removeFromRight(inspectorWidth));
+    inspectorViewport.setBounds(area.removeFromRight(inspectorWidth));
+
+    // Set inspector panel size to accommodate all content (including stack settings)
+    // Width matches viewport, height is enough for full content with some margin
+    int panelHeight = juce::jmax(getHeight() - transportHeight + 200, 800);
+    inspectorPanel.setBounds(0, 0, inspectorWidth, panelHeight);
+
     auto blockArea = area.removeFromBottom(blockStripHeight);
     blockStrip .setBounds(blockArea);
     linkOverlay.setBounds(blockArea);
@@ -133,7 +158,7 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) 
     if (found != selectedBlock) {
         // Block changed (deleted, recreated, or new project) — full refresh
         selectedBlock = found;
-        waveformView.setBlock(found, found ? &project->formatManager : nullptr);
+        waveformView.setBlock(found, project->sampleRate, found ? &project->formatManager : nullptr);
         inspectorPanel.setBlock(selectedBlock);
     } else {
         // Same block, possibly different values/link structure — lightweight refresh
@@ -142,12 +167,10 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) 
     repaint();
 }
 
-bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component* originator) {
-    // Arrow keys: forward to waveformView regardless of which child has focus,
-    // unless a text editor has focus (it needs them for cursor movement).
+bool MainComponent::keyPressed(const juce::KeyPress& key) {
+    // Arrow keys: forward to waveformView regardless of which child has focus
     if (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey) {
-        if (dynamic_cast<juce::TextEditor*>(originator) == nullptr)
-            return waveformView.keyPressed(key);
+        return waveformView.keyPressed(key);
     }
 
     if (key == juce::KeyPress(juce::KeyPress::spaceKey)) {
@@ -181,26 +204,37 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component* origi
         return true;
     }
     if (key.isKeyCode('N') && key.getModifiers().isCommandDown()) {
-        engine.stop();
-        // Clear UI state BEFORE destroying old project to avoid dangling pointers.
-        // waveformView holds a Block* (currentBlock) and ClipRowComponents hold Clip&
-        // refs — clearing them while the old project still exists prevents a crash in
-        // ClipWaveformView::setBlock's removeChangeListener call on freed memory.
-        selectedBlock   = nullptr;
-        selectedBlockId = {};
-        waveformView.setBlock(nullptr);
-        inspectorPanel.setClip(nullptr, nullptr);
-        inspectorPanel.setBlock(nullptr);
-        project->removeChangeListener(this);
-        project = std::make_unique<Project>();
-        project->name = "Untitled Project";
-        project->addChangeListener(this);
-        currentProjectFile = juce::File{};
-        inspectorPanel.setProject(project.get());
-        blockStrip.init(*project, &linkOverlay);
-        auto* b = project->addBlock("Block 1");
-        project->undoManager.clearUndoHistory();
-        blockStrip.selectBlock(b);  // fires onBlockSelected → applyBlockSelection
+        juce::NativeMessageBox::showOkCancelBox(
+            juce::MessageBoxIconType::QuestionIcon,
+            "New Project",
+            "Are you sure you want to create a new project? Any unsaved changes will be lost.",
+            nullptr,
+            juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<MainComponent>(this)](int result) {
+                if (result == 1 && safe) { // OK
+                    auto* self = safe.getComponent();
+                    self->engine.stop();
+                    // Clear UI state BEFORE destroying old project to avoid dangling pointers.
+                    // waveformView holds a Block* (currentBlock) and ClipRowComponents hold Clip&
+                    // refs — clearing them while the old project still exists prevents a crash in
+                    // ClipWaveformView::setBlock's removeChangeListener call on freed memory.
+                    self->selectedBlock   = nullptr;
+                    self->selectedBlockId = {};
+                    self->waveformView.setBlock(nullptr, 48000.0);
+                    self->inspectorPanel.setClip(nullptr, nullptr);
+                    self->inspectorPanel.setBlock(nullptr);
+                    self->project->removeChangeListener(self);
+                    self->project = std::make_unique<Project>();
+                    self->project->name = "Untitled Project";
+                    self->project->addChangeListener(self);
+                    self->currentProjectFile = juce::File{};
+                    self->inspectorPanel.setProject(self->project.get());
+                    self->blockStrip.init(*(self->project), &(self->linkOverlay));
+                    auto* b = self->project->addBlock("Block 1");
+                    self->project->undoManager.clearUndoHistory();
+                    self->blockStrip.selectBlock(b);  // fires onBlockSelected → applyBlockSelection
+                }
+            })
+        );
         return true;
     }
     return false;
@@ -211,6 +245,7 @@ void MainComponent::onPlayPressed() {
         engine.stop();
         transportBar.setIsPlaying(false);
         blockStrip.setPlayingBlock({});
+        waveformView.setPlayingClip({}, 0, 0.0);
     } else {
         currentArrangement = resolver.resolve(*project, rng);
         engine.play(currentArrangement);  // engine takes a copy
@@ -224,6 +259,7 @@ void MainComponent::onStopPressed() {
     transportBar.setIsPlaying(false);
     transportBar.setTimeDisplay(0.0, engine.getTotalSeconds());
     blockStrip.setPlayingBlock({});
+    waveformView.setPlayingClip({}, 0, 0.0);
 }
 
 void MainComponent::onRewindPressed() {
@@ -300,7 +336,7 @@ void MainComponent::loadProject(const juce::File& file) {
     selectedBlock   = nullptr;
     selectedBlockId = {};
     blockStrip.init(*project, &linkOverlay);
-    waveformView.setBlock(nullptr);
+    waveformView.setBlock(nullptr, project->sampleRate);
     inspectorPanel.setClip(nullptr, nullptr);
 
     if (!project->blocks.isEmpty()) {
@@ -317,23 +353,63 @@ void MainComponent::updateTimeDisplay() {
     if (!playing) {
         transportBar.setIsPlaying(false);
         blockStrip.setPlayingBlock({});
+        waveformView.setPlayingClip({}, 0, 0.0);
     } else {
-        // Find which entry is at the current playhead position
+        // Find which entry is at the current playhead position.
+        // With the current timeline model: timelinePos = lead-in start,
+        // body occupies [timelinePos + startMark, timelinePos + endMark).
         int64_t headSamples = (int64_t)(current * currentArrangement.sampleRate);
-        juce::String nowPlayingId;
-        for (const auto& entry : currentArrangement.entries) {
-            int64_t bodyLen = entry.clip->endMark - entry.clip->startMark;
-            if (headSamples >= entry.timelinePos &&
-                headSamples <  entry.timelinePos + bodyLen) {
-                nowPlayingId = entry.blockId;
-                break;
+        juce::String nowPlayingBlockId;
+        juce::String nowPlayingClipId;
+        int64_t clipSamplePos = 0;
+
+        // Always show the first entry at start
+        if (!currentArrangement.entries.isEmpty()) {
+            const auto& firstEntry = currentArrangement.entries.getReference(0);
+            nowPlayingBlockId = firstEntry.blockId;
+            nowPlayingClipId = firstEntry.clipId;
+
+            // After trimming: startMark=0, so bodyStart = timelinePos, bodyEnd = timelinePos + endMark
+            int64_t bodyStart = firstEntry.timelinePos;
+            int64_t bodyEnd   = firstEntry.timelinePos + firstEntry.endMark;
+
+            if (headSamples >= bodyStart && headSamples < bodyEnd) {
+                // Currently within clip body - map to original clip position
+                int64_t posInTrimmed = headSamples - bodyStart;
+                clipSamplePos = firstEntry.originalStartMark + posInTrimmed;
+            } else if (headSamples < bodyStart) {
+                // Before clip starts - show at original start marker
+                clipSamplePos = firstEntry.originalStartMark;
+            } else {
+                // After first clip - use normal tracking
+                for (const auto& entry : currentArrangement.entries) {
+                    int64_t eb = entry.timelinePos;  // startMark is 0 after trimming
+                    int64_t ee = entry.timelinePos + entry.endMark;
+                    if (headSamples >= eb && headSamples < ee) {
+                        nowPlayingBlockId = entry.blockId;
+                        nowPlayingClipId = entry.clipId;
+                        int64_t posInTrimmed = headSamples - eb;
+                        clipSamplePos = entry.originalStartMark + posInTrimmed;
+                        break;
+                    }
+                }
             }
         }
-        blockStrip.setPlayingBlock(nowPlayingId);
-    }
 
-    float fraction = (total > 0.0) ? (float)(current / total) : 0.0f;
-    waveformView.setPlayheadFraction(playing ? fraction : -1.0f);
+        blockStrip.setPlayingBlock(nowPlayingBlockId);
+
+        // Always switch waveform to show the playing block's clips
+        if (!nowPlayingBlockId.isEmpty()) {
+            selectedBlockId = nowPlayingBlockId;
+            selectedBlock = project->getBlockById(nowPlayingBlockId);
+            if (selectedBlock) {
+                waveformView.setBlock(selectedBlock, project->sampleRate, &project->formatManager);
+                inspectorPanel.setBlock(selectedBlock);
+            }
+        }
+
+        waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, currentArrangement.sampleRate);
+    }
 }
 
 namespace {

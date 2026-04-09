@@ -52,11 +52,15 @@ void Project::applyExternalMutation(const juce::var& preSnapshot) {
 }
 
 void Project::resetAndLoad(const juce::var& snapshot) {
-    suppressUndo = true;
+    struct Guard {
+        Project& p;
+        Guard(Project& proj) : p(proj) { p.suppressUndo = true; }
+        ~Guard() { p.suppressUndo = false; }
+    } guard(*this);
+
     blocks.clear();
     links.clear();
     fromJSON(snapshot);
-    suppressUndo = false;
     sendChangeMessage();
 }
 
@@ -79,7 +83,7 @@ Block* Project::addBlock(const juce::String& blockName) {
     };
     block->color = blockPalette[blocks.size() % 8];
 
-    block->position = blocks.size();
+    block->position = blocks.isEmpty() ? 0 : blocks.getLast()->position + 1;
     auto* ptr = block.get();
     blocks.add(block.release());
     sendChangeMessage();
@@ -112,6 +116,23 @@ void Project::moveBlock(int fromIndex, int toIndex) {
     recordMutation(pre);
 }
 
+void Project::propagateStackSettings(int stackGroup, Block* sourceBlock) {
+    if (stackGroup < 0) return;
+    Block* source = sourceBlock;
+    if (source == nullptr || source->stackGroup != stackGroup) {
+        for (auto* b : blocks) {
+            if (b->stackGroup == stackGroup) { source = b; break; }
+        }
+    }
+    if (source == nullptr || source->stackGroup != stackGroup) return;
+    for (auto* b : blocks) {
+        if (b->stackGroup == stackGroup && b != source) {
+            b->stackPlayCount = source->stackPlayCount;
+            b->stackPlayMode  = source->stackPlayMode;
+        }
+    }
+}
+
 Block* Project::getBlockById(const juce::String& blockId) {
     for (auto* b : blocks)
         if (b->id == blockId) return b;
@@ -135,23 +156,28 @@ void Project::stackBlocks(const juce::String& blockIdA, const juce::String& bloc
         a->stackGroup = maxGroup + 1;
         b->stackGroup = maxGroup + 1;
     }
+    propagateStackSettings(a->stackGroup);
     sendChangeMessage();
     recordMutation(pre);
 }
 
-BlockLink* Project::addLink(const juce::String& blockA, const juce::String& blockB, float probability) {
+BlockLink* Project::addLink(const juce::String& blockA, const juce::String& blockB, float probability, bool sendNotification) {
     // Don't snapshot if link already exists (no-op)
     for (auto* link : links)
         if ((link->blockA == blockA && link->blockB == blockB) ||
             (link->blockA == blockB && link->blockB == blockA))
             return link;
 
-    auto pre = toJSON();
+    juce::var pre;
+    if (sendNotification)
+        pre = toJSON();
     auto link = std::make_unique<BlockLink>(blockA, blockB, probability);
     auto* ptr = link.get();
     links.add(link.release());
-    sendChangeMessage();
-    recordMutation(pre);
+    if (sendNotification) {
+        sendChangeMessage();
+        recordMutation(pre);
+    }
     return ptr;
 }
 

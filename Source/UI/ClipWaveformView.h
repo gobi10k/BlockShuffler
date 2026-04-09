@@ -12,6 +12,7 @@ namespace BlockShuffler {
 class ClipRowComponent : public juce::Component {
 public:
     ClipRowComponent(Clip& clip,
+                     double projectSampleRate,
                      std::function<void()> onSelected,
                      std::function<void()> onRepaintNeeded,
                      std::function<void()> onRemoveRequested);
@@ -24,14 +25,16 @@ public:
     void mouseUp(const juce::MouseEvent& e) override;
 
     void setSelected(bool sel);
-    Clip& getClip() { return clip; }
+    Clip* getClip() { return clip.get(); }
+    juce::Rectangle<int> waveArea() const { return getLocalBounds().withTrimmedTop(headerH).reduced(2, 2); }
 
     static constexpr int headerH   = 24;
     static constexpr int markerHit = 7;
 
 private:
-    Clip& clip;
-    bool  selected = false;
+    juce::WeakReference<Clip> clip;
+    double projectSampleRate = 48000.0;
+    bool   selected = false;
 
     std::function<void()> onSelectedCallback;
     std::function<void()> onRepaintCallback;
@@ -53,7 +56,6 @@ private:
     enum class DragTarget { None, StartMarker, EndMarker };
     DragTarget activeDrag = DragTarget::None;
 
-    juce::Rectangle<int> waveArea() const;
     int     sampleToX(int64_t sample) const;
     int64_t xToSample(int x) const;
     void    renderWaveform(juce::Graphics& g, juce::Rectangle<int> area) const;
@@ -91,11 +93,14 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override;
 
-    void setBlock(Block* block, juce::AudioFormatManager* fmtMgr = nullptr);
+    void setBlock(Block* block, double sampleRate, juce::AudioFormatManager* fmtMgr = nullptr);
     Clip* getSelectedClip() const { return selectedClip; }
 
-    /** -1 = hidden; 0.0–1.0 = fraction of total timeline */
-    void setPlayheadFraction(float fraction);
+    /** Set the currently playing clip and its position.
+        @param clipId The ID of the clip being played (empty = stop playback)
+        @param samplePos Position within the clip's audio buffer (0 = start)
+        @param sampleRate The sample rate for samplePos calculation */
+    void setPlayingClip(const juce::String& clipId, int64_t samplePos, double sampleRate);
 
     std::function<void(Clip*)> onClipSelected;
 
@@ -108,16 +113,19 @@ public:
     void paintOverChildren(juce::Graphics& g) override;
 
 private:
-    Block* currentBlock  = nullptr;
+    juce::WeakReference<Block> currentBlock;
     Clip*  selectedClip  = nullptr;
     juce::AudioFormatManager* formatManager = nullptr;
+    double projectSampleRate = 48000.0;
 
     ZoomableViewport viewport;
     juce::Component contentArea;
     juce::OwnedArray<ClipRowComponent> clipRows;
     juce::TextButton addClipBtn { "+ Add Clip" };
 
-    float playheadFraction = -1.0f;  // -1 = hidden
+    juce::String playingClipId;
+    int64_t      playingSamplePos = 0;
+    double       playingSampleRate = 48000.0;
     float zoomFactor = 1.0f;         // 1.0 = fit; >1 = zoomed in
 
     static constexpr int rowH   = 110;

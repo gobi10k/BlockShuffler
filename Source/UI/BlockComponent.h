@@ -29,14 +29,18 @@ public:
     void setSelected(bool s);
     void setHighlighted(bool h);  ///< Pending link/stack target highlight
     void setPlaying(bool p);      ///< Currently playing in the arrangement
+    void setDragTarget(bool d);   ///< Block is the drop target during a drag-to-stack
+    void setDragTargetMode(bool isReorder);  ///< true = reorder within stack, false = stack
     bool isSelected()   const { return selected; }
-    Block& getBlock()         { return block; }
+    Block* getBlock()         { return block.get(); }
 
 private:
-    Block& block;
+    juce::WeakReference<Block> block;
     bool selected    = false;
     bool highlighted = false;
     bool playing     = false;
+    bool dragTarget  = false;
+    bool dragTargetIsReorder = false;  ///< true = reorder within stack, false = stack
 
     std::function<void(Block*)>              onSelected;
     std::function<void(const juce::String&)> onDeleteRequested;
@@ -50,6 +54,8 @@ public:
     /// Called after a context-menu mutation, with the pre-change snapshot, to record undo.
     std::function<void(const juce::var&)>  onUndoableMutation;
     std::function<void(const juce::String&)> onRemoveLinksRequested;
+    /// Called when "Play from Here" is chosen — passes the block id.
+    std::function<void(const juce::String&)> onPlayFromHereRequested;
 
 private:
 
