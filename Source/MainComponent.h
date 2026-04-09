@@ -18,8 +18,7 @@ namespace BlockShuffler {
 class MainComponent : public juce::Component,
                       public juce::DragAndDropContainer,
                       public juce::FileDragAndDropTarget,
-                      public juce::ChangeListener,
-                      public juce::KeyListener {
+                      public juce::ChangeListener {
 public:
     explicit MainComponent(PlaybackEngine& engine);
     ~MainComponent() override;
@@ -34,8 +33,8 @@ public:
     // ChangeListener
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
-    // KeyListener
-    bool keyPressed(const juce::KeyPress& key, juce::Component* originator) override;
+    // Keyboard handling via Component::keyPressed
+    bool keyPressed(const juce::KeyPress& key) override;
 
     // Called by editor timer to refresh transport display
     void updateTimeDisplay();
@@ -46,7 +45,7 @@ private:
     juce::Random       rng;
 
     LookAndFeel_BlockShuffler customLookAndFeel;
-    juce::TooltipWindow       tooltipWindow { this, 600 };  // 600 ms hover delay
+    juce::TooltipWindow       tooltipWindow { this };
     std::unique_ptr<Project>  project;
     juce::File                currentProjectFile;
 
@@ -58,6 +57,7 @@ private:
     ClipWaveformView waveformView;
     BlockStrip       blockStrip;
     BlockLinkOverlay linkOverlay;
+    juce::Viewport  inspectorViewport;
     InspectorPanel   inspectorPanel;
     TransportBar     transportBar;
 

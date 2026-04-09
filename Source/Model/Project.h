@@ -31,8 +31,13 @@ public:
     void   stackBlocks(const juce::String& blockIdA, const juce::String& blockIdB);
     Block* getBlockById(const juce::String& blockId);
 
+    /** Copies stackPlayCount and stackPlayMode from sourceBlock to all other blocks in the group.
+     *  If sourceBlock is null or not in the group, uses the first block as source.
+     *  Call this after any mutation to stack-level settings, and after stacking/unstacking. */
+    void propagateStackSettings(int stackGroup, Block* sourceBlock = nullptr);
+
     // Link operations
-    BlockLink* addLink(const juce::String& blockA, const juce::String& blockB, float probability = 0.5f);
+    BlockLink* addLink(const juce::String& blockA, const juce::String& blockB, float probability = 0.5f, bool sendNotification = true);
     void       removeLink(const juce::String& blockA, const juce::String& blockB);
     void       removeLinksForBlock(const juce::String& blockId);
     void       setLinkProbability(const juce::String& blockA, const juce::String& blockB, float prob);
