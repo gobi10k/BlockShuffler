@@ -8,13 +8,15 @@ BlockComponent::BlockComponent(Block& block_,
                                std::function<void(const juce::String&)> onDeleteRequested_,
                                std::function<void()>                    onMutated_,
                                std::function<void(const juce::String&)> onLinkRequested_,
-                               std::function<void(const juce::String&)> onStackRequested_)
+                               std::function<void(const juce::String&)> onStackRequested_,
+                               std::function<void(const juce::String&)> onUnstackRequested_)
     : block(&block_),
       onSelected(std::move(onSelected_)),
       onDeleteRequested(std::move(onDeleteRequested_)),
       onMutated(std::move(onMutated_)),
       onLinkRequested(std::move(onLinkRequested_)),
-      onStackRequested(std::move(onStackRequested_))
+      onStackRequested(std::move(onStackRequested_)),
+      onUnstackRequested(std::move(onUnstackRequested_))
 {
     nameLabel.setText(block ? block->name : "", juce::dontSendNotification);
     nameLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
@@ -231,9 +233,7 @@ void BlockComponent::showContextMenu() {
         } else if (result == 8 && self->block) {
             if (self->onPlayFromHereRequested) self->onPlayFromHereRequested(self->block->id);
         } else if (result == 9 && self->block && self->block->stackGroup >= 0) {
-            self->block->stackGroup = -1;
-            if (self->onMutated) self->onMutated();
-            if (self->onUndoableMutation) self->onUndoableMutation(pre);
+            if (self->onUnstackRequested) self->onUnstackRequested(self->block->id);
         } else if (result == 5 && self->block) {
             if (self->onDeleteRequested) self->onDeleteRequested(self->block->id);
         }
