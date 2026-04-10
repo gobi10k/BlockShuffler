@@ -27,54 +27,44 @@ TransportBar::TransportBar() {
 }
 
 void TransportBar::paint(juce::Graphics& g) {
-    // ── Background ────────────────────────────────────────────────────────────
-    g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
+    using LF = LookAndFeel_BlockShuffler;
 
-    // Top separator line (panel colour — subtle)
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::panelCol));
+    // ── Background: pure black ─────────────────────────────────────────────
+    g.fillAll(juce::Colour(LF::bgDark));
+
+    // Hairline separator at top — very dark panel colour
+    g.setColour(juce::Colour(LF::panelCol));
     g.drawLine(0.0f, 0.0f, (float)getWidth(), 0.0f, 1.0f);
 
-    // ── Time display ─────────────────────────────────────────────────────────
+    // ── Time display (centre-left, secondary text) ─────────────────────────
     auto timeText = formatTime(currentSecs) + " / " + formatTime(totalSecs);
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
+    g.setColour(juce::Colour(LF::textSecondary));
     g.setFont(juce::Font(juce::FontOptions(13.0f).withStyle("Regular")));
     g.drawText(timeText, timeDisplayArea, juce::Justification::centred);
 
-    // ── App branding ──────────────────────────────────────────────────────────
+    // ── RiverMix. wordmark (centre-right) ─────────────────────────────────
+    // Matches the logo: white "River" + cyan→blue gradient "Mix."
     if (brandingArea.isEmpty()) return;
 
-    const int iconW = 28;
-    const int iconH = 18;
-    const int gap   = 6;
-    const int cy    = brandingArea.getCentreY();
+    const float fy      = (float)brandingArea.getCentreY();
+    const float fontSz  = 16.0f;
+    const float totalW  = 108.0f;  // approximate rendered width
+    const float startX  = brandingArea.getX()
+                          + (brandingArea.getWidth() - totalW) / 2.0f;
 
-    // Mini block-arrangement icon (3 coloured rectangles + arrows)
-    const int iconX = brandingArea.getX() + (brandingArea.getWidth() - iconW - gap - 80) / 2;
-    const int iconY = cy - iconH / 2;
+    g.setFont(juce::Font(juce::FontOptions(fontSz).withStyle("Bold")));
 
-    float r = 2.5f;
-    // Block 1 — Neon Cyan
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-    g.fillRoundedRectangle((float)iconX, (float)iconY, 7.0f, (float)iconH, r);
-    // Block 2 — Electric Violet (slightly shorter, offset down)
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentViolet));
-    g.fillRoundedRectangle((float)(iconX + 10), (float)(iconY + 3), 7.0f, (float)(iconH - 6), r);
-    // Block 3 — Neon Cyan
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-    g.fillRoundedRectangle((float)(iconX + 20), (float)iconY, 7.0f, (float)iconH, r);
+    // "River" — pure white
+    g.setColour(juce::Colour(LF::textPrimary));
+    g.drawText("River",
+               juce::Rectangle<float>(startX, fy - fontSz / 2.0f - 1, 58, fontSz + 2),
+               juce::Justification::centredLeft, false);
 
-    // Arrow dots (Hot Magenta) connecting the blocks
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentMagenta));
-    g.fillEllipse((float)(iconX + 8), (float)(cy - 1), 2.0f, 2.0f);
-    g.fillEllipse((float)(iconX + 18), (float)(cy - 1), 2.0f, 2.0f);
-
-    // App name
-    const int textX = iconX + iconW + gap;
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-    g.setFont(juce::Font(juce::FontOptions(14.0f).withStyle("Bold")));
-    g.drawText("BlockShuffler",
-               juce::Rectangle<int>(textX, cy - 9, 90, 18),
-               juce::Justification::centredLeft);
+    // "Mix." — electric cyan (matches the logo's gradient highlight end)
+    g.setColour(juce::Colour(LF::accentCyan));
+    g.drawText("Mix.",
+               juce::Rectangle<float>(startX + 58, fy - fontSz / 2.0f - 1, 52, fontSz + 2),
+               juce::Justification::centredLeft, false);
 }
 
 void TransportBar::resized() {
