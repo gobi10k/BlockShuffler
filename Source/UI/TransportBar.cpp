@@ -27,14 +27,54 @@ TransportBar::TransportBar() {
 }
 
 void TransportBar::paint(juce::Graphics& g) {
+    // ── Background ────────────────────────────────────────────────────────────
     g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight));
+
+    // Top separator line (panel colour — subtle)
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::panelCol));
     g.drawLine(0.0f, 0.0f, (float)getWidth(), 0.0f, 1.0f);
 
+    // ── Time display ─────────────────────────────────────────────────────────
     auto timeText = formatTime(currentSecs) + " / " + formatTime(totalSecs);
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
-    g.setFont(14.0f);
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
+    g.setFont(juce::Font(juce::FontOptions(13.0f).withStyle("Regular")));
     g.drawText(timeText, timeDisplayArea, juce::Justification::centred);
+
+    // ── App branding ──────────────────────────────────────────────────────────
+    if (brandingArea.isEmpty()) return;
+
+    const int iconW = 28;
+    const int iconH = 18;
+    const int gap   = 6;
+    const int cy    = brandingArea.getCentreY();
+
+    // Mini block-arrangement icon (3 coloured rectangles + arrows)
+    const int iconX = brandingArea.getX() + (brandingArea.getWidth() - iconW - gap - 80) / 2;
+    const int iconY = cy - iconH / 2;
+
+    float r = 2.5f;
+    // Block 1 — Neon Cyan
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+    g.fillRoundedRectangle((float)iconX, (float)iconY, 7.0f, (float)iconH, r);
+    // Block 2 — Electric Violet (slightly shorter, offset down)
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentViolet));
+    g.fillRoundedRectangle((float)(iconX + 10), (float)(iconY + 3), 7.0f, (float)(iconH - 6), r);
+    // Block 3 — Neon Cyan
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+    g.fillRoundedRectangle((float)(iconX + 20), (float)iconY, 7.0f, (float)iconH, r);
+
+    // Arrow dots (Hot Magenta) connecting the blocks
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentMagenta));
+    g.fillEllipse((float)(iconX + 8), (float)(cy - 1), 2.0f, 2.0f);
+    g.fillEllipse((float)(iconX + 18), (float)(cy - 1), 2.0f, 2.0f);
+
+    // App name
+    const int textX = iconX + iconW + gap;
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+    g.setFont(juce::Font(juce::FontOptions(14.0f).withStyle("Bold")));
+    g.drawText("BlockShuffler",
+               juce::Rectangle<int>(textX, cy - 9, 90, 18),
+               juce::Justification::centredLeft);
 }
 
 void TransportBar::resized() {
@@ -58,7 +98,8 @@ void TransportBar::resized() {
     saveBtn.setBounds(area.removeFromRight(60).withSizeKeepingCentre(60, btnH));
     area.removeFromRight(gap * 2);
 
-    // Center: whatever remains is the time display zone
+    // Center: split — time display on left half, branding on right half
+    brandingArea    = area.removeFromRight(area.getWidth() / 2);
     timeDisplayArea = area;
 }
 

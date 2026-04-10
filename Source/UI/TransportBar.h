@@ -34,8 +34,9 @@ private:
     double currentSecs = 0.0;
     double totalSecs   = 0.0;
 
-    // Rect calculated in resized(), used in paint() to avoid overlapping buttons
+    // Rects calculated in resized(), used in paint()
     juce::Rectangle<int> timeDisplayArea;
+    juce::Rectangle<int> brandingArea;
 
     static juce::String formatTime(double seconds);
 

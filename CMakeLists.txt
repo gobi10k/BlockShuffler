@@ -13,6 +13,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+juce_add_binary_data(BlockShufflerResources
+    SOURCES
+        Resources/icon.svg
+        Resources/icon.png
+)
+
 juce_add_plugin(BlockShuffler
     COMPANY_NAME "gobi10k"
     IS_SYNTH FALSE
@@ -22,6 +28,8 @@ juce_add_plugin(BlockShuffler
     PLUGIN_CODE BkSh
     FORMATS Standalone VST3
     PRODUCT_NAME "BlockShuffler"
+    ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
 )
 
 target_sources(BlockShuffler PRIVATE
@@ -99,6 +107,7 @@ endif()
 
 target_link_libraries(BlockShuffler
     PRIVATE
+        BlockShufflerResources
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats

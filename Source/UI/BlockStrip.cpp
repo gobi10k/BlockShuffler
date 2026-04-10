@@ -60,32 +60,32 @@ void BlockStrip::paint(juce::Graphics& g) {
         if (dragIsUnstacking) {
             if (dragOverIndex >= 0) {
                 // UNSTACK AND STACK WITH TARGET: show stacking indicator
-                g.setColour(juce::Colour(0xFF5599FF).withAlpha(0.85f));
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.85f));
                 g.drawLine(float(screenX), float(viewport.getY() + 4),
                            float(screenX), float(viewport.getBottom() - 4), 2.5f);
-                g.setColour(juce::Colour(0xFF5599FF).withAlpha(0.9f));
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.9f));
                 g.fillRect(screenX - 6, viewport.getY() + 2, 12, 6);
                 g.fillRect(screenX - 6, viewport.getBottom() - 8, 12, 6);
-                g.setColour(juce::Colours::white);
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
                 g.setFont(9.0f);
                 g.drawText("STACK", screenX - 20, viewport.getY() + 8, 40, 12,
                            juce::Justification::centred);
             } else {
                 // UNSTACK TO EMPTY SLOT: show horizontal insertion line with "unstacking" indicator
-                g.setColour(juce::Colour(0xFFFF6644).withAlpha(0.85f));
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentAmber).withAlpha(0.85f));
                 g.drawLine(float(screenX), float(viewport.getY() + 4),
                            float(screenX), float(viewport.getBottom() - 4), 2.5f);
-                g.setColour(juce::Colour(0xFFFF6644).withAlpha(0.9f));
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentAmber).withAlpha(0.9f));
                 g.fillRect(screenX - 6, viewport.getY() + 2, 12, 6);
                 g.fillRect(screenX - 6, viewport.getBottom() - 8, 12, 6);
-                g.setColour(juce::Colours::white);
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
                 g.setFont(9.0f);
                 g.drawText("UNSTACK", screenX - 24, viewport.getY() + 8, 48, 12,
                            juce::Justification::centred);
             }
         } else if (dragSourceSlot >= 0 && dragDropSlot == dragSourceSlot && dragOverIndex >= 0) {
             // REORDER WITHIN STACK: show vertical swap indicator
-            g.setColour(juce::Colour(0xFF44CCCC).withAlpha(0.7f));
+            g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentTeal).withAlpha(0.7f));
             g.setFont(9.0f);
             g.drawText("REORDER", viewport.getX() + 2, viewport.getBottom() - 14, 48, 12,
                        juce::Justification::centred);
