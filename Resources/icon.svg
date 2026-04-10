@@ -1,74 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <defs>
-    <!-- Main blue→cyan gradient matching the RiverMix logo gradient -->
-    <linearGradient id="brandGrad" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%"   stop-color="#00C8FF"/>
-      <stop offset="50%"  stop-color="#2B7FFF"/>
-      <stop offset="100%" stop-color="#1E40FF"/>
-    </linearGradient>
-    <!-- Horizontal variant for the wing arcs -->
-    <linearGradient id="brandGradH" x1="0" y1="0.5" x2="1" y2="0.5">
-      <stop offset="0%"   stop-color="#00C8FF"/>
-      <stop offset="100%" stop-color="#1E40FF"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background rounded square: Void Black -->
+  <rect width="512" height="512" rx="96" ry="96" fill="#0B0D10"/>
 
-  <!-- Background: pure black -->
-  <rect width="1024" height="1024" fill="#000000"/>
+  <!-- Graphite Blue inner panel — subtle depth -->
+  <rect x="32" y="32" width="448" height="448" rx="72" ry="72" fill="#121825"/>
 
-  <!-- ── Outer white circle arcs (left and right) ──────────────────────── -->
-  <!-- Left arc -->
-  <path d="M 260 290 A 290 290 0 0 0 260 734" fill="none" stroke="#FFFFFF"
-        stroke-width="22" stroke-linecap="round" opacity="0.90"/>
-  <!-- Right arc -->
-  <path d="M 764 290 A 290 290 0 0 1 764 734" fill="none" stroke="#FFFFFF"
-        stroke-width="22" stroke-linecap="round" opacity="0.90"/>
+  <!-- ── Block arrangement strip ──────────────────────────────────────── -->
+  <!-- Block 1 (left): Neon Cyan — tall -->
+  <rect x="60"  y="148" width="96" height="160" rx="12" ry="12" fill="#25D7F2"/>
+  <rect x="68"  y="156" width="80" height="144" rx="8"  ry="8"  fill="#121825"/>
+  <!-- top accent bar -->
+  <rect x="60"  y="148" width="96" height="16"  rx="12" ry="12" fill="#25D7F2"/>
 
-  <!-- ── Inner white circle arcs (tighter radius) ───────────────────────── -->
-  <path d="M 308 330 A 230 230 0 0 0 308 694" fill="none" stroke="#FFFFFF"
-        stroke-width="18" stroke-linecap="round" opacity="0.55"/>
-  <path d="M 716 330 A 230 230 0 0 1 716 694" fill="none" stroke="#FFFFFF"
-        stroke-width="18" stroke-linecap="round" opacity="0.55"/>
+  <!-- Block 2 (centre): Electric Violet — shorter -->
+  <rect x="208" y="178" width="96" height="100" rx="12" ry="12" fill="#7B5CFF"/>
+  <rect x="216" y="186" width="80" height="84"  rx="8"  ry="8"  fill="#121825"/>
+  <rect x="208" y="178" width="96" height="16"  rx="12" ry="12" fill="#7B5CFF"/>
 
-  <!-- ── Top wing curves — left side (gradient) ────────────────────────── -->
-  <path d="M 512 210 C 460 200, 360 180, 290 230" fill="none" stroke="url(#brandGradH)"
-        stroke-width="18" stroke-linecap="round"/>
-  <path d="M 512 250 C 460 240, 370 220, 305 265" fill="none" stroke="url(#brandGradH)"
-        stroke-width="14" stroke-linecap="round" opacity="0.7"/>
+  <!-- Block 3 (right): Neon Cyan — tall (mirrors block 1) -->
+  <rect x="356" y="148" width="96" height="160" rx="12" ry="12" fill="#25D7F2"/>
+  <rect x="364" y="156" width="80" height="144" rx="8"  ry="8"  fill="#121825"/>
+  <rect x="356" y="148" width="96" height="16"  rx="12" ry="12" fill="#25D7F2"/>
 
-  <!-- ── Top wing curves — right side (gradient, flipped) ──────────────── -->
-  <path d="M 512 210 C 564 200, 664 180, 734 230" fill="none"
-        stroke="url(#brandGrad)" stroke-width="18" stroke-linecap="round"/>
-  <path d="M 512 250 C 564 240, 654 220, 719 265" fill="none"
-        stroke="url(#brandGrad)" stroke-width="14" stroke-linecap="round" opacity="0.7"/>
+  <!-- ── Shuffle connector arrows (Hot Magenta) ───────────────────────── -->
+  <!-- Left arrow shaft: block 1 → block 2 -->
+  <line x1="162" y1="228" x2="202" y2="228" stroke="#FF4FB8" stroke-width="6" stroke-linecap="round"/>
+  <!-- Arrowhead -->
+  <polyline points="192,218 204,228 192,238" fill="none" stroke="#FF4FB8" stroke-width="6"
+            stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- ── Central stem — flows down from top through the teardrop ───────── -->
-  <path d="M 512 210 L 512 360" fill="none" stroke="url(#brandGrad)"
-        stroke-width="20" stroke-linecap="round"/>
+  <!-- Right arrow shaft: block 2 → block 3 -->
+  <line x1="310" y1="228" x2="350" y2="228" stroke="#FF4FB8" stroke-width="6" stroke-linecap="round"/>
+  <polyline points="340,218 352,228 340,238" fill="none" stroke="#FF4FB8" stroke-width="6"
+            stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- ── Left fork of the tuning-fork body ─────────────────────────────── -->
-  <path d="M 512 360 C 512 360, 440 390, 430 450 C 420 510, 460 540, 512 550"
-        fill="none" stroke="url(#brandGrad)" stroke-width="20" stroke-linecap="round"
-        stroke-linejoin="round"/>
-
-  <!-- ── Right fork ────────────────────────────────────────────────────── -->
-  <path d="M 512 360 C 512 360, 584 390, 594 450 C 604 510, 564 540, 512 550"
-        fill="none" stroke="url(#brandGrad)" stroke-width="20" stroke-linecap="round"
-        stroke-linejoin="round"/>
-
-  <!-- ── Teardrop / water drop at centre ──────────────────────────────────
-       Teardrop: rounded bottom, pointed top                               -->
-  <ellipse cx="512" cy="560" rx="48" ry="60" fill="url(#brandGrad)"/>
-  <!-- Pointed top of teardrop -->
-  <path d="M 464 540 Q 512 480, 560 540" fill="url(#brandGrad)"/>
-
-  <!-- ── Lower stem below teardrop ─────────────────────────────────────── -->
-  <path d="M 512 622 L 512 760" fill="none" stroke="url(#brandGrad)"
-        stroke-width="20" stroke-linecap="round"/>
-
-  <!-- ── Small cap dash at very top (matches the logo's top detail) ────── -->
-  <line x1="480" y1="192" x2="544" y2="192" stroke="#FFFFFF" stroke-width="14"
-        stroke-linecap="round" opacity="0.8"/>
-  <line x1="494" y1="208" x2="530" y2="208" stroke="#FFFFFF" stroke-width="10"
-        stroke-linecap="round" opacity="0.5"/>
+  <!-- ── Waveform hint below the blocks (Ice Blue) ────────────────────── -->
+  <polyline
+    points="60,352 84,334 108,360 132,324 156,368 180,338 204,356 228,330 252,360 276,336 300,352 324,328 348,360 372,338 396,350 420,330 452,352"
+    fill="none" stroke="#7EDCFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"
+    opacity="0.55"/>
 </svg>

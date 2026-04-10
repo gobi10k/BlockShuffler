@@ -4,44 +4,42 @@
 namespace BlockShuffler {
 
 /**
- * RiverMix brand palette — extracted from the RiverMix wordmark and icon.
- *
- * Foundation: pure black backgrounds, white text, and a single
- * blue→cyan gradient as the signature accent.  No rainbow palette.
- *
- * Gradient: Deep Blue #1E40FF → Mid Blue #2B7FFF → Cyan #00C8FF
+ * BlockShuffler brand palette — dark precision + neon energy + modular clarity.
+ * Generated from the BlockShuffler logo aesthetic brief (April 2026).
  */
 class LookAndFeel_BlockShuffler : public juce::LookAndFeel_V4 {
 public:
-    // ── Backgrounds (near-black family) ───────────────────────────────────────
-    static constexpr juce::uint32 bgDark        = 0xFF000000;  // Pure Black
-    static constexpr juce::uint32 bgMedium      = 0xFF080810;  // Near Black
-    static constexpr juce::uint32 bgLight       = 0xFF10101C;  // Very Dark Blue-Black
-    static constexpr juce::uint32 panelCol      = 0xFF181828;  // Dark Panel
+    // ── Backgrounds ───────────────────────────────────────────────────────────
+    static constexpr juce::uint32 bgDark        = 0xFF0B0D10;  // Void Black
+    static constexpr juce::uint32 bgMedium      = 0xFF121825;  // Graphite Blue
+    static constexpr juce::uint32 bgLight       = 0xFF1C2533;  // Slate Steel
+    static constexpr juce::uint32 panelCol      = 0xFF24324A;  // Deep Navy
 
     // ── Text ──────────────────────────────────────────────────────────────────
-    static constexpr juce::uint32 textPrimary   = 0xFFFFFFFF;  // Pure White  (matches "River")
-    static constexpr juce::uint32 textSecondary = 0xFF8B96B0;  // Cool Gray
+    static constexpr juce::uint32 textPrimary   = 0xFFF4F7FB;  // Soft White
+    static constexpr juce::uint32 textSecondary = 0xFFA7B0C0;  // Cool Gray
 
-    // ── Brand gradient (use accentCyan as the "hot" highlight) ────────────────
-    static constexpr juce::uint32 accentCyan    = 0xFF00C8FF;  // Electric Cyan  — gradient top
-    static constexpr juce::uint32 accentMid     = 0xFF2B7FFF;  // Mid Blue       — gradient mid
-    static constexpr juce::uint32 accentDeep    = 0xFF1E40FF;  // Deep Blue      — gradient base
+    // ── Accents (use sparingly against the dark base) ─────────────────────────
+    static constexpr juce::uint32 accentCol     = 0xFF25D7F2;  // Neon Cyan      — primary
+    static constexpr juce::uint32 accentViolet  = 0xFF7B5CFF;  // Electric Violet
+    static constexpr juce::uint32 accentMagenta = 0xFFFF4FB8;  // Hot Magenta
+    static constexpr juce::uint32 accentLime    = 0xFFA6F46A;  // Signal Lime
+    static constexpr juce::uint32 accentAmber   = 0xFFFFB347;  // Amber Pulse
+    static constexpr juce::uint32 accentCoral   = 0xFFFF6B6B;  // Infrared Coral
+    static constexpr juce::uint32 accentIceBlue = 0xFF7EDCFF;  // Ice Blue
+    static constexpr juce::uint32 accentTeal    = 0xFF20C997;  // Acid Teal
 
     // ── Functional / audio UI ─────────────────────────────────────────────────
-    static constexpr juce::uint32 waveformFill   = 0xFF00C8FF;  // Cyan waveform
-    static constexpr juce::uint32 gridLineColor  = 0xFF1A1A2E;  // Very subtle grid
-    static constexpr juce::uint32 startMarkerCol = 0xFF00C8FF;  // Cyan  (bright / positive)
-    static constexpr juce::uint32 endMarkerCol   = 0xFFFFFFFF;  // White (clean / end)
-    static constexpr juce::uint32 playheadCol    = 0xFF2B7FFF;  // Mid Blue playhead
-
-    // Convenience aliases used by older paint() callsites
-    static constexpr juce::uint32 accentCol     = accentCyan;   // primary accent = Cyan
+    static constexpr juce::uint32 waveformFill   = 0xFF7EDCFF;  // Ice Blue waveform
+    static constexpr juce::uint32 gridLineColor  = 0xFF1E2E45;  // subtle grid on panels
+    static constexpr juce::uint32 startMarkerCol = 0xFFA6F46A;  // Signal Lime  (green ≈ start)
+    static constexpr juce::uint32 endMarkerCol   = 0xFFFF6B6B;  // Infrared Coral (red ≈ end)
+    static constexpr juce::uint32 playheadCol    = 0xFFFF4FB8;  // Hot Magenta playhead
 
     LookAndFeel_BlockShuffler();
     ~LookAndFeel_BlockShuffler() override = default;
 
-    // Block colors — cool-blue family matching the brand gradient
+    // Default block colors — full accent palette
     static juce::Array<juce::Colour> getBlockPalette();
 };
 

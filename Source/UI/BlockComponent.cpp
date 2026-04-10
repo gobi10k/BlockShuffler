@@ -104,13 +104,13 @@ void BlockComponent::paint(juce::Graphics& g) {
     // Drag-target indicator: bright border + label
     if (dragTarget) {
         if (dragTargetIsReorder) {
-            g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentMid).withAlpha(0.9f));
+            g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentViolet).withAlpha(0.9f));
             g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f, 2.5f);
             g.setFont(10.0f);
             g.drawText("REORDER", getLocalBounds().withTrimmedTop(getHeight() / 2),
                        juce::Justification::centred);
         } else {
-            g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCyan).withAlpha(0.9f));
+            g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentTeal).withAlpha(0.9f));
             g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f, 2.5f);
             g.setFont(10.0f);
             g.drawText("STACK", getLocalBounds().withTrimmedTop(getHeight() / 2),

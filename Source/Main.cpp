@@ -35,111 +35,60 @@ private:
     juce::AudioBuffer<float>       mixBuffer;
 };
 
-/**
- * Draw the RiverMix app icon programmatically into a juce::Image.
- * Approximates the flowing logo mark: white outer arcs, blue→cyan
- * inner strokes, teardrop, on pure black.
- */
+/** Draw the BlockShuffler icon programmatically into a juce::Image. */
 static juce::Image createAppIcon()
 {
+    using LF = BlockShuffler::LookAndFeel_BlockShuffler;
     const int sz = 256;
     juce::Image img(juce::Image::ARGB, sz, sz, true);
     juce::Graphics g(img);
 
-    // Brand colors
-    const juce::Colour black  { 0xFF000000 };
-    const juce::Colour white  { 0xFFFFFFFF };
-    const juce::Colour cyan   { 0xFF00C8FF };
-    const juce::Colour mid    { 0xFF2B7FFF };
-    const juce::Colour deep   { 0xFF1E40FF };
+    // Rounded background: Graphite Blue
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(0.0f, 0.0f, (float)sz, (float)sz, 48.0f);
 
-    const float cx = sz / 2.0f;
-    const float cy = sz / 2.0f;
+    // Three blocks representing the arrangement strip
+    const int bw = 46, bh = 90;
+    const int by = (sz - bh) / 2;
 
-    // Pure black background
-    g.fillAll(black);
+    // Block 1 (left) — Neon Cyan
+    g.setColour(juce::Colour(LF::accentCol));
+    g.fillRoundedRectangle(28.0f, (float)by, (float)bw, (float)bh, 8.0f);
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(32.0f, (float)(by + 8), (float)(bw - 8), (float)(bh - 16), 5.0f);
 
-    // ── Outer white circle arcs (left 110°–250°, right 290°–70°) ─────────
-    g.setColour(white.withAlpha(0.9f));
-    juce::Path leftArc, rightArc;
-    leftArc .addCentredArc(cx, cy, 90, 90, 0,
-                            juce::degreesToRadians(110.0f),
-                            juce::degreesToRadians(250.0f), true);
-    rightArc.addCentredArc(cx, cy, 90, 90, 0,
-                            juce::degreesToRadians(290.0f),
-                            juce::degreesToRadians(430.0f), true);
-    g.strokePath(leftArc,  juce::PathStrokeType(7.0f, juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
-    g.strokePath(rightArc, juce::PathStrokeType(7.0f, juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
+    // Block 2 (centre) — Electric Violet, slightly shorter
+    const int b2h = 58, b2y = (sz - b2h) / 2;
+    g.setColour(juce::Colour(LF::accentViolet));
+    g.fillRoundedRectangle(105.0f, (float)b2y, (float)bw, (float)b2h, 8.0f);
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(109.0f, (float)(b2y + 8), (float)(bw - 8), (float)(b2h - 16), 5.0f);
 
-    // ── Inner arcs (semi-transparent) ────────────────────────────────────
-    g.setColour(white.withAlpha(0.35f));
-    juce::Path lIn, rIn;
-    lIn.addCentredArc(cx, cy, 70, 70, 0,
-                       juce::degreesToRadians(118.0f), juce::degreesToRadians(242.0f), true);
-    rIn.addCentredArc(cx, cy, 70, 70, 0,
-                       juce::degreesToRadians(298.0f), juce::degreesToRadians(422.0f), true);
-    g.strokePath(lIn, juce::PathStrokeType(5.0f, juce::PathStrokeType::curved,
+    // Block 3 (right) — Neon Cyan
+    g.setColour(juce::Colour(LF::accentCol));
+    g.fillRoundedRectangle(182.0f, (float)by, (float)bw, (float)bh, 8.0f);
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(186.0f, (float)(by + 8), (float)(bw - 8), (float)(bh - 16), 5.0f);
+
+    // Connecting arrows — Hot Magenta
+    g.setColour(juce::Colour(LF::accentMagenta));
+    const float ay = (float)(sz / 2);
+    g.drawLine(76.0f, ay, 103.0f, ay, 3.5f);
+    g.drawLine(153.0f, ay, 180.0f, ay, 3.5f);
+
+    // Tiny arrowheads
+    juce::Path ah;
+    ah.startNewSubPath(99.0f, ay - 6.0f);
+    ah.lineTo(105.0f, ay);
+    ah.lineTo(99.0f, ay + 6.0f);
+    g.strokePath(ah, juce::PathStrokeType(3.0f, juce::PathStrokeType::curved,
+                                           juce::PathStrokeType::rounded));
+    juce::Path ah2;
+    ah2.startNewSubPath(176.0f, ay - 6.0f);
+    ah2.lineTo(182.0f, ay);
+    ah2.lineTo(176.0f, ay + 6.0f);
+    g.strokePath(ah2, juce::PathStrokeType(3.0f, juce::PathStrokeType::curved,
                                             juce::PathStrokeType::rounded));
-    g.strokePath(rIn, juce::PathStrokeType(5.0f, juce::PathStrokeType::curved,
-                                            juce::PathStrokeType::rounded));
-
-    // ── Top left wing curve (cyan) ────────────────────────────────────────
-    g.setColour(cyan);
-    juce::Path wingL;
-    wingL.startNewSubPath(cx, 28.0f);
-    wingL.cubicTo(cx - 24, 24, cx - 58, 20, cx - 82, 38);
-    g.strokePath(wingL, juce::PathStrokeType(6.0f, juce::PathStrokeType::curved,
-                                              juce::PathStrokeType::rounded));
-
-    // ── Top right wing curve (deep blue) ─────────────────────────────────
-    g.setColour(deep);
-    juce::Path wingR;
-    wingR.startNewSubPath(cx, 28.0f);
-    wingR.cubicTo(cx + 24, 24, cx + 58, 20, cx + 82, 38);
-    g.strokePath(wingR, juce::PathStrokeType(6.0f, juce::PathStrokeType::curved,
-                                              juce::PathStrokeType::rounded));
-
-    // ── Vertical stem ─────────────────────────────────────────────────────
-    g.setColour(cyan);
-    g.drawLine(cx, 28, cx, 88, 7.0f);
-
-    // ── Fork (left prong — cyan) ──────────────────────────────────────────
-    g.setColour(cyan);
-    juce::Path forkL;
-    forkL.startNewSubPath(cx, 88);
-    forkL.cubicTo(cx - 12, 104, cx - 22, 126, cx, 140);
-    g.strokePath(forkL, juce::PathStrokeType(6.5f, juce::PathStrokeType::curved,
-                                              juce::PathStrokeType::rounded));
-
-    // ── Fork (right prong — deep blue) ───────────────────────────────────
-    g.setColour(deep);
-    juce::Path forkR;
-    forkR.startNewSubPath(cx, 88);
-    forkR.cubicTo(cx + 12, 104, cx + 22, 126, cx, 140);
-    g.strokePath(forkR, juce::PathStrokeType(6.5f, juce::PathStrokeType::curved,
-                                              juce::PathStrokeType::rounded));
-
-    // ── Teardrop (mid blue fill, cyan tint) ───────────────────────────────
-    g.setColour(mid);
-    juce::Path drop;
-    drop.addEllipse(cx - 16, 140, 32, 40);
-    drop.startNewSubPath(cx - 10, 142);
-    drop.quadraticTo(cx, 128, cx + 10, 142);
-    g.fillPath(drop);
-    g.setColour(cyan.withAlpha(0.55f));
-    g.fillPath(drop);
-
-    // ── Lower stem ────────────────────────────────────────────────────────
-    g.setColour(deep);
-    g.drawLine(cx, 182, cx, 220, 7.0f);
-
-    // ── Cap dashes at the top ─────────────────────────────────────────────
-    g.setColour(white.withAlpha(0.75f));
-    g.drawLine(cx - 14, 18, cx + 14, 18, 5.5f);
-    g.setColour(white.withAlpha(0.45f));
-    g.drawLine(cx - 9,  10, cx + 9,  10, 4.0f);
 
     return img;
 }
