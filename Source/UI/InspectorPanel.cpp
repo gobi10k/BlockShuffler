@@ -58,8 +58,22 @@ InspectorPanel::InspectorPanel()
     clipDoneToggle .addListener(this); addAndMakeVisible(clipDoneToggle);
 
     // ── Block section ────────────────────────────────────────────────────────
-    setupLabel(this, blockTitle,   "BLOCK",                   11.0f, true);
-    setupLabel(this, overlapLabel, "Overlap Probability (%)", 12.0f);
+    setupLabel(this, blockTitle,      "BLOCK",                   11.0f, true);
+    setupLabel(this, blockTempoLabel, "Block Tempo (BPM)",       12.0f);
+    setupLabel(this, overlapLabel,    "Overlap Probability (%)", 12.0f);
+
+    blockTempoField.onValueChanged = [this](double t) {
+        if (selectedBlock && !updatingFromModel && project) {
+            if (t > 0.0) {
+                auto pre = project->toJSON();
+                for (auto* c : selectedBlock->clips)
+                    c->tempo = t;
+                project->applyExternalMutation(pre);
+            }
+        }
+    };
+    blockTempoField.setTooltip("Set the tempo for all clips in this block");
+    addAndMakeVisible(blockTempoField);
 
     blockDoneToggle.addListener(this);
     addAndMakeVisible(blockDoneToggle);
@@ -122,6 +136,20 @@ InspectorPanel::InspectorPanel()
     };
     addAndMakeVisible(playModeCombo);
 
+
+    // ── Project section (no block selected) ──────────────────────────────────
+    setupLabel(this, projectTitle,     "PROJECT",              11.0f, true);
+    setupLabel(this, defaultTempoLabel,"Default Clip Tempo (BPM)", 12.0f);
+
+    defaultTempoField.onValueChanged = [this](double t) {
+        if (!updatingFromModel && project) {
+            project->defaultClipTempo = t;
+            // Notify MainComponent so waveformView.defaultTempo stays in sync
+            project->sendChangeMessage();
+        }
+    };
+    defaultTempoField.setTooltip("Default tempo applied to new clips when they are loaded");
+    addAndMakeVisible(defaultTempoField);
 
     // ── Links section ────────────────────────────────────────────────────────
     setupLabel(this, linksTitle, "LINKS", 11.0f, true);
@@ -455,9 +483,18 @@ void InspectorPanel::updateFromModel() {
     }
 
     // ── Block section
-    blockDoneToggle.setEnabled(hasBlock);
-    if (hasBlock)
+    blockDoneToggle .setEnabled(hasBlock);
+    blockTempoField .setEnabled(hasBlock);
+    blockTempoLabel .setVisible(hasBlock);
+    blockTempoField .setVisible(hasBlock);
+    if (hasBlock) {
         blockDoneToggle.setToggleState(selectedBlock->isDone, juce::dontSendNotification);
+        // Show the first non-zero clip tempo as the representative "block tempo"
+        double bt = 0.0;
+        for (auto* c : selectedBlock->clips) { if (c->tempo > 0.0) { bt = c->tempo; break; } }
+        if (bt <= 0.0) bt = (project ? project->defaultClipTempo : 120.0);
+        blockTempoField.setValue(bt, juce::dontSendNotification);
+    }
 
     const bool canOverlap = hasBlock && selectedBlock->isOverlapping;
     overlapSlider.setEnabled(canOverlap);
@@ -532,6 +569,14 @@ void InspectorPanel::updateFromModel() {
     // Block list labels
     for (auto* lbl : stackBlockLabels)
         lbl->setVisible(inStack);
+
+    // ── Project section (no block selected)
+    const bool showProject = !hasBlock;
+    projectTitle      .setVisible(showProject);
+    defaultTempoLabel .setVisible(showProject);
+    defaultTempoField .setVisible(showProject);
+    if (showProject && project)
+        defaultTempoField.setValue(project->defaultClipTempo, juce::dontSendNotification);
 
     // ── Links section
     for (auto* row : linkRows)
@@ -712,6 +757,11 @@ void InspectorPanel::resized() {
 
     // ── Block section
     blockTitle     .setBounds(area.removeFromTop(rh)); area.removeFromTop(gap);
+    if (blockTempoLabel.isVisible()) {
+        blockTempoLabel.setBounds(area.removeFromTop(rh));
+        blockTempoField.setBounds(area.removeFromTop(rh));
+        area.removeFromTop(gap);
+    }
     blockDoneToggle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
     overlapLabel   .setBounds(area.removeFromTop(rh));
     overlapSlider  .setBounds(area.removeFromTop(slh));
@@ -767,6 +817,14 @@ void InspectorPanel::resized() {
     }
 
     area.removeFromTop(sec - gap);
+
+    // ── Project section (shown when no block selected)
+    if (projectTitle.isVisible()) {
+        projectTitle     .setBounds(area.removeFromTop(rh)); area.removeFromTop(gap);
+        defaultTempoLabel.setBounds(area.removeFromTop(rh));
+        defaultTempoField.setBounds(area.removeFromTop(rh));
+        area.removeFromTop(gap);
+    }
 
     // ── Links section
     linksTitle.setBounds(area.removeFromTop(rh)); area.removeFromTop(gap);

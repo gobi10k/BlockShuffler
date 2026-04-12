@@ -125,7 +125,9 @@ public:
 
             // Set the window icon to the brand icon (programmatic, no file I/O needed)
             setIcon(createAppIcon());
+#if JUCE_MAC
             juce::Process::setDockIconVisible(true);
+#endif
 
             // Set up audio device to drive the playback engine
             deviceManager.initialiseWithDefaultDevices(0, 2);

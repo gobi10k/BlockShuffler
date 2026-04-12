@@ -124,6 +124,15 @@ void BlockComponent::paint(juce::Graphics& g) {
         g.setFont(10.0f);
         g.drawText("DONE", getLocalBounds().removeFromBottom(16), juce::Justification::centred);
     }
+
+    // Clip-drop highlight: amber border + "ADD CLIP" label
+    if (clipDropHighlight) {
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentAmber).withAlpha(0.9f));
+        g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f, 2.5f);
+        g.setFont(10.0f);
+        g.drawText("ADD CLIP", getLocalBounds().withTrimmedTop(getHeight() / 2),
+                   juce::Justification::centred);
+    }
 }
 
 void BlockComponent::resized() {
@@ -187,6 +196,28 @@ void BlockComponent::mouseDrag(const juce::MouseEvent& e) {
 
 void BlockComponent::mouseDoubleClick(const juce::MouseEvent&) {
     nameLabel.showEditor();
+}
+
+bool BlockComponent::isInterestedInDragSource(const SourceDetails& details) {
+    return details.description.toString().startsWith("clip:");
+}
+
+void BlockComponent::itemDropped(const SourceDetails& details) {
+    clipDropHighlight = false;
+    repaint();
+    if (!block) return;
+    juce::String clipId = details.description.toString().substring(5);  // strip "clip:"
+    if (onClipDropped) onClipDropped(clipId, block->id);
+}
+
+void BlockComponent::itemDragEnter(const SourceDetails&) {
+    clipDropHighlight = true;
+    repaint();
+}
+
+void BlockComponent::itemDragExit(const SourceDetails&) {
+    clipDropHighlight = false;
+    repaint();
 }
 
 void BlockComponent::showContextMenu() {

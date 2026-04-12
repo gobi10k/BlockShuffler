@@ -18,6 +18,7 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     blockStrip.onBlockSelected = [this](Block* block) {
         applyBlockSelection(block);
     };
+    waveformView.defaultTempo = project->defaultClipTempo;
 
     waveformView.onClipSelected = [this](Clip* clip) {
         inspectorPanel.setClip(clip, selectedBlock);
@@ -34,6 +35,32 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     transportBar.onExport = [this] { exportProject(); };
     transportBar.onSave   = [this] { saveProject(); };
     transportBar.onOpen   = [this] { openProject(); };
+
+    blockStrip.onClipDropped = [this](const juce::String& clipId, const juce::String& targetBlockId) {
+        if (!project) return;
+        // Find the clip and its source block
+        Block* sourceBlock = nullptr;
+        Clip*  movedClip   = nullptr;
+        for (auto* b : project->blocks) {
+            for (auto* c : b->clips) {
+                if (c->id == clipId) { sourceBlock = b; movedClip = c; break; }
+            }
+            if (movedClip) break;
+        }
+        auto* targetBlock = project->getBlockById(targetBlockId);
+        if (!movedClip || !sourceBlock || !targetBlock || sourceBlock == targetBlock) return;
+
+        auto pre = project->toJSON();
+        // Transfer ownership: take clip out of source, add to target
+        for (int i = 0; i < sourceBlock->clips.size(); ++i) {
+            if (sourceBlock->clips[i] == movedClip) {
+                std::unique_ptr<Clip> owned(sourceBlock->clips.removeAndReturn(i));
+                targetBlock->clips.add(owned.release());
+                break;
+            }
+        }
+        project->applyExternalMutation(pre);
+    };
 
     blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
         currentArrangement = resolver.resolve(*project, rng);
@@ -143,6 +170,7 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
             ext == ".flac" || ext == ".ogg"  || ext == ".mp3") {
             auto clip = std::make_unique<Clip>();
             if (clip->loadFromFile(file, project->formatManager, project->sampleRate)) {
+                if (project->defaultClipTempo > 0.0) clip->tempo = project->defaultClipTempo;
                 selectedBlock->addClip(std::move(clip));
                 anyAdded = true;
             }
@@ -153,6 +181,9 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
 }
 
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) {
+    // Keep waveformView in sync with project default tempo (may have changed via undo/redo)
+    waveformView.defaultTempo = project->defaultClipTempo;
+
     // Re-validate the selected block pointer — undo/redo may have deleted/recreated it.
     auto* found = project->getBlockById(selectedBlockId);
     if (found != selectedBlock) {
@@ -342,6 +373,8 @@ void MainComponent::loadProject(const juce::File& file) {
     if (!project->blocks.isEmpty()) {
         blockStrip.selectBlock(project->blocks.getFirst());  // fires onBlockSelected → applyBlockSelection
     }
+    waveformView.defaultTempo = project->defaultClipTempo;
+    project->sendChangeMessage();  // ensures BlockStrip runs its async rebuildBlocks()+resized()
 }
 
 void MainComponent::updateTimeDisplay() {
@@ -369,27 +402,27 @@ void MainComponent::updateTimeDisplay() {
             nowPlayingBlockId = firstEntry.blockId;
             nowPlayingClipId = firstEntry.clipId;
 
-            // After trimming: startMark=0, so bodyStart = timelinePos, bodyEnd = timelinePos + endMark
-            int64_t bodyStart = firstEntry.timelinePos;
+            // bodyStart = timelinePos + startMark (lead-in starts at timelinePos)
+            int64_t bodyStart = firstEntry.timelinePos + firstEntry.startMark;
             int64_t bodyEnd   = firstEntry.timelinePos + firstEntry.endMark;
 
             if (headSamples >= bodyStart && headSamples < bodyEnd) {
                 // Currently within clip body - map to original clip position
                 int64_t posInTrimmed = headSamples - bodyStart;
-                clipSamplePos = firstEntry.originalStartMark + posInTrimmed;
+                clipSamplePos = firstEntry.startMark + posInTrimmed;
             } else if (headSamples < bodyStart) {
-                // Before clip starts - show at original start marker
-                clipSamplePos = firstEntry.originalStartMark;
+                // Before body starts (still in lead-in) - show at start marker
+                clipSamplePos = firstEntry.startMark;
             } else {
                 // After first clip - use normal tracking
                 for (const auto& entry : currentArrangement.entries) {
-                    int64_t eb = entry.timelinePos;  // startMark is 0 after trimming
+                    int64_t eb = entry.timelinePos + entry.startMark;
                     int64_t ee = entry.timelinePos + entry.endMark;
                     if (headSamples >= eb && headSamples < ee) {
                         nowPlayingBlockId = entry.blockId;
                         nowPlayingClipId = entry.clipId;
                         int64_t posInTrimmed = headSamples - eb;
-                        clipSamplePos = entry.originalStartMark + posInTrimmed;
+                        clipSamplePos = entry.startMark + posInTrimmed;
                         break;
                     }
                 }
@@ -397,17 +430,6 @@ void MainComponent::updateTimeDisplay() {
         }
 
         blockStrip.setPlayingBlock(nowPlayingBlockId);
-
-        // Always switch waveform to show the playing block's clips
-        if (!nowPlayingBlockId.isEmpty()) {
-            selectedBlockId = nowPlayingBlockId;
-            selectedBlock = project->getBlockById(nowPlayingBlockId);
-            if (selectedBlock) {
-                waveformView.setBlock(selectedBlock, project->sampleRate, &project->formatManager);
-                inspectorPanel.setBlock(selectedBlock);
-            }
-        }
-
         waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, currentArrangement.sampleRate);
     }
 }

@@ -10,6 +10,7 @@ juce::var projectToJSON(const Project& project) {
     root->setProperty("version", 1);
     root->setProperty("name", project.name);
     root->setProperty("sampleRate", project.sampleRate);
+    root->setProperty("defaultClipTempo", project.defaultClipTempo);
 
     // Blocks
     juce::Array<juce::var> blocksArray;
@@ -88,8 +89,9 @@ juce::var projectToJSON(const Project& project) {
 bool projectFromJSON(const juce::var& json, Project& project) {
     if (!json.isObject()) return false;
 
-    project.name       = json.getProperty("name",       "Untitled").toString();
-    project.sampleRate = (double)json.getProperty("sampleRate", 48000.0);
+    project.name             = json.getProperty("name",            "Untitled").toString();
+    project.sampleRate       = (double)json.getProperty("sampleRate",       48000.0);
+    project.defaultClipTempo = (double)json.getProperty("defaultClipTempo", 120.0);
 
     // Blocks
     if (auto* blocksArr = json.getProperty("blocks", juce::var()).getArray()) {

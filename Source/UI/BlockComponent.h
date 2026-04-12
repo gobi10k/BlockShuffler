@@ -10,7 +10,8 @@ namespace BlockShuffler {
  * Double-click: inline rename.
  * Drag: reorder via DragAndDropContainer.
  */
-class BlockComponent : public juce::Component {
+class BlockComponent : public juce::Component,
+                       public juce::DragAndDropTarget {
 public:
     BlockComponent(Block& block,
                    std::function<void(Block*)>              onSelected,
@@ -34,13 +35,20 @@ public:
     bool isSelected()   const { return selected; }
     Block* getBlock()         { return block.get(); }
 
+    // DragAndDropTarget — accepts clip drops from ClipRowComponent
+    bool isInterestedInDragSource(const SourceDetails& details) override;
+    void itemDropped(const SourceDetails& details) override;
+    void itemDragEnter(const SourceDetails& details) override;
+    void itemDragExit(const SourceDetails& details) override;
+
 private:
     juce::WeakReference<Block> block;
-    bool selected    = false;
-    bool highlighted = false;
-    bool playing     = false;
-    bool dragTarget  = false;
-    bool dragTargetIsReorder = false;  ///< true = reorder within stack, false = stack
+    bool selected         = false;
+    bool highlighted      = false;
+    bool playing          = false;
+    bool dragTarget       = false;
+    bool dragTargetIsReorder  = false;  ///< true = reorder within stack, false = stack
+    bool clipDropHighlight    = false;  ///< true = a clip is being dragged over this block
 
     std::function<void(Block*)>              onSelected;
     std::function<void(const juce::String&)> onDeleteRequested;
@@ -49,6 +57,9 @@ private:
     std::function<void(const juce::String&)> onStackRequested;
 
 public:
+    /// Called when a clip is dropped onto this block: (clipId, targetBlockId)
+    std::function<void(const juce::String&, const juce::String&)> onClipDropped;
+
     /// Called just before a context-menu action changes the model — returns a project snapshot.
     std::function<juce::var()>             onCaptureSnapshot;
     /// Called after a context-menu mutation, with the pre-change snapshot, to record undo.

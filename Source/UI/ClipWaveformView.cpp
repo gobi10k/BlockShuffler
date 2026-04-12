@@ -245,6 +245,24 @@ void ClipRowComponent::mouseDoubleClick(const juce::MouseEvent& e) {
 }
 
 void ClipRowComponent::mouseDrag(const juce::MouseEvent& e) {
+    // If not dragging a marker, start a DnD drag to move this clip to another block
+    if (activeDrag == DragTarget::None && e.getDistanceFromDragStart() > 8 && clip) {
+        if (auto* dc = juce::DragAndDropContainer::findParentDragContainerFor(this)) {
+            if (!dc->isDragAndDropActive()) {
+                juce::Image img(juce::Image::ARGB, getWidth(), headerH, true);
+                {
+                    juce::Graphics ig(img);
+                    ig.setColour(clip->color.withAlpha(0.85f));
+                    ig.fillRoundedRectangle(img.getBounds().toFloat(), 4.0f);
+                    ig.setColour(juce::Colours::white);
+                    ig.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
+                    ig.drawText(clip->name, img.getBounds(), juce::Justification::centred);
+                }
+                dc->startDragging("clip:" + clip->id, this, juce::ScaledImage(img));
+            }
+        }
+        return;
+    }
     if (activeDrag == DragTarget::None) return;
 
     // Snap to tempo grid unless Shift is held (Shift = free drag)
@@ -356,6 +374,22 @@ ClipWaveformView::ClipWaveformView() {
 
     addClipBtn.onClick = [this] { browseForClip(); };
     addAndMakeVisible(addClipBtn);
+
+    auto applyZoom = [this] {
+        juce::MessageManager::callAsync(
+            [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
+                if (safe) safe->resized();
+            });
+    };
+    zoomInBtn .onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, 32.0f, zoomFactor * 1.5f); applyZoom(); };
+    zoomOutBtn.onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, 32.0f, zoomFactor / 1.5f); applyZoom(); };
+    zoomFitBtn.onClick = [this, applyZoom] { zoomFactor = 1.0f; applyZoom(); };
+    zoomInBtn .setTooltip("Zoom in  [Cmd+scroll]");
+    zoomOutBtn.setTooltip("Zoom out  [Cmd+scroll]");
+    zoomFitBtn.setTooltip("Reset zoom to fit");
+    addAndMakeVisible(zoomInBtn);
+    addAndMakeVisible(zoomOutBtn);
+    addAndMakeVisible(zoomFitBtn);
 }
 
 ClipWaveformView::~ClipWaveformView() {
@@ -450,6 +484,7 @@ void ClipWaveformView::browseForClip() {
                 if (f.existsAsFile()) {
                     auto clipPtr = std::make_unique<Clip>();
                     if (clipPtr->loadFromFile(f, *formatManager, projectSampleRate)) {
+                        if (defaultTempo > 0.0) clipPtr->tempo = defaultTempo;
                         currentBlock->addClip(std::move(clipPtr));
                         anyAdded = true;
                     }
@@ -595,6 +630,15 @@ void ClipWaveformView::paint(juce::Graphics& g) {
 void ClipWaveformView::resized() {
     auto area = getLocalBounds();
     addClipBtn.setBounds(area.removeFromBottom(btnH).reduced(4, 2));
+
+    // Zoom bar (bottom, above viewport)
+    auto zoomBar = area.removeFromBottom(zoomBarH).reduced(4, 2);
+    zoomOutBtn.setBounds(zoomBar.removeFromLeft(24));
+    zoomBar.removeFromLeft(2);
+    zoomFitBtn.setBounds(zoomBar.removeFromLeft(36));
+    zoomBar.removeFromLeft(2);
+    zoomInBtn .setBounds(zoomBar.removeFromLeft(24));
+
     viewport.setBounds(area);
 
     int visW   = juce::jmax(viewport.getMaximumVisibleWidth(), 1);

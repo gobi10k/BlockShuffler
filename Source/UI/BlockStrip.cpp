@@ -202,6 +202,9 @@ void BlockStrip::rebuildBlocks() {
         bc->onPlayFromHereRequested = [this](const juce::String& id) {
             if (onPlayFromHereRequested) onPlayFromHereRequested(id);
         };
+        bc->onClipDropped = [this](const juce::String& clipId, const juce::String& targetBlockId) {
+            if (onClipDropped) onClipDropped(clipId, targetBlockId);
+        };
         bc->setSelected(block->id == selectedBlockId);
         bc->setPlaying(block->id == playingBlockId);
         // Highlight potential targets when in link/stack mode

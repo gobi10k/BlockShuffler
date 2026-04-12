@@ -105,6 +105,10 @@ if(APPLE)
     )
 endif()
 
+if(UNIX AND NOT APPLE)
+    find_package(ALSA REQUIRED)
+endif()
+
 target_link_libraries(BlockShuffler
     PRIVATE
         BlockShufflerResources
@@ -124,3 +128,7 @@ target_link_libraries(BlockShuffler
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(BlockShuffler PRIVATE ALSA::ALSA)
+endif()

@@ -102,6 +102,8 @@ public:
         @param sampleRate The sample rate for samplePos calculation */
     void setPlayingClip(const juce::String& clipId, int64_t samplePos, double sampleRate);
 
+    double defaultTempo = 120.0;  ///< Applied to new clips when loaded; sync'd from Project::defaultClipTempo
+
     std::function<void(Clip*)> onClipSelected;
 
     // Wired by MainComponent so clip mutations are undoable
@@ -121,7 +123,12 @@ private:
     ZoomableViewport viewport;
     juce::Component contentArea;
     juce::OwnedArray<ClipRowComponent> clipRows;
-    juce::TextButton addClipBtn { "+ Add Clip" };
+    juce::TextButton addClipBtn  { "+ Add Clip" };
+    juce::TextButton zoomInBtn   { "+" };
+    juce::TextButton zoomOutBtn  { "-" };
+    juce::TextButton zoomFitBtn  { "Fit" };
+
+    static constexpr int zoomBarH = 24;
 
     juce::String playingClipId;
     int64_t      playingSamplePos = 0;

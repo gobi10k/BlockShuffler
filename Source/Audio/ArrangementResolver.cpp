@@ -82,8 +82,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     }
 
     // ── 5. Walk slots and build timeline ─────────────────────────────────────
-    int64_t cursor   = 0;
-    bool    songEnded = false;
+    int64_t cursor        = 0;
+    bool    songEnded     = false;
+    bool    firstEntryAdded = false;  // used to offset cursor so first clip's lead-in starts at t=0
 
     for (auto& slot : slots) {
         if (songEnded) break;
@@ -149,19 +150,23 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             auto* clip = pickClip(*block, rng);
             if (!clip) continue;
 
-            // Trim buffer to [startMark, endMark) region
-            auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
+            // Trim buffer to [0, endMark) — preserves lead-in before startMark
+            auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
             if (!trimmed) continue;
-            int64_t trimmedLen = trimmed->getNumSamples();
+
+            // Offset cursor so the first clip's lead-in starts at timeline position 0
+            if (!firstEntryAdded) { cursor = clip->startMark; firstEntryAdded = true; }
+            int64_t tPos    = cursor - clip->startMark;
+            int64_t bodyLen = clip->endMark - clip->startMark;
 
             result.entries.add({
                 trimmed,
-                0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                 clip->name, clip->id,
-                cursor, 1.0f, block->id
+                tPos, 1.0f, block->id
             });
 
-            cursor += trimmedLen;
+            cursor += bodyLen;
             if (clip->isSongEnder) songEnded = true;
 
         } else {
@@ -201,42 +206,50 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 (normal[0]->stackPlayMode == StackPlayMode::Simultaneous);
 
             if (isSimultaneous) {
-                // All picked blocks start at the same timeline position (trimmed buffers)
-                const int64_t slotStart = cursor;
+                // All picked blocks' bodies start at the same timeline position.
+                // Lead-ins may extend before that position (each clip's own startMark back).
                 const float stackGain = 1.0f / (float)juce::jmax(1, (int)picked.size());
 
-                // Collect picked clips so overlapping-block targeting can check them
                 juce::Array<Clip*> simultaneousClips;
-                int64_t maxTrimmedLen = 0;
+                int64_t maxBodyLen = 0;
+                int64_t bodyStart  = -1;  // latched on first valid clip
+
                 for (auto* b : picked) {
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
-                    auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
+
+                    auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
                     if (!trimmed) continue;
-                    int64_t trimmedLen = trimmed->getNumSamples();
+
+                    // Initialise cursor on first ever entry so lead-in starts at t=0
+                    if (!firstEntryAdded) { cursor = clip->startMark; firstEntryAdded = true; }
+                    if (bodyStart < 0) bodyStart = cursor;  // all bodies share this start
+
+                    int64_t tPos    = bodyStart - clip->startMark;
+                    int64_t bodyLen = clip->endMark - clip->startMark;
+
                     result.entries.add({
                         trimmed,
-                        0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                        clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                         clip->name, clip->id,
-                        slotStart, stackGain, b->id
+                        tPos, stackGain, b->id
                     });
-                    maxTrimmedLen = std::max(maxTrimmedLen, trimmedLen);
+                    maxBodyLen = std::max(maxBodyLen, bodyLen);
                     simultaneousClips.add(clip);
                     if (clip->isSongEnder) songEnded = true;
                 }
 
-                // Overlapping blocks layer on top of this slot
+                if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid
+
+                // Overlapping blocks layer on top of this slot (timelinePos = bodyStart)
                 for (auto* ob : overlapping) {
                     if (ob->isDone || ob->clips.isEmpty()) continue;
-                    // Clip targeting: allow only if at least one simultaneous clip is in the allowed list
                     if (!ob->allowedParentClipIds.isEmpty()) {
                         bool anyAllowed = false;
                         for (auto* sc : simultaneousClips)
                             if (ob->allowedParentClipIds.contains(sc->id)) { anyAllowed = true; break; }
-                        if (!anyAllowed) {
-                            continue;
-                        }
+                        if (!anyAllowed) continue;
                     }
                     if (rng.nextFloat() < ob->overlapProbability) {
                         auto* clip = pickClip(*ob, rng);
@@ -247,45 +260,48 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                     trimmed,
                                     0, (int64_t)trimmed->getNumSamples(), clip->startMark, clip->retainTailTempo,
                                     clip->name, clip->id,
-                                    slotStart, 1.0f, ob->id, true
+                                    bodyStart, 1.0f, ob->id, true
                                 });
                             }
                         }
                     }
                 }
-                cursor += maxTrimmedLen;
+                cursor += maxBodyLen;
 
             } else {
-                // Sequential: each picked block occupies its own time slot (trimmed buffers).
+                // Sequential: each picked block occupies its own time slot.
                 for (auto* b : picked) {
                     if (songEnded) break;
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
 
-                    // Trim buffer to [startMark, endMark)
-                    auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
+                    // Trim buffer to [0, endMark) — preserves lead-in
+                    auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
                     if (!trimmed) continue;
-                    int64_t trimmedLen = trimmed->getNumSamples();
+
+                    // Initialise cursor on first ever entry so lead-in starts at t=0
+                    if (!firstEntryAdded) { cursor = clip->startMark; firstEntryAdded = true; }
+                    int64_t tPos      = cursor - clip->startMark;
+                    int64_t bodyLen   = clip->endMark - clip->startMark;
+                    int64_t bodyStart = cursor;  // = tPos + startMark
 
                     result.entries.add({
                         trimmed,
-                        0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                        clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                         clip->name, clip->id,
-                        cursor, 1.0f, b->id
+                        tPos, 1.0f, b->id
                     });
 
-                    // Layer overlapping blocks on top of this picked block
+                    // Layer overlapping blocks on top of this picked block (bodies aligned)
                     for (auto* ob : overlapping) {
                         if (ob->isDone || ob->clips.isEmpty()) continue;
-                        // Clip targeting: skip if this overlay isn't allowed over the selected parent clip
                         if (!ob->allowedParentClipIds.isEmpty() &&
                             !ob->allowedParentClipIds.contains(clip->id))
                         {
                             continue;
                         }
-                        float roll = rng.nextFloat();
-                        if (roll < ob->overlapProbability) {
+                        if (rng.nextFloat() < ob->overlapProbability) {
                             auto* oc = pickClip(*ob, rng);
                             if (oc) {
                                 auto trimmedOverlay = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
@@ -294,13 +310,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                         trimmedOverlay,
                                         0, (int64_t)trimmedOverlay->getNumSamples(), oc->startMark, oc->retainTailTempo,
                                         oc->name, oc->id,
-                                        cursor, 1.0f, ob->id, true
+                                        bodyStart, 1.0f, ob->id, true
                                     });
                                 }
                             }
                         }
                     }
-                    cursor += trimmedLen;
+                    cursor += bodyLen;
                     if (clip->isSongEnder) songEnded = true;
                 }
             }

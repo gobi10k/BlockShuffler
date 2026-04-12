@@ -107,6 +107,7 @@ private:
                 
                 setSize(200, 80);
                 textEditor.grabKeyboardFocus();
+                textEditor.selectAll();
             }
             
             bool keyPressed(const juce::KeyPress& key) override {
@@ -197,9 +198,16 @@ private:
 
     // ── Block section ────────────────────────────────────────────────────────
     juce::Label        blockTitle;
+    juce::Label        blockTempoLabel;
+    DraggableNumberBox blockTempoField  { 20.0, 300.0, 1 };
     juce::ToggleButton blockDoneToggle  { "Mark Block as Done" };
     juce::Label        overlapLabel;
     juce::Slider       overlapSlider;
+
+    // ── Project section (shown when no block selected) ───────────────────────
+    juce::Label        projectTitle;
+    juce::Label        defaultTempoLabel;
+    DraggableNumberBox defaultTempoField { 20.0, 300.0, 1 };
 
     // ── "Plays Over" section ─────────────────────────────────────────────────
     juce::Label playsOverTitle;

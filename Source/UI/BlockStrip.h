@@ -27,6 +27,8 @@ public:
 
     std::function<void(Block*)>              onBlockSelected;
     std::function<void(const juce::String&)> onPlayFromHereRequested;
+    /// Called when a clip is dragged and dropped onto a block: (clipId, targetBlockId)
+    std::function<void(const juce::String&, const juce::String&)> onClipDropped;
 
     /** Programmatic selection (e.g. on startup or project load). */
     void selectBlock(Block* block);

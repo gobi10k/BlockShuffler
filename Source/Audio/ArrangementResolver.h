@@ -11,9 +11,9 @@ namespace BlockShuffler {
  *  dangling pointers if model objects are deleted during playback. */
 struct ResolvedEntry {
     std::shared_ptr<juce::AudioBuffer<float>> audioBuffer;
-    int64_t      startMark;         // after trimming: always 0
-    int64_t      endMark;           // after trimming: trimmed length
-    int64_t      originalStartMark; // original clip's startMark (for playhead mapping)
+    int64_t      startMark;         // clip's startMark; buffer trimmed [0, endMark), lead-in is [0, startMark)
+    int64_t      endMark;           // clip's endMark; body is [startMark, endMark)
+    int64_t      originalStartMark; // same as startMark; kept for compatibility
     bool         retainTailTempo;
     juce::String clipName;
     juce::String clipId;
