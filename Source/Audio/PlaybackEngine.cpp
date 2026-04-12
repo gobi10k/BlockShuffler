@@ -193,26 +193,31 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
-    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
-    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
+    // Lead-in occupies [leadInStart, bodyStart) in the timeline.
+    // For the first entry (entryIndex == 0) there is no previous tail to crossfade
+    // with, so the lead-in plays at constant full gain (1.0 → 1.0).
+    // For subsequent entries the lead-in fades 0→1 to crossfade with the previous
+    // entry's tail.
     if (leadInLen > 0)
     {
+        const float liGainStart = (entryIndex == 0) ? 1.0f : 0.0f;
+
         if (entry.stretchedLeadIn)
         {
             // Pre-stretched buffer occupies [leadInStart, leadInStart + sl)
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBuf(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0.0, 0.0f, 1.0f);
+            mixBuf(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0.0, liGainStart, 1.0f);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
             // No stretching needed
-            mixBuf(src, leadInStart, bodyStart, 0.0, 0.0f, 1.0f);
+            mixBuf(src, leadInStart, bodyStart, 0.0, liGainStart, 1.0f);
         }
         else
         {
             // Fallback linear-interp (WSOLA failed or was bypassed)
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            mixBuf(src, leadInStart, leadInStart + leadInTL, 0.0, 0.0f, 1.0f);
+            mixBuf(src, leadInStart, leadInStart + leadInTL, 0.0, liGainStart, 1.0f);
         }
     }
 

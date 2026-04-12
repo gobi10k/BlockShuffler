@@ -73,9 +73,12 @@ void BlockComponent::paint(juce::Graphics& g) {
     g.setColour(playing ? juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol) : block->color);
     g.fillRoundedRectangle(bounds.removeFromTop(playing ? 9.0f : 8.0f), 3.0f);
 
-    // Border — accent if highlighted, block color otherwise
+    // Border — accent (blue) when selected by user, accent when highlighted (pending
+    // link/stack mode), block color otherwise. This is independent of the playing
+    // indicator (green top bar) so both states can coexist on different blocks.
     auto borderCol = highlighted ? juce::Colour(LookAndFeel_BlockShuffler::accentCol)
-                                 : block->color.withAlpha(selected ? 1.0f : 0.6f);
+                   : selected   ? juce::Colour(LookAndFeel_BlockShuffler::accentCol)
+                                : block->color.withAlpha(0.6f);
     g.setColour(borderCol);
     float borderW = (selected || highlighted) ? 2.0f : 1.0f;
     if (block->isOverlapping) {

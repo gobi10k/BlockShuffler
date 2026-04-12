@@ -66,13 +66,16 @@ InspectorPanel::InspectorPanel()
         if (selectedBlock && !updatingFromModel && project) {
             if (t > 0.0) {
                 auto pre = project->toJSON();
+                // Store the block-level tempo so new clips added later inherit it,
+                // and update all current clips so they all play to the same grid.
+                selectedBlock->tempo = t;
                 for (auto* c : selectedBlock->clips)
                     c->tempo = t;
                 project->applyExternalMutation(pre);
             }
         }
     };
-    blockTempoField.setTooltip("Set the tempo for all clips in this block");
+    blockTempoField.setTooltip("Set the tempo for all clips in this block (new clips will inherit this tempo)");
     addAndMakeVisible(blockTempoField);
 
     blockDoneToggle.addListener(this);
@@ -142,10 +145,12 @@ InspectorPanel::InspectorPanel()
     setupLabel(this, defaultTempoLabel,"Default Clip Tempo (BPM)", 12.0f);
 
     defaultTempoField.onValueChanged = [this](double t) {
-        if (!updatingFromModel && project) {
+        if (!updatingFromModel && project && t > 0.0) {
+            auto pre = project->toJSON();
             project->defaultClipTempo = t;
-            // Notify MainComponent so waveformView.defaultTempo stays in sync
-            project->sendChangeMessage();
+            // applyExternalMutation records the undo snapshot AND fires sendChangeMessage
+            // so MainComponent syncs waveformView.defaultTempo on the next tick.
+            project->applyExternalMutation(pre);
         }
     };
     defaultTempoField.setTooltip("Default tempo applied to new clips when they are loaded");
@@ -489,10 +494,12 @@ void InspectorPanel::updateFromModel() {
     blockTempoField .setVisible(hasBlock);
     if (hasBlock) {
         blockDoneToggle.setToggleState(selectedBlock->isDone, juce::dontSendNotification);
-        // Show the first non-zero clip tempo as the representative "block tempo"
-        double bt = 0.0;
-        for (auto* c : selectedBlock->clips) { if (c->tempo > 0.0) { bt = c->tempo; break; } }
-        if (bt <= 0.0) bt = (project ? project->defaultClipTempo : 120.0);
+        // Show the block's stored tempo.  This is authoritative: it stays fixed even when
+        // individual clip tempos are overridden, and is what new clips inherit.
+        // Fall back to project default only if the block tempo is somehow 0.
+        double bt = selectedBlock->tempo > 0.0
+                    ? selectedBlock->tempo
+                    : (project ? project->defaultClipTempo : 120.0);
         blockTempoField.setValue(bt, juce::dontSendNotification);
     }
 

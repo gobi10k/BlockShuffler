@@ -420,6 +420,19 @@ void ClipWaveformView::rebuildRows() {
     clipRows.clear();
     if (!currentBlock) return;
 
+    // If the previously selected clip is no longer in this block (e.g. it was dragged
+    // to another block), clear the selection and notify the inspector so it doesn't
+    // show stale properties for a clip that's gone.
+    if (selectedClip != nullptr) {
+        bool stillHere = false;
+        for (auto* c : currentBlock->clips)
+            if (c == selectedClip) { stillHere = true; break; }
+        if (!stillHere) {
+            selectedClip = nullptr;
+            if (onClipSelected) onClipSelected(nullptr);
+        }
+    }
+
     for (auto* clipPtr : currentBlock->clips) {
         auto* row = clipRows.add(new ClipRowComponent(
             *clipPtr,
@@ -484,7 +497,10 @@ void ClipWaveformView::browseForClip() {
                 if (f.existsAsFile()) {
                     auto clipPtr = std::make_unique<Clip>();
                     if (clipPtr->loadFromFile(f, *formatManager, projectSampleRate)) {
-                        if (defaultTempo > 0.0) clipPtr->tempo = defaultTempo;
+                        // Block tempo takes priority over project default for new clips.
+                        double blockT = currentBlock ? currentBlock->tempo : 0.0;
+                        clipPtr->tempo = (blockT > 0.0) ? blockT
+                                       : (defaultTempo > 0.0 ? defaultTempo : 120.0);
                         currentBlock->addClip(std::move(clipPtr));
                         anyAdded = true;
                     }
@@ -531,17 +547,15 @@ void ClipWaveformView::setPlayingClip(const juce::String& clipId, int64_t sample
         playingClipId = clipId;
         changed = true;
 
+        // Scroll the playing clip's row into view WITHOUT changing the user's selection.
+        // The playhead (red line in paintOverChildren) is the only visual playing indicator.
+        // Do NOT change selectedClip or any row's selected state here — that would override
+        // the clip the user explicitly clicked, switching the inspector to the playing clip.
         if (!clipId.isEmpty()) {
             for (int i = 0; i < clipRows.size(); ++i) {
                 auto* row = clipRows[i];
                 auto* clip = row->getClip();
                 if (clip != nullptr && !clip->id.isEmpty() && clip->id == clipId) {
-                    selectedClip = clip;
-                    row->setSelected(true);
-                    for (int j = 0; j < clipRows.size(); ++j) {
-                        if (j != i) clipRows[j]->setSelected(false);
-                    }
-
                     juce::MessageManager::callAsync([this, rowIndex = i]() {
                         if (rowIndex >= 0 && rowIndex < clipRows.size()) {
                             auto rowBounds = clipRows[rowIndex]->getBounds();

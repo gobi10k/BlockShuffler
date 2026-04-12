@@ -51,13 +51,24 @@ MainComponent::MainComponent(PlaybackEngine& eng)
         if (!movedClip || !sourceBlock || !targetBlock || sourceBlock == targetBlock) return;
 
         auto pre = project->toJSON();
-        // Transfer ownership: take clip out of source, add to target
+        // Transfer ownership: take clip out of source, add to target.
+        // Also update the clip's tempo to match the target block so it plays on the
+        // correct grid, then fire change messages on both blocks so their waveform
+        // views rebuild immediately (the clip disappears from the source row and
+        // appears in the target row without waiting for a project-level rebuild).
+        bool moved = false;
         for (int i = 0; i < sourceBlock->clips.size(); ++i) {
             if (sourceBlock->clips[i] == movedClip) {
-                std::unique_ptr<Clip> owned(sourceBlock->clips.removeAndReturn(i));
-                targetBlock->clips.add(owned.release());
+                Clip* rawClip = sourceBlock->clips.removeAndReturn(i);
+                rawClip->tempo = targetBlock->tempo > 0.0 ? targetBlock->tempo : rawClip->tempo;
+                targetBlock->clips.add(rawClip);
+                moved = true;
                 break;
             }
+        }
+        if (moved) {
+            sourceBlock->sendChangeMessage();  // source waveform view drops the clip row
+            targetBlock->sendChangeMessage();  // target waveform view gains the clip row
         }
         project->applyExternalMutation(pre);
     };
@@ -170,7 +181,10 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
             ext == ".flac" || ext == ".ogg"  || ext == ".mp3") {
             auto clip = std::make_unique<Clip>();
             if (clip->loadFromFile(file, project->formatManager, project->sampleRate)) {
-                if (project->defaultClipTempo > 0.0) clip->tempo = project->defaultClipTempo;
+                // Block tempo takes priority; fall back to project default.
+                clip->tempo = (selectedBlock->tempo > 0.0)
+                              ? selectedBlock->tempo
+                              : (project->defaultClipTempo > 0.0 ? project->defaultClipTempo : 120.0);
                 selectedBlock->addClip(std::move(clip));
                 anyAdded = true;
             }
