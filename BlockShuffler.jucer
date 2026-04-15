@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="zS4Ip5" name="BlockShuffler" companyName="gobi10k" version="1.0.0"
+              projectType="audioplug"
+              pluginName="BlockShuffler"
+              pluginDesc="Block-based arrangement randomizer"
+              pluginManufacturer="gobi10k"
+              pluginManufacturerCode="Gb1k"
+              pluginCode="BkSh"
+              pluginFormats="buildVST3,buildStandalone"
+              useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0"
+              jucerFormatVersion="1">
+
+  <MAINGROUP id="NRSShe" name="BlockShuffler">
+
+    <GROUP id="{E1000001-0000-0000-0000-000000000001}" name="Plugin">
+      <FILE id="PP0001" name="PluginProcessor.h"   compile="0" resource="0" file="Source/PluginProcessor.h"/>
+      <FILE id="PP0002" name="PluginProcessor.cpp" compile="1" resource="0" file="Source/PluginProcessor.cpp"/>
+      <FILE id="MC0001" name="MainComponent.h"     compile="0" resource="0" file="Source/MainComponent.h"/>
+      <FILE id="MC0002" name="MainComponent.cpp"   compile="1" resource="0" file="Source/MainComponent.cpp"/>
+    </GROUP>
+
+    <GROUP id="{E1000002-0000-0000-0000-000000000002}" name="Model">
+      <FILE id="MO0001" name="Project.h"        compile="0" resource="0" file="Source/Model/Project.h"/>
+      <FILE id="MO0002" name="Project.cpp"      compile="1" resource="0" file="Source/Model/Project.cpp"/>
+      <FILE id="MO0003" name="Block.h"          compile="0" resource="0" file="Source/Model/Block.h"/>
+      <FILE id="MO0004" name="Block.cpp"        compile="1" resource="0" file="Source/Model/Block.cpp"/>
+      <FILE id="MO0005" name="Clip.h"           compile="0" resource="0" file="Source/Model/Clip.h"/>
+      <FILE id="MO0006" name="Clip.cpp"         compile="1" resource="0" file="Source/Model/Clip.cpp"/>
+      <FILE id="MO0007" name="BlockLink.h"      compile="0" resource="0" file="Source/Model/BlockLink.h"/>
+      <FILE id="MO0008" name="BlockLink.cpp"    compile="1" resource="0" file="Source/Model/BlockLink.cpp"/>
+      <FILE id="MO0009" name="Serialization.h"  compile="0" resource="0" file="Source/Model/Serialization.h"/>
+      <FILE id="MO0010" name="Serialization.cpp" compile="1" resource="0" file="Source/Model/Serialization.cpp"/>
+    </GROUP>
+
+    <GROUP id="{E1000003-0000-0000-0000-000000000003}" name="Audio">
+      <FILE id="AU0001" name="ArrangementResolver.h"   compile="0" resource="0" file="Source/Audio/ArrangementResolver.h"/>
+      <FILE id="AU0002" name="ArrangementResolver.cpp" compile="1" resource="0" file="Source/Audio/ArrangementResolver.cpp"/>
+      <FILE id="AU0003" name="PlaybackEngine.h"        compile="0" resource="0" file="Source/Audio/PlaybackEngine.h"/>
+      <FILE id="AU0004" name="PlaybackEngine.cpp"      compile="1" resource="0" file="Source/Audio/PlaybackEngine.cpp"/>
+      <FILE id="AU0005" name="TempoStretcher.h"        compile="0" resource="0" file="Source/Audio/TempoStretcher.h"/>
+      <FILE id="AU0006" name="TempoStretcher.cpp"      compile="1" resource="0" file="Source/Audio/TempoStretcher.cpp"/>
+      <FILE id="AU0007" name="ExportRenderer.h"        compile="0" resource="0" file="Source/Audio/ExportRenderer.h"/>
+      <FILE id="AU0008" name="ExportRenderer.cpp"      compile="1" resource="0" file="Source/Audio/ExportRenderer.cpp"/>
+    </GROUP>
+
+    <GROUP id="{E1000004-0000-0000-0000-000000000004}" name="UI">
+      <FILE id="UI0001" name="BlockStrip.h"                compile="0" resource="0" file="Source/UI/BlockStrip.h"/>
+      <FILE id="UI0002" name="BlockStrip.cpp"              compile="1" resource="0" file="Source/UI/BlockStrip.cpp"/>
+      <FILE id="UI0003" name="BlockComponent.h"            compile="0" resource="0" file="Source/UI/BlockComponent.h"/>
+      <FILE id="UI0004" name="BlockComponent.cpp"          compile="1" resource="0" file="Source/UI/BlockComponent.cpp"/>
+      <FILE id="UI0005" name="BlockStackView.h"            compile="0" resource="0" file="Source/UI/BlockStackView.h"/>
+      <FILE id="UI0006" name="BlockStackView.cpp"          compile="1" resource="0" file="Source/UI/BlockStackView.cpp"/>
+      <FILE id="UI0007" name="ClipListPanel.h"             compile="0" resource="0" file="Source/UI/ClipListPanel.h"/>
+      <FILE id="UI0008" name="ClipListPanel.cpp"           compile="1" resource="0" file="Source/UI/ClipListPanel.cpp"/>
+      <FILE id="UI0009" name="ClipWaveformView.h"          compile="0" resource="0" file="Source/UI/ClipWaveformView.h"/>
+      <FILE id="UI0010" name="ClipWaveformView.cpp"        compile="1" resource="0" file="Source/UI/ClipWaveformView.cpp"/>
+      <FILE id="UI0011" name="InspectorPanel.h"            compile="0" resource="0" file="Source/UI/InspectorPanel.h"/>
+      <FILE id="UI0012" name="InspectorPanel.cpp"          compile="1" resource="0" file="Source/UI/InspectorPanel.cpp"/>
+      <FILE id="UI0013" name="TransportBar.h"              compile="0" resource="0" file="Source/UI/TransportBar.h"/>
+      <FILE id="UI0014" name="TransportBar.cpp"            compile="1" resource="0" file="Source/UI/TransportBar.cpp"/>
+      <FILE id="UI0015" name="BlockLinkOverlay.h"          compile="0" resource="0" file="Source/UI/BlockLinkOverlay.h"/>
+      <FILE id="UI0016" name="BlockLinkOverlay.cpp"        compile="1" resource="0" file="Source/UI/BlockLinkOverlay.cpp"/>
+      <FILE id="UI0017" name="LookAndFeel_BlockShuffler.h"   compile="0" resource="0" file="Source/UI/LookAndFeel_BlockShuffler.h"/>
+      <FILE id="UI0018" name="LookAndFeel_BlockShuffler.cpp" compile="1" resource="0" file="Source/UI/LookAndFeel_BlockShuffler.cpp"/>
+    </GROUP>
+
+    <GROUP id="{E1000005-0000-0000-0000-000000000005}" name="Utils">
+      <FILE id="UT0001" name="WeightedRandom.h"  compile="0" resource="0" file="Source/Utils/WeightedRandom.h"/>
+      <FILE id="UT0002" name="GridSnap.h"         compile="0" resource="0" file="Source/Utils/GridSnap.h"/>
+      <FILE id="UT0003" name="UuidGenerator.h"    compile="0" resource="0" file="Source/Utils/UuidGenerator.h"/>
+    </GROUP>
+
+  </MAINGROUP>
+
+  <MODULES>
+    <MODULE id="juce_audio_basics"        showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices"       showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats"       showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors"    showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_utils"         showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core"                showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures"     showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_dsp"                 showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events"              showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics"            showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics"          showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra"           showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+  </MODULES>
+
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_VST3_CAN_REPLACE_VST2="0"
+               JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0" JUCE_DISPLAY_SPLASH_SCREEN="0"/>
+
+  <EXPORTFORMATS>
+    <XCODE_MAC targetFolder="Builds/MacOSX">
+      <CONFIGURATIONS>
+        <CONFIGURATION name="Debug"   isDebug="1" optimisation="1" targetName="BlockShuffler"/>
+        <CONFIGURATION name="Release" isDebug="0" optimisation="3" targetName="BlockShuffler"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics"        path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices"       path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats"       path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors"    path="../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils"         path="../JUCE/modules"/>
+        <MODULEPATH id="juce_core"                path="../JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures"     path="../JUCE/modules"/>
+        <MODULEPATH id="juce_dsp"                 path="../JUCE/modules"/>
+        <MODULEPATH id="juce_events"              path="../JUCE/modules"/>
+        <MODULEPATH id="juce_graphics"            path="../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics"          path="../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra"           path="../JUCE/modules"/>
+      </MODULEPATHS>
+    </XCODE_MAC>
+  </EXPORTFORMATS>
+
+</JUCERPROJECT>
