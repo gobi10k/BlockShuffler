@@ -7,6 +7,19 @@
 
 namespace BlockShuffler {
 
+/** TextEditor that always selects its full contents when it gains keyboard focus.
+ *  juce::TextEditor::setSelectAllWhenFocused is unreliable when focus is requested
+ *  before the component is visible (e.g. inside a modal dialog constructor). */
+class SelectAllTextEditor : public juce::TextEditor {
+public:
+    using juce::TextEditor::TextEditor;
+
+    void focusGained(FocusChangeType type) override {
+        juce::TextEditor::focusGained(type);
+        selectAll();
+    }
+};
+
 // A number box that supports text input and click-drag to change value
 class DraggableNumberBox : public juce::Component {
 public:
@@ -86,7 +99,6 @@ private:
             {
                 addAndMakeVisible(textEditor);
                 textEditor.setText(juce::String(initialVal, decimals), false);
-                textEditor.setSelectAllWhenFocused(true);
                 textEditor.setInputRestrictions(8, "0123456789.");
                 
                 addAndMakeVisible(okButton);
@@ -124,7 +136,7 @@ private:
             }
             
         private:
-            juce::TextEditor textEditor;
+            SelectAllTextEditor textEditor;
             juce::TextButton okButton, cancelButton;
             double minVal, maxVal;
             int decimals;

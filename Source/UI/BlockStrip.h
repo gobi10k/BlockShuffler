@@ -75,7 +75,7 @@ private:
 
     static constexpr int blockW   = 100;
     static constexpr int blockH   = 120;
-    static constexpr int blockGap =   6;
+    static constexpr int blockGap =  16;
     static constexpr int padding  =   8;
     static constexpr int addBtnW  =  36;
 
@@ -105,6 +105,11 @@ private:
     /** Returns the block index (into blockComponents/project->blocks) at a contentArea point,
      *  or -1 if the point is not inside any block tile. */
     int blockIndexAtContentPos(juce::Point<int> contentPos) const;
+
+    /** Like blockIndexAtContentPos but only matches if the point falls inside the
+     *  central 60% of the block horizontally. The outer 20% on each side counts as
+     *  a reorder zone (treated the same as the gap between blocks). */
+    int blockStackZoneAtContentPos(juce::Point<int> contentPos) const;
 
     /** Sets the drag-over highlight on the block at dragOverIndex, clearing the previous one. */
     void setDragOver(int newIndex, bool isReorder = false);

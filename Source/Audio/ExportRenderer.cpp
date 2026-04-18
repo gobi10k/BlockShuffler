@@ -63,10 +63,10 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
     const int64_t bodyLen    = endMark - startMark;
     const int64_t leadInLen  = startMark;
     const int64_t tailLen    = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
-    // New timeline model: timelinePos = lead-in start; body starts at timelinePos + startMark.
-    const int64_t leadInStart = entry.timelinePos;
-    const int64_t bodyStart   = leadInStart + leadInLen;   // = timelinePos + startMark
-    const int64_t bodyEnd     = leadInStart + endMark;     // = timelinePos + endMark
+    // Timeline model: timelinePos = body-start.
+    const int64_t bodyStart    = entry.timelinePos;
+    const int64_t leadInStart  = bodyStart - leadInLen;
+    const int64_t bodyEnd      = bodyStart + bodyLen;
 
     // General 1:1 additive mixer with gain ramp, from any source buffer.
     auto mixBufRange = [&](const juce::AudioBuffer<float>& s,
@@ -108,19 +108,24 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
-    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
-    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
+    // Lead-in occupies [leadInStart, bodyStart) in the timeline.
+    // Entry 0: full-gain (nothing precedes it). Others: fade 0→1 to crossfade with previous tail.
     if (leadInLen > 0)
     {
+        // Detect first primary entry (non-overlay) in the arrangement for full-gain lead-in.
+        // Simpler: treat leadInStart == 0 (which only happens for entry 0 with startMark reservation) as full-gain.
+        const bool atTimelineStart = (leadInStart == 0);
+        const float leadInGainStart = atTimelineStart ? 1.0f : 0.0f;
+        const float leadInGainEnd   = 1.0f;
         if (entry.stretchedLeadIn)
         {
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBufRange(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0, 0.0f, 1.0f);
+            mixBufRange(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0, leadInGainStart, leadInGainEnd);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
             // No stretching — source samples [0, leadInLen) map 1:1 to [leadInStart, bodyStart)
-            mixBufRange(src, leadInStart, bodyStart, 0, 0.0f, 1.0f);
+            mixBufRange(src, leadInStart, bodyStart, 0, leadInGainStart, leadInGainEnd);
         }
         else
         {
@@ -137,7 +142,9 @@ void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
                 int srcSliceCnt   = juce::jmin((int)((double)destCount * srcAdv + 1.5), (int)leadInLen - srcSliceOff);
                 float t0 = (leadInTL > 1) ? (float)(ovStart - leadInStart) / (float)(leadInTL - 1) : 0.0f;
                 float t1 = (leadInTL > 1) ? (float)(ovEnd   - leadInStart) / (float)(leadInTL - 1) : 1.0f;
-                TempoStretcher::resampleAdd(src, srcSliceOff, srcSliceCnt, dest, destOff, destCount, t0 * entry.gain, t1 * entry.gain);
+                float gs = leadInGainStart + t0 * (leadInGainEnd - leadInGainStart);
+                float ge = leadInGainStart + t1 * (leadInGainEnd - leadInGainStart);
+                TempoStretcher::resampleAdd(src, srcSliceOff, srcSliceCnt, dest, destOff, destCount, gs * entry.gain, ge * entry.gain);
             }
         }
     }

@@ -7,19 +7,6 @@
 
 namespace BlockShuffler {
 
-// Trim buffer to [startSample, endSample) region
-static std::shared_ptr<juce::AudioBuffer<float>> trimBuffer(
-    const juce::AudioBuffer<float>& src,
-    int64_t startSample, int64_t endSample)
-{
-    int64_t len = endSample - startSample;
-    if (len <= 0 || !src.getNumSamples()) return nullptr;
-    auto dst = std::make_shared<juce::AudioBuffer<float>>(src.getNumChannels(), (int)len);
-    for (int ch = 0; ch < src.getNumChannels(); ++ch)
-        dst->copyFrom(ch, 0, src.getReadPointer(ch, (int)startSample), (int)len);
-    return dst;
-}
-
 ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                                   juce::Random& rng) const {
     ResolvedArrangement result;
@@ -82,8 +69,16 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     }
 
     // ── 5. Walk slots and build timeline ─────────────────────────────────────
+    // cursor = body-start position in the timeline (new model).
     int64_t cursor   = 0;
+    bool    firstPrimaryPlaced = false;  // reserve lead-in space once, before the first primary entry
     bool    songEnded = false;
+
+    auto reserveLeadInForFirst = [&](const Clip* clip) {
+        if (!firstPrimaryPlaced && clip && clip->startMark > 0)
+            cursor = clip->startMark;  // make room so lead-in fits in [0, startMark)
+        firstPrimaryPlaced = true;
+    };
 
     for (auto& slot : slots) {
         if (songEnded) break;
@@ -124,16 +119,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         if (roll < ob->overlapProbability)
                         {
                             auto* oc = pickClip(*ob, rng);
-                            if (oc) {
-                                auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
-                                if (trimmed) {
-                                    result.entries.add({
-                                        trimmed,
-                                        0, (int64_t)trimmed->getNumSamples(), oc->startMark, oc->retainTailTempo,
-                                        oc->name, oc->id,
-                                        overlayStart, 1.0f, ob->id, true
-                                    });
-                                }
+                            if (oc && oc->audioBuffer) {
+                                result.entries.add({
+                                    oc->audioBuffer,
+                                    oc->startMark, oc->endMark, oc->startMark, oc->retainTailTempo,
+                                    oc->name, oc->id,
+                                    overlayStart, 1.0f, ob->id, true
+                                });
                             }
                         }
                     }
@@ -147,21 +139,20 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             auto* block = normal[0];
             if (block->clips.isEmpty()) continue;
             auto* clip = pickClip(*block, rng);
-            if (!clip) continue;
+            if (!clip || !clip->audioBuffer) continue;
 
-            // Trim buffer to [startMark, endMark) region
-            auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
-            if (!trimmed) continue;
-            int64_t trimmedLen = trimmed->getNumSamples();
+            reserveLeadInForFirst(clip);
+            const int64_t bodyLen = clip->endMark - clip->startMark;
+            if (bodyLen <= 0) continue;
 
             result.entries.add({
-                trimmed,
-                0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                clip->audioBuffer,
+                clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                 clip->name, clip->id,
                 cursor, 1.0f, block->id
             });
 
-            cursor += trimmedLen;
+            cursor += bodyLen;
             if (clip->isSongEnder) songEnded = true;
 
         } else {
@@ -201,27 +192,37 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 (normal[0]->stackPlayMode == StackPlayMode::Simultaneous);
 
             if (isSimultaneous) {
-                // All picked blocks start at the same timeline position (trimmed buffers)
+                // All picked blocks start at the same body-start position (full buffers)
+                // Reserve lead-in space once, using the largest first-clip lead-in in the slot
+                if (!firstPrimaryPlaced) {
+                    int64_t maxLead = 0;
+                    for (auto* b : picked) {
+                        if (b->clips.isEmpty()) continue;
+                        for (auto* c : b->clips)
+                            if (!c->isDone) maxLead = juce::jmax(maxLead, c->startMark);
+                    }
+                    if (maxLead > 0) cursor = maxLead;
+                    firstPrimaryPlaced = true;
+                }
                 const int64_t slotStart = cursor;
                 const float stackGain = 1.0f / (float)juce::jmax(1, (int)picked.size());
 
                 // Collect picked clips so overlapping-block targeting can check them
                 juce::Array<Clip*> simultaneousClips;
-                int64_t maxTrimmedLen = 0;
+                int64_t maxBodyLen = 0;
                 for (auto* b : picked) {
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
-                    if (!clip) continue;
-                    auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
-                    if (!trimmed) continue;
-                    int64_t trimmedLen = trimmed->getNumSamples();
+                    if (!clip || !clip->audioBuffer) continue;
+                    const int64_t bodyLen = clip->endMark - clip->startMark;
+                    if (bodyLen <= 0) continue;
                     result.entries.add({
-                        trimmed,
-                        0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                        clip->audioBuffer,
+                        clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                         clip->name, clip->id,
                         slotStart, stackGain, b->id
                     });
-                    maxTrimmedLen = std::max(maxTrimmedLen, trimmedLen);
+                    maxBodyLen = std::max(maxBodyLen, bodyLen);
                     simultaneousClips.add(clip);
                     if (clip->isSongEnder) songEnded = true;
                 }
@@ -240,37 +241,33 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     }
                     if (rng.nextFloat() < ob->overlapProbability) {
                         auto* clip = pickClip(*ob, rng);
-                        if (clip) {
-                            auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
-                            if (trimmed) {
-                                result.entries.add({
-                                    trimmed,
-                                    0, (int64_t)trimmed->getNumSamples(), clip->startMark, clip->retainTailTempo,
-                                    clip->name, clip->id,
-                                    slotStart, 1.0f, ob->id, true
-                                });
-                            }
+                        if (clip && clip->audioBuffer) {
+                            result.entries.add({
+                                clip->audioBuffer,
+                                clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
+                                clip->name, clip->id,
+                                slotStart, 1.0f, ob->id, true
+                            });
                         }
                     }
                 }
-                cursor += maxTrimmedLen;
+                cursor += maxBodyLen;
 
             } else {
-                // Sequential: each picked block occupies its own time slot (trimmed buffers).
+                // Sequential: each picked block occupies its own time slot (full buffers).
                 for (auto* b : picked) {
                     if (songEnded) break;
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
-                    if (!clip) continue;
+                    if (!clip || !clip->audioBuffer) continue;
 
-                    // Trim buffer to [startMark, endMark)
-                    auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
-                    if (!trimmed) continue;
-                    int64_t trimmedLen = trimmed->getNumSamples();
+                    reserveLeadInForFirst(clip);
+                    const int64_t bodyLen = clip->endMark - clip->startMark;
+                    if (bodyLen <= 0) continue;
 
                     result.entries.add({
-                        trimmed,
-                        0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                        clip->audioBuffer,
+                        clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                         clip->name, clip->id,
                         cursor, 1.0f, b->id
                     });
@@ -287,20 +284,17 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         float roll = rng.nextFloat();
                         if (roll < ob->overlapProbability) {
                             auto* oc = pickClip(*ob, rng);
-                            if (oc) {
-                                auto trimmedOverlay = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
-                                if (trimmedOverlay) {
-                                    result.entries.add({
-                                        trimmedOverlay,
-                                        0, (int64_t)trimmedOverlay->getNumSamples(), oc->startMark, oc->retainTailTempo,
-                                        oc->name, oc->id,
-                                        cursor, 1.0f, ob->id, true
-                                    });
-                                }
+                            if (oc && oc->audioBuffer) {
+                                result.entries.add({
+                                    oc->audioBuffer,
+                                    oc->startMark, oc->endMark, oc->startMark, oc->retainTailTempo,
+                                    oc->name, oc->id,
+                                    cursor, 1.0f, ob->id, true
+                                });
                             }
                         }
                     }
-                    cursor += trimmedLen;
+                    cursor += bodyLen;
                     if (clip->isSongEnder) songEnded = true;
                 }
             }

@@ -90,15 +90,17 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
                                              (int64_t)entry.audioBuffer->getNumSamples()
                                              - entry.endMark) : 0;
 
-        // Full range: lead-in starts at timelinePos, body at timelinePos+startMark,
-        // tail at timelinePos+endMark, tail ends at timelinePos+endMark+tailTL.
+        // Timeline model: timelinePos = body-start.
+        //   lead-in [timelinePos - leadInLen, timelinePos)
+        //   body    [timelinePos, timelinePos + bodyLen)
+        //   tail    [timelinePos + bodyLen, timelinePos + bodyLen + tailTL)
         const int64_t tailTL    = entry.stretchedTail
                                   ? (int64_t)entry.stretchedTail->getNumSamples()
                                   : (int64_t)(tailLen   * entry.tailStretchRatio   + 0.5f);
 
         // Convert project-space bounds to hardware-space bounds
-        int64_t fullStartH = (int64_t)((double)entry.timelinePos * hToP + 0.5);
-        int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + entry.endMark + tailTL) * hToP + 0.5);
+        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - leadInLen) * hToP + 0.5);
+        int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + bodyLen + tailTL) * hToP + 0.5);
 
         if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;
 
@@ -137,10 +139,13 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     const int64_t leadInLen = startMark;
     const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
 
-    // New timeline model: timelinePos = lead-in start; body starts at timelinePos + startMark.
-    const int64_t leadInStart = entry.timelinePos;
-    const int64_t bodyStart   = leadInStart + leadInLen;  // = timelinePos + startMark
-    const int64_t bodyEnd     = leadInStart + endMark;    // = timelinePos + endMark
+    // Timeline model: timelinePos = body-start.
+    //   lead-in occupies [timelinePos - leadInLen, timelinePos)
+    //   body    occupies [timelinePos, timelinePos + bodyLen)
+    //   tail    occupies [timelinePos + bodyLen, timelinePos + bodyLen + tailLen)
+    const int64_t bodyStart   = entry.timelinePos;
+    const int64_t leadInStart = bodyStart - leadInLen;
+    const int64_t bodyEnd     = bodyStart + bodyLen;
     const int64_t blockEnd    = currentHead + (int64_t)numSamples;
 
     // General region mixer with resampling for pitch correction.
@@ -193,26 +198,29 @@ void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
-    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
-    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
+    // Lead-in occupies [leadInStart, bodyStart) in the timeline.
+    // Entry 0: play at full volume (no crossfade — nothing preceding it).
+    // Subsequent entries: fade 0→1 so it crossfades with the previous entry's tail.
     if (leadInLen > 0)
     {
+        const float leadInGainStart = (entryIndex == 0) ? 1.0f : 0.0f;
+        const float leadInGainEnd   = 1.0f;
         if (entry.stretchedLeadIn)
         {
             // Pre-stretched buffer occupies [leadInStart, leadInStart + sl)
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBuf(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0.0, 0.0f, 1.0f);
+            mixBuf(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0.0, leadInGainStart, leadInGainEnd);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
             // No stretching needed
-            mixBuf(src, leadInStart, bodyStart, 0.0, 0.0f, 1.0f);
+            mixBuf(src, leadInStart, bodyStart, 0.0, leadInGainStart, leadInGainEnd);
         }
         else
         {
             // Fallback linear-interp (WSOLA failed or was bypassed)
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            mixBuf(src, leadInStart, leadInStart + leadInTL, 0.0, 0.0f, 1.0f);
+            mixBuf(src, leadInStart, leadInStart + leadInTL, 0.0, leadInGainStart, leadInGainEnd);
         }
     }
 

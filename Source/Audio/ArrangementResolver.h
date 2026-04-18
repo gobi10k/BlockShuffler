@@ -10,15 +10,15 @@ namespace BlockShuffler {
  *  Stored as a self-contained snapshot of audio data and metadata to avoid
  *  dangling pointers if model objects are deleted during playback. */
 struct ResolvedEntry {
-    std::shared_ptr<juce::AudioBuffer<float>> audioBuffer;
-    int64_t      startMark;         // after trimming: always 0
-    int64_t      endMark;           // after trimming: trimmed length
-    int64_t      originalStartMark; // original clip's startMark (for playhead mapping)
+    std::shared_ptr<juce::AudioBuffer<float>> audioBuffer;  // full clip buffer (not trimmed)
+    int64_t      startMark;         // original clip startMark (body starts here in buffer)
+    int64_t      endMark;           // original clip endMark   (body ends here in buffer)
+    int64_t      originalStartMark; // mirror of startMark; kept for playhead mapping
     bool         retainTailTempo;
     juce::String clipName;
     juce::String clipId;
 
-    int64_t      timelinePos;         // output timeline sample where clip starts
+    int64_t      timelinePos;         // timeline sample where the clip's BODY begins
     float        gain;                // mixing gain (1.0 for solo clips, <1.0 for simultaneous layers)
     juce::String blockId;             // id of the Block that produced this entry
 

@@ -373,6 +373,21 @@ int BlockStrip::blockIndexAtContentPos(juce::Point<int> contentPos) const {
     return -1;
 }
 
+int BlockStrip::blockStackZoneAtContentPos(juce::Point<int> contentPos) const {
+    for (int i = 0; i < blockComponents.size(); ++i) {
+        const auto bounds = blockComponents[i]->getBounds();
+        if (bounds.contains(contentPos)) {
+            const int x = contentPos.x - bounds.getX();
+            const int w = bounds.getWidth();
+            // Central 60% is the stack zone; outer 20% on each side is reorder.
+            if (x >= w * 2 / 10 && x < w * 8 / 10)
+                return i;
+            return -1;
+        }
+    }
+    return -1;
+}
+
 void BlockStrip::setDragOver(int newIndex, bool isReorder) {
     if (newIndex == dragOverIndex) {
         if (newIndex >= 0 && newIndex < blockComponents.size())
@@ -476,7 +491,17 @@ void BlockStrip::itemDragMove(const SourceDetails& details) {
     }
     dragIsUnstacking = (dragSourceSlot >= 0 && !sameColumn);
 
-    int  over = blockIndexAtContentPos(contentPos);
+    // Source-is-stacked AND cursor-in-source-column → Y-based within-stack reorder
+    // (needs full-block detection so dropping anywhere on a stacked tile can swap it).
+    // Any other case is either a stack-with-target or a horizontal reorder, for which
+    // only the central 60% of a block counts as a stack target.
+    const bool sourceIsStacked = (dragSourceIndex >= 0
+                                  && dragSourceIndex < project->blocks.size()
+                                  && project->blocks[dragSourceIndex]->stackGroup >= 0);
+    const bool withinStackReorder = sourceIsStacked && sameColumn;
+
+    int  over = withinStackReorder ? blockIndexAtContentPos(contentPos)
+                                   : blockStackZoneAtContentPos(contentPos);
     bool isReorder = !dragIsUnstacking;
     if (over >= 0 && over < (int)project->blocks.size() &&
         project->blocks[over]->id != blockId)
@@ -515,6 +540,7 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
 
     auto contentPos = toContentPos(details.localPosition);
     int  overIndex  = blockIndexAtContentPos(contentPos);
+    int  overStack  = blockStackZoneAtContentPos(contentPos);
 
     struct SlotInfo { juce::Array<int> indices; };
     juce::Array<SlotInfo> slots;
@@ -543,6 +569,9 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
     auto* draggedBlock      = project->blocks[fromIndex];
     bool draggedIsStacked   = (draggedBlock->stackGroup >= 0);
     bool droppedOnDiffBlock = (overIndex >= 0 && overIndex != fromIndex);
+    // Only the central 60% of a target tile counts as a "stack with this block"
+    // drop. Outer 20% on each side falls through to plain reorder instead.
+    bool droppedOnStackZone = (overStack >= 0 && overStack != fromIndex);
 
     // CASE 3: Stacked block dragged out of its stack column → unstack
     if (draggedIsStacked && dragIsUnstacking) {
@@ -559,8 +588,8 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
             for (auto* b : project->blocks)
                 if (b->stackGroup == oldGroup) b->stackGroup = -1;
 
-        if (droppedOnDiffBlock) {
-            auto* targetBlock = project->blocks[overIndex];
+        if (droppedOnStackZone) {
+            auto* targetBlock = project->blocks[overStack];
             if (targetBlock->stackGroup >= 0) {
                 draggedBlock->stackGroup = targetBlock->stackGroup;
             } else {
@@ -606,9 +635,9 @@ void BlockStrip::itemDropped(const SourceDetails& details) {
 
         project->applyExternalMutation(pre);
 
-    } else if (!draggedIsStacked && droppedOnDiffBlock) {
-        // CASE 1: non-stacked block dropped onto another block → stack
-        project->stackBlocks(blockId, project->blocks[overIndex]->id);
+    } else if (!draggedIsStacked && droppedOnStackZone) {
+        // CASE 1: non-stacked block dropped onto the stack zone of another block → stack
+        project->stackBlocks(blockId, project->blocks[overStack]->id);
 
     } else if (draggedIsStacked && fromSlot >= 0) {
         // CASE 2: stacked block dragged within its stack column (swap or reorder)

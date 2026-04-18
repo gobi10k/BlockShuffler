@@ -37,11 +37,11 @@ MainComponent::MainComponent(PlaybackEngine& eng)
 
     blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
         currentArrangement = resolver.resolve(*project, rng);
-        // Find the body start of the target block in the resolved arrangement
+        // Find the body start of the target block (timelinePos = body start in new model)
         int64_t seekPos = 0;
         for (const auto& entry : currentArrangement.entries) {
             if (entry.blockId == blockId) {
-                seekPos = entry.timelinePos + entry.startMark;
+                seekPos = entry.timelinePos;
                 break;
             }
         }
@@ -356,57 +356,51 @@ void MainComponent::updateTimeDisplay() {
         waveformView.setPlayingClip({}, 0, 0.0);
     } else {
         // Find which entry is at the current playhead position.
-        // With the current timeline model: timelinePos = lead-in start,
-        // body occupies [timelinePos + startMark, timelinePos + endMark).
+        // New timeline model: timelinePos = body start,
+        // body occupies [timelinePos, timelinePos + (endMark - startMark)).
         int64_t headSamples = (int64_t)(current * currentArrangement.sampleRate);
         juce::String nowPlayingBlockId;
         juce::String nowPlayingClipId;
         int64_t clipSamplePos = 0;
 
-        // Always show the first entry at start
         if (!currentArrangement.entries.isEmpty()) {
             const auto& firstEntry = currentArrangement.entries.getReference(0);
+            const int64_t firstBodyStart = firstEntry.timelinePos;
+            const int64_t firstBodyEnd   = firstEntry.timelinePos
+                                         + (firstEntry.endMark - firstEntry.startMark);
+
+            // Default to first entry so the waveform/indicator shows something before playback enters a body.
             nowPlayingBlockId = firstEntry.blockId;
-            nowPlayingClipId = firstEntry.clipId;
+            nowPlayingClipId  = firstEntry.clipId;
 
-            // After trimming: startMark=0, so bodyStart = timelinePos, bodyEnd = timelinePos + endMark
-            int64_t bodyStart = firstEntry.timelinePos;
-            int64_t bodyEnd   = firstEntry.timelinePos + firstEntry.endMark;
-
-            if (headSamples >= bodyStart && headSamples < bodyEnd) {
-                // Currently within clip body - map to original clip position
-                int64_t posInTrimmed = headSamples - bodyStart;
-                clipSamplePos = firstEntry.originalStartMark + posInTrimmed;
-            } else if (headSamples < bodyStart) {
-                // Before clip starts - show at original start marker
-                clipSamplePos = firstEntry.originalStartMark;
+            if (headSamples < firstBodyStart) {
+                // Lead-in of the first entry is playing — map position to buffer sample.
+                int64_t leadInLen = firstEntry.startMark;  // clip->startMark
+                int64_t leadInStart = firstBodyStart - leadInLen;
+                int64_t offset = juce::jmax((int64_t)0, headSamples - leadInStart);
+                clipSamplePos = offset;  // lead-in source is [0, startMark)
+            } else if (headSamples >= firstBodyStart && headSamples < firstBodyEnd) {
+                int64_t posInBody = headSamples - firstBodyStart;
+                clipSamplePos = firstEntry.startMark + posInBody;
             } else {
-                // After first clip - use normal tracking
+                // Walk remaining entries to find the one whose body contains headSamples.
                 for (const auto& entry : currentArrangement.entries) {
-                    int64_t eb = entry.timelinePos;  // startMark is 0 after trimming
-                    int64_t ee = entry.timelinePos + entry.endMark;
-                    if (headSamples >= eb && headSamples < ee) {
+                    const int64_t bodyStart = entry.timelinePos;
+                    const int64_t bodyEnd   = entry.timelinePos + (entry.endMark - entry.startMark);
+                    if (headSamples >= bodyStart && headSamples < bodyEnd) {
                         nowPlayingBlockId = entry.blockId;
-                        nowPlayingClipId = entry.clipId;
-                        int64_t posInTrimmed = headSamples - eb;
-                        clipSamplePos = entry.originalStartMark + posInTrimmed;
+                        nowPlayingClipId  = entry.clipId;
+                        int64_t posInBody = headSamples - bodyStart;
+                        clipSamplePos = entry.startMark + posInBody;
                         break;
                     }
                 }
             }
         }
 
+        // Update ONLY the playing highlight — NOT the selection. The inspector
+        // must stay on whichever block the user clicked.
         blockStrip.setPlayingBlock(nowPlayingBlockId);
-
-        // Always switch waveform to show the playing block's clips
-        if (!nowPlayingBlockId.isEmpty()) {
-            selectedBlockId = nowPlayingBlockId;
-            selectedBlock = project->getBlockById(nowPlayingBlockId);
-            if (selectedBlock) {
-                waveformView.setBlock(selectedBlock, project->sampleRate, &project->formatManager);
-                inspectorPanel.setBlock(selectedBlock);
-            }
-        }
 
         waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, currentArrangement.sampleRate);
     }
