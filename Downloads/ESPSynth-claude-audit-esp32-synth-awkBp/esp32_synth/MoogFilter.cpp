@@ -124,7 +124,7 @@ void LadderFilter::updateCoefficients(float modHz) {
 void LadderFilter::setResonance(float res) {
     res = constrain(res, 0.0f, 1.0f);
     // Map to align peak gain with SVF at same nominal value
-    float mapped = res * (1.0f + res * 0.4f); // r=0.5→0.6, r=0.9→0.99
+    float mapped = res * (1.0f + res * 0.15f); // r=0.5→0.54, r=0.9→0.99
     resonance_ = constrain(mapped, 0.0f, 1.0f);
 }
 
@@ -196,7 +196,7 @@ float LadderFilter::process(float input) {
     if (isnan(delay_[3]) || isinf(delay_[3])) reset();
 
     // Feedback - limit to prevent instability
-    float feedback = resonance_ * 3.5f;  // Reduced from 4.0
+    float feedback = resonance_ * 3.5f;  // Original value with fastTanh saturation
     
     // Apply drive
     float in = input * drive_;
