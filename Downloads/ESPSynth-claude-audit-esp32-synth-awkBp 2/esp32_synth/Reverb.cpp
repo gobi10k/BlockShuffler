@@ -66,17 +66,28 @@ void FDNReverb::setPreDelay(float ms) {
 }
 
 void FDNReverb::updateDecayCoefficients() {
+    // Compute average delay based on current delay times
     float avgDelay = 0.0f;
     for (int i = 0; i < 4; i++) {
         avgDelay += delayTimes_[i];
     }
     avgDelay /= 4.0f;
     
+    // Calculate feedback gain for desired RT60
+    // RT60 = time for -60dB decay = decayTime_ seconds
+    // Each feedback loop reduces energy by feedbackGain_
+    // After N loops: gain^N = 0.001 (-60dB)
+    // N = log(0.001) / log(gain)
+    // N = samplesForRT60 / avgDelay
+    // Therefore: gain = 0.001^(avgDelay / samplesForRT60)
+    
     float samplesForRT60 = decayTime_ * SAMPLE_RATE;
     float loopsForRT60 = samplesForRT60 / avgDelay;
     
+    // Compute feedback gain - ensure it doesn't exceed stability limit
+    // Standard FDN stability limit is ~0.98 for 4x4 Hadamard
     feedbackGain_ = powf(0.001f, 1.0f / loopsForRT60);
-    if (feedbackGain_ > 0.98f) feedbackGain_ = 0.98f;
+    feedbackGain_ = constrain(feedbackGain_, 0.0f, 0.98f);
 }
 
 float FDNReverb::process(float input) {
