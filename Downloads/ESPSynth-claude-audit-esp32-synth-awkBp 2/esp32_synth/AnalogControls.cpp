@@ -1,6 +1,11 @@
 #include "AnalogControls.h"
 #include "SynthEngine.h"
 #include <Arduino.h>
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+
+static adc_oneshot_unit_handle_t adc_handle = NULL;
 
 AnalogControls::AnalogControls() :
     engine_(nullptr)
@@ -15,21 +20,52 @@ AnalogControls::AnalogControls() :
     }
 }
 
+// Map GPIO to ADC1 Channel
+static adc_channel_t getChannelFromPin(int pin) {
+    switch(pin) {
+        case 32: return ADC_CHANNEL_4;
+        case 33: return ADC_CHANNEL_5;
+        case 34: return ADC_CHANNEL_6;
+        case 35: return ADC_CHANNEL_7;
+        case 36: return ADC_CHANNEL_0;
+        case 39: return ADC_CHANNEL_3;
+        default: return ADC_CHANNEL_0; // Fallback
+    }
+}
+
 void AnalogControls::init(SynthEngine* engine) {
     engine_ = engine;
 
-    // In Arduino Core 3.x, global analogSetAttenuation/analogReadResolution invoke the legacy ADC driver,
-    // which conflicts with the new driver_ng used by analogRead(). 12-bit and 11dB are default.
+    if (!adc_handle) {
+        adc_oneshot_unit_init_cfg_t init_config = {
+            .unit_id = ADC_UNIT_1,
+            .clk_src = ADC_RTC_CLK_SRC_DEFAULT,
+            .ulp_mode = ADC_ULP_MODE_DISABLE,
+        };
+        esp_err_t err = adc_oneshot_new_unit(&init_config, &adc_handle);
+        if (err != ESP_OK) {
+            Serial.printf("ADC Init Failed: %d\n", err);
+            return;
+        }
 
-    // pinMode(..., ANALOG) is not valid on ESP32, INPUT or no pinMode is used for ADC.
-    pinMode(POT_CUTOFF_PIN, INPUT);
-    pinMode(POT_RESO_PIN, INPUT);
-    pinMode(POT_VOLUME_PIN, INPUT);
-    pinMode(POT_EFFECT_PIN, INPUT);
+        adc_oneshot_chan_cfg_t config = {
+            .atten = ADC_ATTEN_DB_11,
+            .bitwidth = ADC_BITWIDTH_12,
+        };
+
+        adc_oneshot_config_channel(adc_handle, getChannelFromPin(POT_CUTOFF_PIN), &config);
+        adc_oneshot_config_channel(adc_handle, getChannelFromPin(POT_RESO_PIN), &config);
+        adc_oneshot_config_channel(adc_handle, getChannelFromPin(POT_VOLUME_PIN), &config);
+        adc_oneshot_config_channel(adc_handle, getChannelFromPin(POT_EFFECT_PIN), &config);
+    }
 }
 
 void AnalogControls::readPot(int index, int pin) {
-    int raw = analogRead(pin);
+    if (!adc_handle) return;
+    
+    int raw = 0;
+    esp_err_t err = adc_oneshot_read(adc_handle, getChannelFromPin(pin), &raw);
+    if (err != ESP_OK) return;
 
     // Smooth using moving average
     potHistory_[index][historyIndex_[index]] = raw;
