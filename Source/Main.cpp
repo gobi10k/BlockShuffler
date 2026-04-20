@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include "MainComponent.h"
+#include "UI/LookAndFeel_BlockShuffler.h"
 
 /** Thin AudioSource adapter that drives a PlaybackEngine from the audio device callback. */
 class PlaybackEngineSource final : public juce::AudioSource {
@@ -34,6 +35,64 @@ private:
     juce::AudioBuffer<float>       mixBuffer;
 };
 
+/** Draw the BlockShuffler icon programmatically into a juce::Image. */
+static juce::Image createAppIcon()
+{
+    using LF = BlockShuffler::LookAndFeel_BlockShuffler;
+    const int sz = 256;
+    juce::Image img(juce::Image::ARGB, sz, sz, true);
+    juce::Graphics g(img);
+
+    // Rounded background: Graphite Blue
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(0.0f, 0.0f, (float)sz, (float)sz, 48.0f);
+
+    // Three blocks representing the arrangement strip
+    const int bw = 46, bh = 90;
+    const int by = (sz - bh) / 2;
+
+    // Block 1 (left) — Neon Cyan
+    g.setColour(juce::Colour(LF::accentCol));
+    g.fillRoundedRectangle(28.0f, (float)by, (float)bw, (float)bh, 8.0f);
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(32.0f, (float)(by + 8), (float)(bw - 8), (float)(bh - 16), 5.0f);
+
+    // Block 2 (centre) — Electric Violet, slightly shorter
+    const int b2h = 58, b2y = (sz - b2h) / 2;
+    g.setColour(juce::Colour(LF::accentViolet));
+    g.fillRoundedRectangle(105.0f, (float)b2y, (float)bw, (float)b2h, 8.0f);
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(109.0f, (float)(b2y + 8), (float)(bw - 8), (float)(b2h - 16), 5.0f);
+
+    // Block 3 (right) — Neon Cyan
+    g.setColour(juce::Colour(LF::accentCol));
+    g.fillRoundedRectangle(182.0f, (float)by, (float)bw, (float)bh, 8.0f);
+    g.setColour(juce::Colour(LF::bgMedium));
+    g.fillRoundedRectangle(186.0f, (float)(by + 8), (float)(bw - 8), (float)(bh - 16), 5.0f);
+
+    // Connecting arrows — Hot Magenta
+    g.setColour(juce::Colour(LF::accentMagenta));
+    const float ay = (float)(sz / 2);
+    g.drawLine(76.0f, ay, 103.0f, ay, 3.5f);
+    g.drawLine(153.0f, ay, 180.0f, ay, 3.5f);
+
+    // Tiny arrowheads
+    juce::Path ah;
+    ah.startNewSubPath(99.0f, ay - 6.0f);
+    ah.lineTo(105.0f, ay);
+    ah.lineTo(99.0f, ay + 6.0f);
+    g.strokePath(ah, juce::PathStrokeType(3.0f, juce::PathStrokeType::curved,
+                                           juce::PathStrokeType::rounded));
+    juce::Path ah2;
+    ah2.startNewSubPath(176.0f, ay - 6.0f);
+    ah2.lineTo(182.0f, ay);
+    ah2.lineTo(176.0f, ay + 6.0f);
+    g.strokePath(ah2, juce::PathStrokeType(3.0f, juce::PathStrokeType::curved,
+                                            juce::PathStrokeType::rounded));
+
+    return img;
+}
+
 class BlockShufflerApplication : public juce::JUCEApplication {
 public:
     BlockShufflerApplication() = default;
@@ -59,10 +118,16 @@ public:
     public:
         explicit MainWindow(const juce::String& name)
             : DocumentWindow(name,
-                             juce::Colour(0xFF1E1E1E),
+                             juce::Colour(BlockShuffler::LookAndFeel_BlockShuffler::bgDark),
                              DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar(true);
+
+            // Set the window icon to the brand icon (programmatic, no file I/O needed)
+            setIcon(createAppIcon());
+#if JUCE_MAC
+            juce::Process::setDockIconVisible(true);
+#endif
 
             // Set up audio device to drive the playback engine
             deviceManager.initialiseWithDefaultDevices(0, 2);
