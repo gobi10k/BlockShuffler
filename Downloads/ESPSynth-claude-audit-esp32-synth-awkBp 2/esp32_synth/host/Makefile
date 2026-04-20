@@ -36,12 +36,17 @@ SRCS = \
     $(SRCDIR)/Voice.cpp \
     $(SRCDIR)/Wavetables.cpp
 
-TARGET = espsynth_host
+TARGETS = espsynth_host espsynth_analysis
 
-$(TARGET): $(SRCS)
+all: $(TARGETS)
+
+espsynth_host: $(SRCS)
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+
+espsynth_analysis: analysis.cpp $(filter-out main.cpp, $(SRCS))
 	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
 
 clean:
-	rm -f $(TARGET) out.wav
+	rm -f $(TARGETS) out.wav
 
 .PHONY: clean
