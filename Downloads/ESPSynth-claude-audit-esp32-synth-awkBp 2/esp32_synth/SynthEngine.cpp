@@ -22,7 +22,7 @@ SynthEngine::SynthEngine() :
     fmAmount_(1.0f),
     resonatorEnabled_(true),
     combEnabled_(false),
-    granularMix_(0.0f),
+    granularMix_(0.2f),
     granularEnabled_(false),
     globalPan_(0.0f),
     currentVelocity_(0.0f),
@@ -501,11 +501,11 @@ void SynthEngine::processBlock() {
         left *= 0.3f;
         right *= 0.3f;
 
-        // Apply Granular exciter (if enabled) - Mono input, but we can spread it
+        // Apply Granular exciter (if enabled) - Parallel additive layer
         if (granularEnabled_) {
             float gran = granular_.process();
-            left = left * (1.0f - granularMix_) + gran * granularMix_ * 0.7f;
-            right = right * (1.0f - granularMix_) + gran * granularMix_ * 0.7f;
+            left = left + gran * granularMix_ * 0.3f;
+            right = right + gran * granularMix_ * 0.3f;
         }
 
         // Apply Resonator and Comb (if enabled) - Currently Mono
