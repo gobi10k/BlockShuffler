@@ -122,7 +122,10 @@ void LadderFilter::updateCoefficients(float modHz) {
 }
 
 void LadderFilter::setResonance(float res) {
-    resonance_ = constrain(res, 0.0f, 1.0f);
+    res = constrain(res, 0.0f, 1.0f);
+    // Map to align peak gain with SVF at same nominal value
+    float mapped = res * (1.0f + res * 0.4f); // r=0.5→0.6, r=0.9→0.99
+    resonance_ = constrain(mapped, 0.0f, 1.0f);
 }
 
 void LadderFilter::setMode(LadderMode mode) {
