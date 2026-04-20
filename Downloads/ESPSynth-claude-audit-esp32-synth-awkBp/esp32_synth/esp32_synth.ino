@@ -247,12 +247,15 @@ void setup() {
     Serial.begin(115200);
     Serial.setTimeout(100);
     delay(1000);
-    
+
     Serial.println("\n=== ESP32 Synth v5 - Resonant Spectral Engine ===\n");
-    
+
+    // Initialize ADC FIRST - before any other libraries that might auto-init legacy ADC
+    AnalogControls::initADC();
+
     // Initialize subsystems
     presets.begin();
-    
+
     if (!display.init(&synth)) {
         Serial.println("Display init failed");
     }
@@ -261,12 +264,9 @@ void setup() {
         Serial.println("FATAL: Synth init failed");
         while (1) delay(1000);
     }
-    
+
     // Setup SD card
     sd.begin(SD_CS_PIN);
-
-    // Initialize ADC (must be before controls.init)
-    AnalogControls::initADC();
 
     // Setup controls
     controls.init(&synth);

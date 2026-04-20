@@ -2,7 +2,6 @@
 #include "SynthEngine.h"
 #include <Arduino.h>
 
-adc_oneshot_unit_handle_t AnalogControls::adc1_handle_ = nullptr;
 bool AnalogControls::adc_initialized_ = false;
 
 AnalogControls::AnalogControls() :
@@ -23,29 +22,11 @@ void AnalogControls::initADC() {
         return;
     }
 
-    adc_oneshot_unit_init_cfg_t init_config1 = {
-        .unit_id = ADC_UNIT_1,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
-    };
-    
-    esp_err_t err = adc_oneshot_new_unit(&init_config1, &adc1_handle_);
-    if (err != ESP_OK) {
-        Serial.printf("ERROR: ADC1 init failed: %s\n", esp_err_to_name(err));
-        return;
-    }
-
-    adc_oneshot_chan_cfg_t config = {
-        .atten = ADC_ATTEN_DB_11,
-        .bitwidth = ADC_BITWIDTH_12,
-    };
-
-    adc_oneshot_config_channel(adc1_handle_, ADC_CHANNEL_4, &config);
-    adc_oneshot_config_channel(adc1_handle_, ADC_CHANNEL_5, &config);
-    adc_oneshot_config_channel(adc1_handle_, ADC_CHANNEL_6, &config);
-    adc_oneshot_config_channel(adc1_handle_, ADC_CHANNEL_7, &config);
+    analogReadResolution(12);
+    analogSetAttenuation(ADC_11DB);
 
     adc_initialized_ = true;
-    Serial.println("ADC1 initialized via adc_oneshot driver");
+    Serial.println("ADC initialized via legacy driver (analogRead)");
 }
 
 void AnalogControls::init(SynthEngine* engine) {
@@ -58,21 +39,15 @@ int AnalogControls::readPot(int index) {
         return 0;
     }
 
-    adc_channel_t channels[NUM_POTS] = {
-        ADC_CHANNEL_4,  // POT_CUTOFF (GPIO32)
-        ADC_CHANNEL_5,  // POT_RESO (GPIO33)
-        ADC_CHANNEL_6,  // POT_VOLUME (GPIO34)
-        ADC_CHANNEL_7   // POT_EFFECT (GPIO35)
+    uint8_t pins[NUM_POTS] = {
+        POT_CUTOFF_PIN,
+        POT_RESO_PIN,
+        POT_VOLUME_PIN,
+        POT_EFFECT_PIN
     };
 
-    int raw = 0;
-    esp_err_t err = adc_oneshot_read(adc1_handle_, channels[index], &raw);
-    if (err != ESP_OK) {
-        Serial.printf("ADC read error: %s\n", esp_err_to_name(err));
-        return 0;
-    }
+    int raw = analogRead(pins[index]);
 
-    // Smooth using moving average
     potHistory_[index][historyIndex_[index]] = raw;
     historyIndex_[index] = (historyIndex_[index] + 1) % HISTORY_SIZE;
 
