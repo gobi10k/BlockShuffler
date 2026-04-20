@@ -134,8 +134,28 @@ void onMIDICC(uint8_t ch, uint8_t cc, uint8_t val) {
             synth.setFilterType((VoiceFilterType)(val % 2));
             break;
         case MIDI_CC::ALL_NOTES_OFF:
-            synth.allNotesOff();
+            panic();
             break;
+    }
+}
+
+void panic() {
+    synth.allNotesOff();
+    synth.setResonatorEnabled(false);
+    synth.setCombEnabled(false);
+    synth.setGranularEnabled(false);
+    synth.getEffects().setEnabled(false, false, false);
+    synth.getReverb().setEnabled(false);
+    synth.getCompressor().setEnabled(false);
+
+    synth.getResonator().reset();
+    synth.getComb().reset();
+    synth.getReverb().reset();
+    synth.getEffects().delay.clear();
+    synth.getEffects().chorus.clear();
+
+    for (int i = 0; i < NUM_VOICES; i++) {
+        synth.getVoice(i).forceOff();
     }
 }
 
@@ -841,24 +861,7 @@ void processCommand(const String& cmd) {
             break;
         case 'V':
             Serial.println("PANIC: Stopping All Notes & Resetting Engine");
-            synth.allNotesOff();
-            synth.setResonatorEnabled(false);
-            synth.setCombEnabled(false);
-            synth.setGranularEnabled(false);
-            synth.getEffects().setEnabled(false, false, false);
-            synth.getReverb().setEnabled(false);
-            synth.getCompressor().setEnabled(false);
-
-            // Hard reset of all recursive modules
-            synth.getResonator().reset();
-            synth.getComb().reset();
-            synth.getReverb().reset();
-            synth.getEffects().delay.clear();
-            synth.getEffects().chorus.clear();
-
-            for (int i = 0; i < NUM_VOICES; i++) {
-                synth.getVoice(i).forceOff();
-            }
+            panic();
             Serial.println("Panic reset complete.");
             break;
         case 'm':
