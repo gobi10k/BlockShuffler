@@ -23,7 +23,7 @@ void AnalogControls::initADC() {
     }
 
     analogReadResolution(12);
-    analogSetAttenuation(ADC_11DB);
+    analogSetAttenuation(ADC_11db);
 
     adc_initialized_ = true;
     Serial.println("ADC initialized via legacy driver (analogRead)");
