@@ -54,6 +54,9 @@ SynthEngine::SynthEngine() :
     // Resonator defaults - harmonic profile with moderate mix
     resonator_.setProfile(ResonatorProfile::HARMONIC);
     resonator_.setMix(0.4f);
+
+    // Mod wheel to resonator mix
+    modMatrix_.setSlot(1, ModSource::MOD_WHEEL, ModDest::RESONATOR_MIX, 0.5f);
 }
 
 bool SynthEngine::init() {
@@ -509,8 +512,11 @@ void SynthEngine::processBlock() {
         if (resonatorEnabled_) {
             float mono = (left + right) * 0.5f;
             float res = resonator_.process(mono);
-            left = left * 0.5f + res * 0.5f;
-            right = right * 0.5f + res * 0.5f;
+            // Apply mod wheel to resonator mix
+            float resMix = 0.5f + modMatrix_.getModulation(ModDest::RESONATOR_MIX) * 0.5f;
+            resMix = constrain(resMix, 0.0f, 1.0f);
+            left = left * (1.0f - resMix) + res * resMix;
+            right = right * (1.0f - resMix) + res * resMix;
         }
         if (combEnabled_) {
             float mono = (left + right) * 0.5f;
