@@ -69,11 +69,33 @@ void test_filters() {
         printf("Moog Res=%.2f: Peak %.1fHz (H=%.2f), Self-osc=%d\n", res, peak_freq, max_mag, osc);
     }
     
-    // Dump to CSV
-    FILE* f = fopen("filter_sweep.csv", "w");
-    fprintf(f, "freq_hz,moog_0.0,moog_0.9\n");
-    // ...
-    fclose(f);
+    // Test SVF
+    printf("\n--- SVF SWEEP ---\n");
+    for (float res : resonances) {
+        svf.setResonance(res);
+        svf.setCutoff(1000.0f);
+        
+        vector<complex<double>> ir(n, 0.0);
+        ir[0] = 1.0;
+        // The Chamberlin SVF process updates state. We'll use lowpass output for test.
+        svf.setMode(FilterMode::LOWPASS);
+        for (int i = 0; i < n; i++) ir[i] = svf.process(ir[i].real());
+        fft(ir);
+        
+        double max_mag = 0; int peak_bin = 0;
+        for (int i=0; i<n/2; i++) {
+            double mag = abs(ir[i]);
+            if (mag > max_mag) { max_mag = mag; peak_bin = i; }
+        }
+        double peak_freq = peak_bin * SAMPLE_RATE / n;
+        
+        // Self-osc:
+        svf.process(1.0);
+        for(int i=0; i<48000; i++) svf.process(0.0);
+        bool osc = abs(svf.process(0.0)) > 0.1;
+        
+        printf("SVF Res=%.2f: Peak %.1fHz (H=%.2f), Self-osc=%d\n", res, peak_freq, max_mag, osc);
+    }
 }
 
 // 2. Oscillator Spectra
@@ -82,7 +104,7 @@ void test_oscillators() {
     Wavetables::init();
     Oscillator osc;
     int notes[] = {36, 60, 84, 108};
-    Waveform waves[] = {Waveform::SAW, Waveform::SQUARE};
+    Waveform waves[] = {Waveform::SAW, Waveform::SQUARE, Waveform::PULSE};
     
     for (Waveform wf : waves) {
         printf("Waveform: %d\n", (int)wf);
