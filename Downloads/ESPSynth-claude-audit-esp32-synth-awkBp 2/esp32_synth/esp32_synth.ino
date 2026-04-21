@@ -985,7 +985,7 @@ void loop() {
     if (currentBlock >= lastHeartbeatBlock + 375) { // ~1 second
         lastHeartbeatBlock = currentBlock;
         if (autoStats) {
-            Serial.printf("[CPU: %.1f%%] ", synth.getCPUPercent());
+            Serial.printf("[CPU: %.1f%%] [Heap: %d] ", synth.getCPUPercent(), ESP.getFreeHeap());
         } else {
             Serial.print(".");
         }
