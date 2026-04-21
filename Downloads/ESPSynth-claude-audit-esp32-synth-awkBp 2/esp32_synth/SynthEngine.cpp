@@ -502,14 +502,16 @@ void SynthEngine::processBlock() {
         right *= 0.3f;
 
         // Apply Granular exciter (if enabled) - Parallel additive layer
-        if (granularEnabled_) {
+        // Skip granular if CPU overloaded to prevent crash
+        if (granularEnabled_ && !profiler_.isOverloaded()) {
             float gran = granular_.process();
             left = left + gran * granularMix_ * 0.3f;
             right = right + gran * granularMix_ * 0.3f;
         }
 
         // Apply Resonator and Comb (if enabled) - Currently Mono
-        if (resonatorEnabled_) {
+        // Skip if CPU overloaded
+        if (resonatorEnabled_ && !profiler_.isOverloaded()) {
             float mono = (left + right) * 0.5f;
             float res = resonator_.process(mono);
             // Apply mod wheel to resonator mix
@@ -518,7 +520,7 @@ void SynthEngine::processBlock() {
             left = left * (1.0f - resMix) + res * resMix;
             right = right * (1.0f - resMix) + res * resMix;
         }
-        if (combEnabled_) {
+        if (combEnabled_ && !profiler_.isOverloaded()) {
             float mono = (left + right) * 0.5f;
             float cb = comb_.process(mono);
             left = left * 0.5f + cb * 0.5f;
@@ -530,7 +532,7 @@ void SynthEngine::processBlock() {
 
         // Check which global effects are enabled - skip processing if all disabled
         const bool effectsEnabled = effects_.isSatEnabled() || effects_.isChorusEnabled() || effects_.isDelayEnabled();
-        const bool reverbEnabled = reverb_.isEnabled();
+        const bool reverbEnabled = reverb_.isEnabled() && !profiler_.isOverloaded();
         const bool compressorEnabled = compressor_.isEnabled();
 
         if (effectsEnabled || reverbEnabled || compressorEnabled) {
@@ -538,7 +540,7 @@ void SynthEngine::processBlock() {
             float monoInput = (left + right) * 0.5f;
             float wetMono = effectsEnabled ? effects_.process(monoInput) : monoInput;
 
-            // Reverb - let's make it pseudo-stereo
+            // Reverb - let's make it pseudo-stereo (skip if CPU overloaded)
             float wetL = 0.0f, wetR = 0.0f;
             if (reverbEnabled) {
                 reverb_.processStereo(monoInput, wetL, wetR);
