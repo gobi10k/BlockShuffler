@@ -528,25 +528,43 @@ void SynthEngine::processBlock() {
         if (isnan(left) || isinf(left)) left = 0.0f;
         if (isnan(right) || isinf(right)) right = 0.0f;
 
-        // Process global effects - mono for now but we'll adapt them
-        float monoInput = (left + right) * 0.5f;
-        float wetMono = effects_.process(monoInput);
+        // Check which global effects are enabled - skip processing if all disabled
+        const bool effectsEnabled = effects_.isSatEnabled() || effects_.isChorusEnabled() || effects_.isDelayEnabled();
+        const bool reverbEnabled = reverb_.isEnabled();
+        const bool compressorEnabled = compressor_.isEnabled();
 
-        // Reverb - let's make it pseudo-stereo
-        float wetL, wetR;
-        reverb_.processStereo(monoInput, wetL, wetR);
+        if (effectsEnabled || reverbEnabled || compressorEnabled) {
+            // Process global effects - mono for now but we'll adapt them
+            float monoInput = (left + right) * 0.5f;
+            float wetMono = effectsEnabled ? effects_.process(monoInput) : monoInput;
 
-        float finalL = wetMono * 0.5f + wetL;
-        float finalR = wetMono * 0.5f + wetR;
+            // Reverb - let's make it pseudo-stereo
+            float wetL = 0.0f, wetR = 0.0f;
+            if (reverbEnabled) {
+                reverb_.processStereo(monoInput, wetL, wetR);
+            }
 
-        // Compressor on stereo
-        float compL = compressor_.process(finalL);
-        float compR = compressor_.process(finalR);
+            float finalL = wetMono * 0.5f + wetL;
+            float finalR = wetMono * 0.5f + wetR;
 
-        // Master volume
-        float vol = masterVolume_.process();
-        left = compL * vol;
-        right = compR * vol;
+            // Compressor on stereo
+            if (compressorEnabled) {
+                float compL = compressor_.process(finalL);
+                float compR = compressor_.process(finalR);
+                finalL = compL;
+                finalR = compR;
+            }
+
+            // Master volume
+            float vol = masterVolume_.process();
+            left = finalL * vol;
+            right = finalR * vol;
+        } else {
+            // Skip all global effects - just apply master volume
+            float vol = masterVolume_.process();
+            left = left * vol;
+            right = right * vol;
+        }
         
         // Soft clip
         left = fastTanh(left);
