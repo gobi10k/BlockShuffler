@@ -50,6 +50,9 @@ uint32_t lastHeartbeatBlock = 0;
 volatile bool presetPending_ = false;
 volatile uint8_t pendingPresetProgram_ = 0;
 
+// Current state for NVS save
+uint8_t currentPresetSlot = 0;
+
 // ============================================================================
 // MIDI CALLBACKS
 // ============================================================================
@@ -69,6 +72,7 @@ void onMIDICC(uint8_t ch, uint8_t cc, uint8_t val) {
             break;
         case MIDI_CC::VOLUME:
             synth.setMasterVolume(val / 127.0f);
+            presets.saveLastState(currentPresetSlot, val / 127.0f);
             break;
         case MIDI_CC::PAN:
             synth.setGlobalPan(constrain((val - 64) / 64.0f, -1.0f, 1.0f));
@@ -298,14 +302,21 @@ void setup() {
     midi.setPitchBendCallback(onMIDIPitchBend);
     midi.setClockCallback(onMIDIClock);
     
-    // Load init preset or factory if first boot
+    // Load last state or factory preset
+    uint8_t lastPreset = 0;
+    float lastVolume = 0.7f;
+    presets.loadLastState(lastPreset, lastVolume);
+
     PresetData initPreset;
-    if (!presets.loadPreset(0, initPreset)) {
+    if (!presets.loadPreset(lastPreset, initPreset)) {
         Serial.println("Loading factory presets...");
         presets.loadFactoryPresets();
         presets.loadPreset(0, initPreset);
+        lastPreset = 0;
     }
     applyPreset(initPreset);
+    synth.setMasterVolume(lastVolume);
+    currentPresetSlot = lastPreset;
     
     synth.start();
     display.start();
@@ -957,6 +968,8 @@ void loop() {
         PresetData p;
         if (presets.loadPreset(pendingPresetProgram_, p)) {
             applyPreset(p);
+            currentPresetSlot = pendingPresetProgram_;
+            presets.saveLastState(currentPresetSlot, synth.getMasterVolume());
         }
     }
     
