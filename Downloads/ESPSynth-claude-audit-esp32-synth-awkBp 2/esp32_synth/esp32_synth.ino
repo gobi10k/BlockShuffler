@@ -844,31 +844,57 @@ void processCommand(const String& cmd) {
 
         case 'S':
             Serial.println("Starting Stress Test (Gradual All systems GO)...");
+            Serial.flush();
             synth.setSynthMode(VoiceSynthMode::FM);
             synth.setFMAmount(5.0f);
 
-            // Enable effects one by one with delay
-            Serial.println("  Enabling basic effects...");
+            // Step 1: Basic effects with CPU measurement
+            Serial.println("  Step 1: Basic effects...");
+            Serial.flush();
             synth.getEffects().setEnabled(true, true, true);
-            delay(500);
+            delay(2000);
+            Serial.printf("    CPU: %.1f%%\n", synth.getCPUPercent());
+            Serial.flush();
 
-            Serial.println("  Enabling master effects...");
+            // Step 2: Master effects
+            Serial.println("  Step 2: Reverb + Compressor...");
+            Serial.flush();
             synth.getReverb().setEnabled(true);
             synth.getCompressor().setEnabled(true);
-            delay(500);
+            delay(2000);
+            Serial.printf("    CPU: %.1f%%\n", synth.getCPUPercent());
+            Serial.flush();
 
-            Serial.println("  Enabling spectral modules...");
+            // Step 3: Spectral modules
+            Serial.println("  Step 3: Resonator + Comb...");
+            Serial.flush();
             synth.setResonatorEnabled(true);
             synth.setCombEnabled(true);
-            synth.setGranularEnabled(true);
-            delay(500);
+            delay(2000);
+            Serial.printf("    CPU: %.1f%%\n", synth.getCPUPercent());
+            Serial.flush();
 
+            // Step 4: Granular
+            Serial.println("  Step 4: Granular...");
+            Serial.flush();
+            synth.setGranularEnabled(true);
+            delay(2000);
+            Serial.printf("    CPU: %.1f%%\n", synth.getCPUPercent());
+            Serial.flush();
+
+            // Step 5: Trigger voices
+            Serial.println("  Step 5: Triggering voices...");
+            Serial.flush();
             for (int i = 0; i < NUM_VOICES; i++) {
-                Serial.printf("  Triggering voice %d (Note %d)...\n", i, 48 + i * 7);
+                Serial.printf("    Voice %d (Note %d)\n", i, 48 + i * 7);
+                Serial.flush();
                 synth.noteOn(48 + i * 7, 100);
-                delay(1000); // 1 second between notes for stability monitoring
+                delay(500);
+                Serial.printf("    CPU: %.1f%%\n", synth.getCPUPercent());
+                Serial.flush();
             }
-            Serial.println("Stress Test running.");
+            Serial.println("Stress Test complete.");
+            Serial.printf("Final CPU: %.1f%%\n", synth.getCPUPercent());
             break;
         case 'V':
             Serial.println("PANIC: Stopping All Notes & Resetting Engine");
