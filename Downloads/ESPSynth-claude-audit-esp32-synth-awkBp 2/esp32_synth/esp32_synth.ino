@@ -945,8 +945,8 @@ void loop() {
         }
     }
 
-    // Handle Value Encoder
-    int valDelta = encVal.getDelta();
+    // Handle Value Encoder (with acceleration)
+    int valDelta = encVal.getDeltaAccelerated();
     if (valDelta != 0) {
         display.adjustValue(valDelta);
     }
