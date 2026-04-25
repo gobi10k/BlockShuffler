@@ -245,24 +245,6 @@ void ClipRowComponent::mouseDoubleClick(const juce::MouseEvent& e) {
 }
 
 void ClipRowComponent::mouseDrag(const juce::MouseEvent& e) {
-    // If not dragging a marker, start a DnD drag to move this clip to another block
-    if (activeDrag == DragTarget::None && e.getDistanceFromDragStart() > 8 && clip) {
-        if (auto* dc = juce::DragAndDropContainer::findParentDragContainerFor(this)) {
-            if (!dc->isDragAndDropActive()) {
-                juce::Image img(juce::Image::ARGB, getWidth(), headerH, true);
-                {
-                    juce::Graphics ig(img);
-                    ig.setColour(clip->color.withAlpha(0.85f));
-                    ig.fillRoundedRectangle(img.getBounds().toFloat(), 4.0f);
-                    ig.setColour(juce::Colours::white);
-                    ig.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
-                    ig.drawText(clip->name, img.getBounds(), juce::Justification::centred);
-                }
-                dc->startDragging("clip:" + clip->id, this, juce::ScaledImage(img));
-            }
-        }
-        return;
-    }
     if (activeDrag == DragTarget::None) return;
 
     // Snap to tempo grid unless Shift is held (Shift = free drag)
@@ -409,8 +391,9 @@ void ClipWaveformView::setBlock(Block* block, double sampleRate, juce::AudioForm
 }
 
 void ClipWaveformView::changeListenerCallback(juce::ChangeBroadcaster*) {
+    juce::Component::SafePointer<ClipWaveformView> safe(this);
     juce::MessageManager::callAsync(
-        [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
+        [safe] {
             if (safe) { safe->rebuildRows(); safe->resized(); safe->repaint(); }
         });
 }
@@ -420,9 +403,6 @@ void ClipWaveformView::rebuildRows() {
     clipRows.clear();
     if (!currentBlock) return;
 
-    // If the previously selected clip is no longer in this block (e.g. it was dragged
-    // to another block), clear the selection and notify the inspector so it doesn't
-    // show stale properties for a clip that's gone.
     if (selectedClip != nullptr) {
         bool stillHere = false;
         for (auto* c : currentBlock->clips)
@@ -497,7 +477,6 @@ void ClipWaveformView::browseForClip() {
                 if (f.existsAsFile()) {
                     auto clipPtr = std::make_unique<Clip>();
                     if (clipPtr->loadFromFile(f, *formatManager, projectSampleRate)) {
-                        // Block tempo takes priority over project default for new clips.
                         double blockT = currentBlock ? currentBlock->tempo : 0.0;
                         clipPtr->tempo = (blockT > 0.0) ? blockT
                                        : (defaultTempo > 0.0 ? defaultTempo : 120.0);
@@ -645,7 +624,6 @@ void ClipWaveformView::resized() {
     auto area = getLocalBounds();
     addClipBtn.setBounds(area.removeFromBottom(btnH).reduced(4, 2));
 
-    // Zoom bar (bottom, above viewport)
     auto zoomBar = area.removeFromBottom(zoomBarH).reduced(4, 2);
     zoomOutBtn.setBounds(zoomBar.removeFromLeft(24));
     zoomBar.removeFromLeft(2);

@@ -17,6 +17,9 @@ juce_add_binary_data(BlockShufflerResources
     SOURCES
         Resources/icon.svg
         Resources/icon.png
+        Resources/fonts/Inter-Regular.ttf
+        Resources/fonts/Inter-Bold.ttf
+        Resources/fonts/JetBrainsMono-Regular.ttf
 )
 
 juce_add_plugin(BlockShuffler

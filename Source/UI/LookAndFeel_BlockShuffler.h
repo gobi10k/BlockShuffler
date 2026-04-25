@@ -4,43 +4,85 @@
 namespace BlockShuffler {
 
 /**
- * BlockShuffler brand palette — dark precision + neon energy + modular clarity.
- * Generated from the BlockShuffler logo aesthetic brief (April 2026).
+ * BlockShuffler LookAndFeel — layered dark + single teal accent.
+ * All components should source colours via the ColourIds enum (findColour)
+ * or the static constants for direct paint() use.
  */
 class LookAndFeel_BlockShuffler : public juce::LookAndFeel_V4 {
 public:
+    // ── Semantic colour IDs (use via findColour() in draw* overrides) ─────────
+    enum ColourIds : int {
+        backgroundBaseId     = 0x00B50000,
+        backgroundPanelId    = 0x00B50001,
+        backgroundElevatedId = 0x00B50002,
+        backgroundHoverId    = 0x00B50003,
+        accentId             = 0x00B50004,
+        accentMutedId        = 0x00B50005,
+        textPrimaryId        = 0x00B50006,
+        textSecondaryId      = 0x00B50007,
+        textTertiaryId       = 0x00B50008,
+        borderSubtleId       = 0x00B50009,
+        borderStrongId       = 0x00B5000A,
+    };
+
     // ── Backgrounds ───────────────────────────────────────────────────────────
-    static constexpr juce::uint32 bgDark        = 0xFF0B0D10;  // Void Black
-    static constexpr juce::uint32 bgMedium      = 0xFF121825;  // Graphite Blue
-    static constexpr juce::uint32 bgLight       = 0xFF1C2533;  // Slate Steel
-    static constexpr juce::uint32 panelCol      = 0xFF24324A;  // Deep Navy
+    static constexpr juce::uint32 bgDark   = 0xFF0E1216;  // Base
+    static constexpr juce::uint32 bgMedium = 0xFF161B22;  // Panel
+    static constexpr juce::uint32 bgLight  = 0xFF1F2630;  // Elevated
+    static constexpr juce::uint32 panelCol = 0xFF2A3340;  // Hover / raised
 
     // ── Text ──────────────────────────────────────────────────────────────────
-    static constexpr juce::uint32 textPrimary   = 0xFFF4F7FB;  // Soft White
-    static constexpr juce::uint32 textSecondary = 0xFFA7B0C0;  // Cool Gray
+    static constexpr juce::uint32 textPrimary   = 0xFFE8EEF2;
+    static constexpr juce::uint32 textSecondary = 0xFF8B96A4;
+    static constexpr juce::uint32 textTertiary  = 0xFF5A6473;
 
-    // ── Accents (use sparingly against the dark base) ─────────────────────────
-    static constexpr juce::uint32 accentCol     = 0xFF25D7F2;  // Neon Cyan      — primary
-    static constexpr juce::uint32 accentViolet  = 0xFF7B5CFF;  // Electric Violet
-    static constexpr juce::uint32 accentMagenta = 0xFFFF4FB8;  // Hot Magenta
-    static constexpr juce::uint32 accentLime    = 0xFFA6F46A;  // Signal Lime
-    static constexpr juce::uint32 accentAmber   = 0xFFFFB347;  // Amber Pulse
-    static constexpr juce::uint32 accentCoral   = 0xFFFF6B6B;  // Infrared Coral
-    static constexpr juce::uint32 accentIceBlue = 0xFF7EDCFF;  // Ice Blue
-    static constexpr juce::uint32 accentTeal    = 0xFF20C997;  // Acid Teal
+    // ── Borders ───────────────────────────────────────────────────────────────
+    static constexpr juce::uint32 borderSubtle = 0xFF242B35;
+    static constexpr juce::uint32 borderStrong = 0xFF323B47;
+
+    // ── Primary accent (teal-cyan, locked in) ─────────────────────────────────
+    static constexpr juce::uint32 accentCol   = 0xFF4DD6D1;
+    static constexpr juce::uint32 accentMuted = 0xFF2D9E9A;
 
     // ── Functional / audio UI ─────────────────────────────────────────────────
-    static constexpr juce::uint32 waveformFill   = 0xFF7EDCFF;  // Ice Blue waveform
-    static constexpr juce::uint32 gridLineColor  = 0xFF1E2E45;  // subtle grid on panels
-    static constexpr juce::uint32 startMarkerCol = 0xFFA6F46A;  // Signal Lime  (green ≈ start)
-    static constexpr juce::uint32 endMarkerCol   = 0xFFFF6B6B;  // Infrared Coral (red ≈ end)
-    static constexpr juce::uint32 playheadCol    = 0xFFFF4FB8;  // Hot Magenta playhead
+    static constexpr juce::uint32 waveformFill   = 0xFF4DD6D1;  // accent
+    static constexpr juce::uint32 gridLineColor  = 0xFF242B35;  // borderSubtle
+    static constexpr juce::uint32 startMarkerCol = 0xFF4CC87A;  // green
+    static constexpr juce::uint32 endMarkerCol   = 0xFFE86060;  // coral red
+    static constexpr juce::uint32 playheadCol    = 0xFF4DD6D1;  // accent (was magenta)
+
+    // ── Block identity palette (8 hues, consistent luminance) ─────────────────
+    // Also accessible via getBlockColour(index) and getBlockPalette().
+    static constexpr juce::uint32 accentCoral   = 0xFFD45C5C;  // Coral Red
+    static constexpr juce::uint32 accentAmber   = 0xFFD4883C;  // Amber Orange
+    static constexpr juce::uint32 accentLime    = 0xFF7FC43C;  // Lime Green
+    static constexpr juce::uint32 accentTeal    = 0xFF2DB88A;  // Mint Teal
+    static constexpr juce::uint32 accentIceBlue = 0xFF3C94D4;  // Sky Blue
+    static constexpr juce::uint32 accentViolet  = 0xFF6868CC;  // Indigo
+    static constexpr juce::uint32 accentPurple  = 0xFF9060CC;  // Violet
+    static constexpr juce::uint32 accentMagenta = 0xFFCC4E90;  // Rose Pink
 
     LookAndFeel_BlockShuffler();
     ~LookAndFeel_BlockShuffler() override = default;
 
-    // Default block colors — full accent palette
+    // ── Font routing ──────────────────────────────────────────────────────────
+    juce::Typeface::Ptr getTypefaceForFont(const juce::Font& f) override;
+
+    /** Returns Inter-Regular at the requested size — UI labels. */
+    static juce::Font uiFont(float size);
+    /** Returns Inter-Bold at the requested size — headings / section titles. */
+    static juce::Font uiFontBold(float size);
+    /** Returns JetBrains Mono at the requested size — numeric readouts. */
+    static juce::Font monoFont(float size);
+
+    // ── Block colour helpers ───────────────────────────────────────────────────
     static juce::Array<juce::Colour> getBlockPalette();
+    static juce::Colour              getBlockColour(int index);
+
+private:
+    juce::Typeface::Ptr interRegular;
+    juce::Typeface::Ptr interBold;
+    juce::Typeface::Ptr jetbrainsMono;
 };
 
 } // namespace BlockShuffler
