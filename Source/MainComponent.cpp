@@ -73,6 +73,14 @@ MainComponent::MainComponent(PlaybackEngine& eng)
         project->applyExternalMutation(pre);
     };
 
+    blockStrip.onPlayBlockRequested = [this](const juce::String& blockId) {
+        playBlock(blockId);
+    };
+
+    waveformView.onPlayClipRequested = [this](const juce::String& clipId) {
+        playClip(clipId);
+    };
+
     blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
         currentArrangement = resolver.resolve(*project, rng);
         // Find the body start of the target block in the resolved arrangement
@@ -218,6 +226,10 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
         return waveformView.keyPressed(key);
     }
 
+    if (key == juce::KeyPress(juce::KeyPress::spaceKey, juce::ModifierKeys::shiftModifier, 0)) {
+        if (selectedBlock) playBlock(selectedBlock->id);
+        return true;
+    }
     if (key == juce::KeyPress(juce::KeyPress::spaceKey)) {
         onPlayPressed();
         return true;
@@ -283,6 +295,61 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
         return true;
     }
     return false;
+}
+
+void MainComponent::playBlock(const juce::String& blockId) {
+    if (!project) return;
+    // Resolve the full arrangement, then keep only entries belonging to this block.
+    auto fullArr = resolver.resolve(*project, rng);
+    ResolvedArrangement single;
+    single.sampleRate = fullArr.sampleRate;
+    int64_t cursor = 0;
+    for (const auto& entry : fullArr.entries) {
+        if (entry.blockId == blockId) {
+            auto e = entry;
+            e.timelinePos = cursor;
+            cursor += e.endMark - e.startMark;
+            single.entries.add(e);
+        }
+    }
+    single.totalDurationSamples = cursor;
+    if (single.isEmpty()) return;
+    currentArrangement = std::move(single);
+    engine.play(currentArrangement);
+    transportBar.setIsPlaying(true);
+}
+
+void MainComponent::playClip(const juce::String& clipId) {
+    if (!project) return;
+    Clip* found = nullptr;
+    juce::String foundBlockId;
+    for (auto* b : project->blocks) {
+        for (auto* c : b->clips) {
+            if (c->id == clipId) { found = c; foundBlockId = b->id; break; }
+        }
+        if (found) break;
+    }
+    if (!found || !found->audioBuffer) return;
+
+    ResolvedEntry entry;
+    entry.audioBuffer   = found->audioBuffer;
+    entry.startMark     = found->startMark;
+    entry.endMark       = found->endMark;
+    entry.originalStartMark = found->startMark;
+    entry.clipId        = found->id;
+    entry.clipName      = found->name;
+    entry.blockId       = foundBlockId;
+    entry.timelinePos   = 0;
+    entry.gain          = 1.0f;
+
+    ResolvedArrangement single;
+    single.sampleRate           = project->sampleRate;
+    single.totalDurationSamples = found->endMark - found->startMark;
+    single.entries.add(entry);
+
+    currentArrangement = std::move(single);
+    engine.play(currentArrangement);
+    transportBar.setIsPlaying(true);
 }
 
 void MainComponent::onPlayPressed() {

@@ -74,6 +74,8 @@ public:
     std::function<void(const juce::String&)> onRemoveLinksRequested;
     /// Called when "Play from Here" is chosen.
     std::function<void(const juce::String&)> onPlayFromHereRequested;
+    /// Called when "Play Block" is chosen (plays only this block in isolation).
+    std::function<void(const juce::String&)> onPlayBlockRequested;
 
     /// Fired every time the block moves during a drag.
     /// @param comp   The BlockComponent being dragged.

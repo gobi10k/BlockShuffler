@@ -503,11 +503,10 @@ void InspectorPanel::updateFromModel() {
         blockTempoField.setValue(bt, juce::dontSendNotification);
     }
 
-    const bool canOverlap = hasBlock && selectedBlock->isOverlapping;
-    overlapSlider.setEnabled(canOverlap);
-    if (hasBlock)
-        overlapSlider.setValue(selectedBlock->overlapProbability * 100.0,
-                               juce::dontSendNotification);
+    // Overlap probability is now controlled per-clip via each clip's probability slider.
+    // The block-level overlap slider is hidden; it no longer drives the resolver.
+    overlapLabel .setVisible(false);
+    overlapSlider.setVisible(false);
 
     // ── "Plays Over" section
     const bool showPlaysOver = hasBlock && selectedBlock->isOverlapping;
@@ -770,9 +769,11 @@ void InspectorPanel::resized() {
         area.removeFromTop(gap);
     }
     blockDoneToggle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
-    overlapLabel   .setBounds(area.removeFromTop(rh));
-    overlapSlider  .setBounds(area.removeFromTop(slh));
-    area.removeFromTop(gap);
+    if (overlapLabel.isVisible()) {
+        overlapLabel .setBounds(area.removeFromTop(rh));
+        overlapSlider.setBounds(area.removeFromTop(slh));
+        area.removeFromTop(gap);
+    }
 
     // ── Plays-over section
     if (playsOverTitle.isVisible()) {

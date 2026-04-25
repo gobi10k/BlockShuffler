@@ -262,6 +262,7 @@ void BlockComponent::showContextMenu() {
     menu.addSubMenu("Set Color", colourMenu);
     menu.addSeparator();
     menu.addItem(8, "Play from Here");
+    menu.addItem(10, "Play Block");
     menu.addSeparator();
     menu.addItem(2, "Link to...");
     menu.addItem(7, "Remove Links");
@@ -302,6 +303,8 @@ void BlockComponent::showContextMenu() {
             if (self->onRemoveLinksRequested) self->onRemoveLinksRequested(self->block->id);
         } else if (result == 8 && self->block) {
             if (self->onPlayFromHereRequested) self->onPlayFromHereRequested(self->block->id);
+        } else if (result == 10 && self->block) {
+            if (self->onPlayBlockRequested) self->onPlayBlockRequested(self->block->id);
         } else if (result == 9 && self->block && self->block->stackGroup >= 0) {
             self->block->stackGroup = -1;
             if (self->onMutated) self->onMutated();

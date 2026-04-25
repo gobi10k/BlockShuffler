@@ -74,6 +74,8 @@ private:
     void loadProject(const juce::File& file);
     void exportProject();
     void applyBlockSelection(Block* block);  // updates all views consistently
+    void playBlock(const juce::String& blockId);
+    void playClip(const juce::String& clipId);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

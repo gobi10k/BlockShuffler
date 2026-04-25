@@ -33,6 +33,8 @@ public:
 
     std::function<void(Block*)>              onBlockSelected;
     std::function<void(const juce::String&)> onPlayFromHereRequested;
+    /// Called when "Play Block" is chosen — plays only that block in isolation.
+    std::function<void(const juce::String&)> onPlayBlockRequested;
     /// Called when a clip is dragged and dropped onto a block: (clipId, targetBlockId)
     std::function<void(const juce::String&, const juce::String&)> onClipDropped;
 

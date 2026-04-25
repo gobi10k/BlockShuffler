@@ -121,11 +121,10 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     for (auto* ob : overlapping)
                     {
                         if (ob->isDone || ob->clips.isEmpty()) continue;
-                        float roll = rng.nextFloat();
-                        if (roll < ob->overlapProbability)
-                        {
-                            auto* oc = pickClip(*ob, rng);
-                            if (oc) {
+                        // Each clip rolls independently against its own probability
+                        for (auto* oc : ob->clips) {
+                            if (oc->isDone) continue;
+                            if (rng.nextFloat() < oc->probability) {
                                 auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
                                 if (trimmed) {
                                     result.entries.add({
@@ -253,15 +252,16 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                             if (ob->allowedParentClipIds.contains(sc->id)) { anyAllowed = true; break; }
                         if (!anyAllowed) continue;
                     }
-                    if (rng.nextFloat() < ob->overlapProbability) {
-                        auto* clip = pickClip(*ob, rng);
-                        if (clip) {
-                            auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
+                    // Each clip rolls independently against its own probability
+                    for (auto* oc : ob->clips) {
+                        if (oc->isDone) continue;
+                        if (rng.nextFloat() < oc->probability) {
+                            auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
                             if (trimmed) {
                                 result.entries.add({
                                     trimmed,
-                                    0, (int64_t)trimmed->getNumSamples(), clip->startMark, clip->retainTailTempo,
-                                    clip->name, clip->id,
+                                    0, (int64_t)trimmed->getNumSamples(), oc->startMark, oc->retainTailTempo,
+                                    oc->name, oc->id,
                                     bodyStart, 1.0f, ob->id, true
                                 });
                             }
@@ -296,7 +296,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, 1.0f, b->id
                     });
 
-                    // Layer overlapping blocks on top of this picked block (bodies aligned)
+                    // Layer overlapping blocks on top of this picked block (bodies aligned).
+                    // Each clip rolls independently against its own probability.
                     for (auto* ob : overlapping) {
                         if (ob->isDone || ob->clips.isEmpty()) continue;
                         if (!ob->allowedParentClipIds.isEmpty() &&
@@ -304,9 +305,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         {
                             continue;
                         }
-                        if (rng.nextFloat() < ob->overlapProbability) {
-                            auto* oc = pickClip(*ob, rng);
-                            if (oc) {
+                        for (auto* oc : ob->clips) {
+                            if (oc->isDone) continue;
+                            if (rng.nextFloat() < oc->probability) {
                                 auto trimmedOverlay = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
                                 if (trimmedOverlay) {
                                     result.entries.add({

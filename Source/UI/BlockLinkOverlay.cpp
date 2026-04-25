@@ -45,11 +45,21 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
                           juce::PathStrokeType::curved,
                           juce::PathStrokeType::rounded));
 
-        // Probability label at arc peak
+        // Label at arc peak: "NameA ↔ NameB" then "30%"
         g.setFont(10.0f);
         g.setColour(col.withAlpha(1.0f));
-        g.drawText(juce::String((int)(link->swapProbability * 100)) + "%",
-                   juce::Rectangle<float>(midX - 16.0f, peakY - 14.0f, 32.0f, 14.0f),
+        juce::String nameA = link->blockA;
+        juce::String nameB = link->blockB;
+        if (auto* ba = project->getBlockById(link->blockA)) nameA = ba->name;
+        if (auto* bb = project->getBlockById(link->blockB)) nameB = bb->name;
+        juce::String labelText = nameA + " \xe2\x86\x94 " + nameB;  // ↔ (UTF-8)
+        juce::String probText  = juce::String((int)(link->swapProbability * 100)) + "%";
+        float labelW = 120.0f;
+        g.drawText(labelText,
+                   juce::Rectangle<float>(midX - labelW * 0.5f, peakY - 26.0f, labelW, 13.0f),
+                   juce::Justification::centred);
+        g.drawText(probText,
+                   juce::Rectangle<float>(midX - 20.0f, peakY - 13.0f, 40.0f, 13.0f),
                    juce::Justification::centred);
     }
 

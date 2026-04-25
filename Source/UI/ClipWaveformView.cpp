@@ -114,14 +114,13 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
 
 void ClipRowComponent::paint(juce::Graphics& g) {
     if (!clip) return;
-    auto bg = selected
-        ? juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.18f)
-        : juce::Colour(LookAndFeel_BlockShuffler::bgMedium);
-    g.fillAll(bg);
+    // Background is always the neutral panel colour — selection is shown via border only
+    // so the clip's header colour is never tinted by the accent.
+    g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
 
-    // Header
+    // Header — clip's own colour, fully opaque
     auto headerRect = getLocalBounds().removeFromTop(headerH);
-    g.setColour(clip->color.withAlpha(0.85f));
+    g.setColour(clip->color);
     g.fillRect(headerRect);
 
     // Pick black or white text depending on header luminance so it's always readable
@@ -203,9 +202,14 @@ void ClipRowComponent::paint(juce::Graphics& g) {
         g.fillPath(tri);
     }
 
-    g.setColour(selected ? juce::Colour(LookAndFeel_BlockShuffler::accentCol)
-                         : juce::Colour(LookAndFeel_BlockShuffler::bgLight));
-    g.drawRect(getLocalBounds());
+    // Border: 2-px accent outline for selection, 1-px subtle for others
+    if (selected) {
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+        g.drawRect(getLocalBounds(), 2);
+    } else {
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight));
+        g.drawRect(getLocalBounds(), 1);
+    }
 }
 
 void ClipRowComponent::resized() {
@@ -289,6 +293,8 @@ void ClipRowComponent::showContextMenu() {
     menu.addItem(1, "Rename");
     menu.addSubMenu("Set Color", colourMenu);
     menu.addSeparator();
+    menu.addItem(5, "Play Clip");
+    menu.addSeparator();
     menu.addItem(2, "Song Ender",  true, clip && clip->isSongEnder);
     menu.addItem(3, "Mark as Done", true, clip && clip->isDone);
     menu.addSeparator();
@@ -324,6 +330,8 @@ void ClipRowComponent::showContextMenu() {
             if (self->onUndoableMutation && pre.isObject()) self->onUndoableMutation(pre);
         } else if (result == 4) {
             if (self->onRemoveCallback) self->onRemoveCallback();
+        } else if (result == 5 && self->clip) {
+            if (self->onPlayClipRequested) self->onPlayClipRequested(self->clip->id);
         }
     });
 }
@@ -345,7 +353,7 @@ ClipWaveformView::ClipWaveformView() {
     // Route Cmd+scroll from the viewport subclass to our zoom logic.
     viewport.onZoomScroll = [this](float deltaY) {
         float delta = deltaY > 0 ? 1.25f : 0.8f;
-        zoomFactor  = juce::jlimit(1.0f, 32.0f, zoomFactor * delta);
+        zoomFactor  = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor * delta);
         juce::Component::SafePointer<ClipWaveformView> safeThis(this);
         juce::MessageManager::callAsync(
             [safeThis] {
@@ -363,8 +371,8 @@ ClipWaveformView::ClipWaveformView() {
                 if (safe) safe->resized();
             });
     };
-    zoomInBtn .onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, 32.0f, zoomFactor * 1.5f); applyZoom(); };
-    zoomOutBtn.onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, 32.0f, zoomFactor / 1.5f); applyZoom(); };
+    zoomInBtn .onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor * 1.5f); applyZoom(); };
+    zoomOutBtn.onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor / 1.5f); applyZoom(); };
     zoomFitBtn.onClick = [this, applyZoom] { zoomFactor = 1.0f; applyZoom(); };
     zoomInBtn .setTooltip("Zoom in  [Cmd+scroll]");
     zoomOutBtn.setTooltip("Zoom out  [Cmd+scroll]");
@@ -421,8 +429,9 @@ void ClipWaveformView::rebuildRows() {
             [this]       { repaint(); },
             [this, clipPtr] { removeClip(clipPtr); }
         ));
-        row->onCaptureSnapshot  = onCaptureSnapshot;
-        row->onUndoableMutation = onUndoableMutation;
+        row->onCaptureSnapshot   = onCaptureSnapshot;
+        row->onUndoableMutation  = onUndoableMutation;
+        row->onPlayClipRequested = onPlayClipRequested;
         row->ownerBlock = currentBlock.get();
         row->setSelected(clipPtr == selectedClip);
         contentArea.addAndMakeVisible(row);
@@ -569,31 +578,42 @@ void ClipWaveformView::paintOverChildren(juce::Graphics& g) {
         auto* clip = row->getClip();
         if (clip == nullptr || clip->id.isEmpty() || clip->id != playingClipId) continue;
 
-        auto rowBounds = row->getBounds();
-        auto wa = row->waveArea();
-
         if (clip->audioBuffer == nullptr || clip->audioBuffer->getNumSamples() == 0) return;
-
         int64_t totalSamples = clip->audioBuffer->getNumSamples();
         if (totalSamples <= 0) return;
 
         double fraction = (double)playingSamplePos / (double)totalSamples;
-        if (fraction < 0.0) fraction = 0.0;
-        if (fraction > 1.0) fraction = 1.0;
+        fraction = juce::jlimit(0.0, 1.0, fraction);
 
-        int vpTop = viewport.getY();
-        int vpBottom = viewport.getBottom();
-        int vpLeft = viewport.getX();
-        int vpRight = viewport.getRight();
+        // Row bounds are in contentArea-local space; convert to ClipWaveformView space.
+        // Viewport sits at (vpX, vpY) in our space; contentArea is offset by the scroll.
+        const int scrollX = viewport.getViewPositionX();
+        const int scrollY = viewport.getViewPositionY();
+        const int vpX     = viewport.getX();
+        const int vpY     = viewport.getY();
 
-        int waveX = wa.getX() + (int)(fraction * wa.getWidth());
+        auto rowBounds = row->getBounds();   // contentArea coords
+        auto wa        = row->waveArea();    // row-local coords (row.getX()==0 so same as contentArea)
 
-        if (waveX < vpLeft || waveX > vpRight) return;
+        // Playhead X in ClipWaveformView space
+        int waveX = vpX - scrollX + wa.getX() + (int)(fraction * wa.getWidth());
 
-        int drawTop = juce::jmax(vpTop, rowBounds.getY());
-        int drawBottom = juce::jmin(vpBottom, rowBounds.getBottom());
+        // Viewport clip bounds in ClipWaveformView space
+        const int vpLeft   = vpX;
+        const int vpRight  = viewport.getRight();
+        const int vpTop    = vpY;
+        const int vpBottom = viewport.getBottom();
 
-        if (drawBottom <= drawTop) return;
+        if (waveX < vpLeft || waveX > vpRight) break;
+
+        // Row Y range in ClipWaveformView space
+        int rowTop    = vpY - scrollY + rowBounds.getY();
+        int rowBottom = vpY - scrollY + rowBounds.getBottom();
+
+        int drawTop    = juce::jmax(vpTop,    rowTop);
+        int drawBottom = juce::jmin(vpBottom, rowBottom);
+
+        if (drawBottom <= drawTop) break;
 
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::playheadCol).withAlpha(0.85f));
         g.drawLine((float)waveX, (float)drawTop, (float)waveX, (float)drawBottom, 2.0f);
@@ -652,7 +672,7 @@ void ClipWaveformView::mouseWheelMove(const juce::MouseEvent& e,
     // delegate zoom to shared logic, or scroll the viewport manually.
     if (e.mods.isCommandDown()) {
         float delta = w.deltaY > 0 ? 1.25f : 0.8f;
-        zoomFactor  = juce::jlimit(1.0f, 32.0f, zoomFactor * delta);
+        zoomFactor  = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor * delta);
         juce::MessageManager::callAsync(
             [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
                 if (safe) safe->resized();
@@ -665,6 +685,29 @@ void ClipWaveformView::mouseWheelMove(const juce::MouseEvent& e,
             pos.y - juce::roundToInt(w.deltaY * 100.0f));
         viewport.setViewPosition(pos.x, newY);
     }
+}
+
+float ClipWaveformView::computeMaxZoom() const {
+    // Find the longest clip in the current block.
+    // Max zoom is chosen so the waveform shows ~0.5 seconds at full zoom.
+    double maxDurationSeconds = 0.0;
+    const double sr = projectSampleRate > 0.0 ? projectSampleRate : 48000.0;
+
+    if (currentBlock) {
+        for (auto* clip : currentBlock->clips) {
+            if (clip->audioBuffer) {
+                double dur = (double)clip->audioBuffer->getNumSamples() / sr;
+                if (dur > maxDurationSeconds) maxDurationSeconds = dur;
+            }
+        }
+    }
+
+    if (maxDurationSeconds < 0.001) return 32.0f; // fallback for empty/tiny clips
+
+    double maxZoom = maxDurationSeconds / 0.5;     // shows ~0.5 s at full zoom
+    maxZoom = juce::jmax(maxZoom, 1.0);
+    maxZoom = juce::jmin(maxZoom, 256.0);
+    return (float)maxZoom;
 }
 
 } // namespace BlockShuffler

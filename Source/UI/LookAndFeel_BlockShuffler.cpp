@@ -6,14 +6,14 @@ namespace BlockShuffler {
 LookAndFeel_BlockShuffler::LookAndFeel_BlockShuffler() {
     // Load typefaces from embedded binary data
     interRegular  = juce::Typeface::createSystemTypefaceFor(
-                        BinaryData::Inter_Regular_ttf,
-                        BinaryData::Inter_Regular_ttfSize);
+                        BinaryData::InterRegular_ttf,
+                        BinaryData::InterRegular_ttfSize);
     interBold     = juce::Typeface::createSystemTypefaceFor(
-                        BinaryData::Inter_Bold_ttf,
-                        BinaryData::Inter_Bold_ttfSize);
+                        BinaryData::InterBold_ttf,
+                        BinaryData::InterBold_ttfSize);
     jetbrainsMono = juce::Typeface::createSystemTypefaceFor(
-                        BinaryData::JetBrainsMono_Regular_ttf,
-                        BinaryData::JetBrainsMono_Regular_ttfSize);
+                        BinaryData::JetBrainsMonoRegular_ttf,
+                        BinaryData::JetBrainsMonoRegular_ttfSize);
 
     // ── Semantic colour IDs ───────────────────────────────────────────────────
     setColour(backgroundBaseId,     juce::Colour(bgDark));

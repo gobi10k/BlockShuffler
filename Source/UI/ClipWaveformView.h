@@ -45,6 +45,9 @@ public:
     std::function<juce::var()>            onCaptureSnapshot;
     std::function<void(const juce::var&)> onUndoableMutation;
 
+    /// Called when "Play Clip" is chosen from the context menu.
+    std::function<void(const juce::String&)> onPlayClipRequested;
+
     // Used to compute effective (normalized) probability across all sibling clips
     Block* ownerBlock = nullptr;
 
@@ -106,6 +109,9 @@ public:
 
     std::function<void(Clip*)> onClipSelected;
 
+    /// Called when "Play Clip" is chosen from a clip's context menu.
+    std::function<void(const juce::String&)> onPlayClipRequested;
+
     // Wired by MainComponent so clip mutations are undoable
     std::function<juce::var()>            onCaptureSnapshot;
     std::function<void(const juce::var&)> onUndoableMutation;
@@ -143,6 +149,7 @@ private:
     void selectClip(Clip* clip);
     void removeClip(Clip* clip);
     void browseForClip();
+    float computeMaxZoom() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipWaveformView)
 };

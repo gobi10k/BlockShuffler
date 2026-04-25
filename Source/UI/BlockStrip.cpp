@@ -204,10 +204,15 @@ void BlockStrip::changeListenerCallback(juce::ChangeBroadcaster*) {
             safe->needsRebuildAfterDrag = true;
             return;
         }
+        // Preserve the horizontal scroll position across rebuilds so that
+        // dropping a clip onto a far-right block doesn't snap the view back to x=0.
+        int savedScrollX = safe->viewport.getViewPositionX();
         safe->needsRebuildAfterDrag = false;
         safe->rebuildBlocks();
         safe->resized();
         safe->repaint();
+        if (savedScrollX > 0)
+            safe->viewport.setViewPosition(savedScrollX, 0);
     });
 }
 
@@ -249,6 +254,9 @@ void BlockStrip::rebuildBlocks() {
         };
         bc->onPlayFromHereRequested = [this](const juce::String& id) {
             if (onPlayFromHereRequested) onPlayFromHereRequested(id);
+        };
+        bc->onPlayBlockRequested = [this](const juce::String& id) {
+            if (onPlayBlockRequested) onPlayBlockRequested(id);
         };
         bc->onClipDropped = [this](const juce::String& clipId, const juce::String& targetBlockId) {
             if (onClipDropped) onClipDropped(clipId, targetBlockId);
@@ -495,38 +503,35 @@ void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> cent
         if (fromIndex < 0) { clearDragFeedback(); return; }
 
         if (draggedBlock->stackGroup >= 0) {
-            // Unstack first, then move to the new position.
-            auto pre     = project->toJSON();
-            int oldGroup = draggedBlock->stackGroup;
-            draggedBlock->stackGroup = -1;
+            // Move entire stack as a unit to the new slot position.
+            auto pre = project->toJSON();
+            int stackGroup = draggedBlock->stackGroup;
 
-            // Dissolve the old stack group if only one member remains.
-            int remaining = 0;
-            for (auto* b : project->blocks)
-                if (b->stackGroup == oldGroup) ++remaining;
-            if (remaining <= 1)
-                for (auto* b : project->blocks)
-                    if (b->stackGroup == oldGroup) b->stackGroup = -1;
+            // Collect stack-member indices in ascending order.
+            juce::Array<int> stackIndices;
+            for (int i = 0; i < project->blocks.size(); ++i)
+                if (project->blocks[i]->stackGroup == stackGroup)
+                    stackIndices.add(i);
 
-            project->propagateStackSettings(oldGroup);
+            // Extract stack members in original order (remove high→low to keep indices valid).
+            juce::OwnedArray<Block> extracted;
+            for (int i = stackIndices.size() - 1; i >= 0; --i)
+                extracted.insert(0, project->blocks.removeAndReturn(stackIndices[i]));
 
-            // Convert "insert before dropTargetIndex" to a move-to destination.
-            int insertBefore = juce::jlimit(0, project->blocks.size(), dropTargetIndex);
-            int dest;
-            if (insertBefore >= project->blocks.size()) {
-                dest = project->blocks.size() - 1;
-            } else if (fromIndex < insertBefore) {
-                dest = insertBefore - 1;
-            } else {
-                dest = insertBefore;
-            }
-            dest = juce::jlimit(0, project->blocks.size() - 1, dest);
+            // Adjust the insertion point: each removed index below it shifts it left.
+            int insertPos = dropTargetIndex;
+            for (int idx : stackIndices)
+                if (idx < insertPos) --insertPos;
+            insertPos = juce::jlimit(0, project->blocks.size(), insertPos);
 
-            if (fromIndex != dest) {
-                project->blocks.move(fromIndex, dest);
-                for (int i = 0; i < project->blocks.size(); ++i)
-                    project->blocks[i]->position = i;
-            }
+            // Re-insert stack members at the adjusted position in their original order.
+            for (int i = 0; i < extracted.size(); ++i)
+                project->blocks.insert(insertPos + i, extracted.removeAndReturn(0));
+
+            // Update all block positions.
+            for (int i = 0; i < project->blocks.size(); ++i)
+                project->blocks[i]->position = i;
+
             project->applyExternalMutation(pre);
         } else {
             // Plain reorder.
