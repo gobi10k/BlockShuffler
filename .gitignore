@@ -1,0 +1,14 @@
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+*.swp
+*.swo
+*~
+.github/.DS_Store
+Source/.DS_Store
+Resources/.DS_Store
