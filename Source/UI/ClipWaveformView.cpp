@@ -366,8 +366,9 @@ ClipWaveformView::ClipWaveformView() {
     addAndMakeVisible(addClipBtn);
 
     auto applyZoom = [this] {
+        ClipWaveformView* self = this;
         juce::MessageManager::callAsync(
-            [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
+            [safe = juce::Component::SafePointer<ClipWaveformView>(self)] {
                 if (safe) safe->resized();
             });
     };
