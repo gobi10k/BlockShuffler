@@ -17,7 +17,7 @@ BlockComponent::BlockComponent(Block& block_,
       onStackRequested(std::move(onStackRequested_))
 {
     nameLabel.setText(block ? block->name : "", juce::dontSendNotification);
-    nameLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
+    nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(12.0f));
     nameLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
     nameLabel.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
@@ -119,14 +119,14 @@ void BlockComponent::paint(juce::Graphics& g) {
         g.setColour(block->color);
         g.fillEllipse(badge.toFloat().reduced(1.0f));
         g.setColour(juce::Colours::white);
-        g.setFont(9.0f);
+        g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
         g.drawText(juce::String(block->stackGroup + 1), badge, juce::Justification::centred);
     }
 
     // Done indicator
     if (block->isDone) {
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(10.0f);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textTertiary));
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(9.0f));
         g.drawText("DONE", getLocalBounds().removeFromBottom(16), juce::Justification::centred);
     }
 
@@ -134,7 +134,7 @@ void BlockComponent::paint(juce::Graphics& g) {
     if (clipDropHighlight) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentAmber).withAlpha(0.9f));
         g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f, 2.5f);
-        g.setFont(10.0f);
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
         g.drawText("ADD CLIP", getLocalBounds().withTrimmedTop(getHeight() / 2),
                    juce::Justification::centred);
     }

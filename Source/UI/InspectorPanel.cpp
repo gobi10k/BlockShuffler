@@ -8,10 +8,16 @@ static void setupLabel(juce::Component* parent, juce::Label& lbl,
                        const juce::String& text, float fontSize, bool dim = false)
 {
     lbl.setText(text, juce::dontSendNotification);
-    lbl.setFont(juce::Font(juce::FontOptions(fontSize)));
-    lbl.setColour(juce::Label::textColourId,
-                  dim ? juce::Colour(LookAndFeel_BlockShuffler::textSecondary)
-                      : juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+    if (dim) {
+        // Section header style: small-caps approximation via Inter Bold at 10px in tertiary color
+        lbl.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
+        lbl.setColour(juce::Label::textColourId,
+                      juce::Colour(LookAndFeel_BlockShuffler::textTertiary));
+    } else {
+        lbl.setFont(LookAndFeel_BlockShuffler::uiFont(fontSize));
+        lbl.setColour(juce::Label::textColourId,
+                      juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+    }
     parent->addAndMakeVisible(lbl);
 }
 
@@ -35,7 +41,7 @@ InspectorPanel::InspectorPanel()
     probSlider.addListener(this);
     addAndMakeVisible(probSlider);
 
-    effectiveProbLabel.setFont(juce::Font(juce::FontOptions(11.0f)));
+    effectiveProbLabel.setFont(LookAndFeel_BlockShuffler::monoFont(11.0f));
     effectiveProbLabel.setColour(juce::Label::textColourId,
                                  juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
     effectiveProbLabel.setJustificationType(juce::Justification::centredRight);
@@ -97,7 +103,7 @@ InspectorPanel::InspectorPanel()
 
     playsOverHint.setText("Stack with a block to configure clip targeting.",
                           juce::dontSendNotification);
-    playsOverHint.setFont(juce::Font(juce::FontOptions(11.0f)));
+    playsOverHint.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
     playsOverHint.setColour(juce::Label::textColourId,
                             juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
     playsOverHint.setJustificationType(juce::Justification::topLeft);
@@ -105,12 +111,12 @@ InspectorPanel::InspectorPanel()
 
     // ── Stack settings section ───────────────────────────────────────────────
     stackSectionTitle.setText("STACK SETTINGS", juce::dontSendNotification);
-    stackSectionTitle.setFont(juce::Font(juce::FontOptions(11.0f).withStyle("Bold")));
+    stackSectionTitle.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
     stackSectionTitle.setColour(juce::Label::textColourId,
                                 juce::Colour(LookAndFeel_BlockShuffler::accentCol));
     addAndMakeVisible(stackSectionTitle);
 
-    stackInfoLabel.setFont(juce::Font(juce::FontOptions(11.0f)));
+    stackInfoLabel.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
     stackInfoLabel.setColour(juce::Label::textColourId,
                              juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
     addAndMakeVisible(stackInfoLabel);
@@ -273,7 +279,7 @@ void InspectorPanel::rebuildLinkRows() {
             otherName = other->name;
 
         row->label.setText("<-> " + otherName, juce::dontSendNotification);
-        row->label.setFont(juce::Font(juce::FontOptions(12.0f)));
+        row->label.setFont(LookAndFeel_BlockShuffler::uiFont(12.0f));
         row->label.setColour(juce::Label::textColourId,
                              juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
         row->slider.setValue(link->swapProbability * 100.0, juce::dontSendNotification);
@@ -310,7 +316,7 @@ void InspectorPanel::rebuildStackCountRows() {
 
         row->countLbl.setText("Play " + juce::String(spc.values[i]),
                               juce::dontSendNotification);
-        row->countLbl.setFont(juce::Font(juce::FontOptions(12.0f)));
+        row->countLbl.setFont(LookAndFeel_BlockShuffler::monoFont(12.0f));
         row->countLbl.setColour(juce::Label::textColourId,
                                 juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
         row->countLbl.setJustificationType(juce::Justification::centredLeft);
@@ -382,7 +388,7 @@ void InspectorPanel::rebuildStackBlockLabels() {
         juce::String text = juce::String(juce::CharPointer_UTF8("\xe2\x80\xa2 ")) + b->name;
         if (isThis) text += "  \xe2\x86\x90 this";
         lbl->setText(text, juce::dontSendNotification);
-        lbl->setFont(juce::Font(juce::FontOptions(11.0f)));
+        lbl->setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
         lbl->setColour(juce::Label::textColourId,
                        isThis ? juce::Colour(LookAndFeel_BlockShuffler::textPrimary)
                                : juce::Colour(LookAndFeel_BlockShuffler::textSecondary));

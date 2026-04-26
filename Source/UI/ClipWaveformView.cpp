@@ -20,7 +20,7 @@ ClipRowComponent::ClipRowComponent(Clip& c,
       onRemoveCallback(std::move(onRemove))
 {
     nameLabel.setText(clip ? clip->name : "", juce::dontSendNotification);
-    nameLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
+    nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(12.0f));
     nameLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
     nameLabel.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
@@ -71,7 +71,7 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
 
     if (!clip || !clip->audioBuffer) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
         g.drawText("No audio loaded", area, juce::Justification::centred);
         return;
     }
@@ -81,7 +81,7 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
     const int numChannels = buf.getNumChannels();
     if (numSamples == 0 || numChannels == 0) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
         g.drawText("No audio loaded", area, juce::Justification::centred);
         return;
     }
@@ -143,7 +143,7 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     } else {
         probText = juce::String((int)(clip->probability * 100.0f)) + "%";
     }
-    g.setFont(juce::Font(juce::FontOptions(11.0f)));
+    g.setFont(LookAndFeel_BlockShuffler::monoFont(11.0f));
     g.setColour(headerTextCol);
     g.drawText(probText, headerRect.withTrimmedRight(4), juce::Justification::centredRight);
 
@@ -633,7 +633,7 @@ void ClipWaveformView::paint(juce::Graphics& g) {
     g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
     if (!currentBlock || currentBlock->clips.isEmpty()) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(juce::Font(juce::FontOptions(14.0f)));
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(14.0f));
         g.drawText(currentBlock ? "Drop audio files here or click  \"+Add Clip\""
                                 : "Select a block to view clips",
                    getLocalBounds().withTrimmedBottom(btnH + 4),

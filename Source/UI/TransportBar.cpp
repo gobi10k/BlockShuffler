@@ -40,7 +40,7 @@ void TransportBar::paint(juce::Graphics& g) {
     // ── Time display ─────────────────────────────────────────────────────────
     auto timeText = formatTime(currentSecs) + " / " + formatTime(totalSecs);
     g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-    g.setFont(juce::Font(juce::FontOptions(13.0f).withStyle("Regular")));
+    g.setFont(LookAndFeel_BlockShuffler::monoFont(14.0f));
     g.drawText(timeText, timeDisplayArea, juce::Justification::centred);
 
     // ── App branding ──────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ void TransportBar::paint(juce::Graphics& g) {
     // App name
     const int textX = iconX + iconW + gap;
     g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-    g.setFont(juce::Font(juce::FontOptions(14.0f).withStyle("Bold")));
+    g.setFont(LookAndFeel_BlockShuffler::uiFontBold(14.0f));
     g.drawText("BlockShuffler",
                juce::Rectangle<int>(textX, cy - 9, 90, 18),
                juce::Justification::centredLeft);

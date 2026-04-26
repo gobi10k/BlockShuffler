@@ -45,8 +45,7 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
                           juce::PathStrokeType::curved,
                           juce::PathStrokeType::rounded));
 
-        // Label at arc peak: "NameA ↔ NameB" then "30%"
-        g.setFont(10.0f);
+        // Label at arc peak: "NameA ↔ NameB" (Inter) then "30%" (mono)
         g.setColour(col.withAlpha(1.0f));
         juce::String nameA = link->blockA;
         juce::String nameB = link->blockB;
@@ -55,9 +54,11 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         juce::String labelText = nameA + " \xe2\x86\x94 " + nameB;  // ↔ (UTF-8)
         juce::String probText  = juce::String((int)(link->swapProbability * 100)) + "%";
         float labelW = 120.0f;
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(10.0f));
         g.drawText(labelText,
                    juce::Rectangle<float>(midX - labelW * 0.5f, peakY - 26.0f, labelW, 13.0f),
                    juce::Justification::centred);
+        g.setFont(LookAndFeel_BlockShuffler::monoFont(10.0f));
         g.drawText(probText,
                    juce::Rectangle<float>(midX - 20.0f, peakY - 13.0f, 40.0f, 13.0f),
                    juce::Justification::centred);
@@ -68,7 +69,7 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.8f));
         g.drawLine((float)linkingSourceX, 0.0f,
                    (float)linkingSourceX, (float)getHeight(), 2.0f);
-        g.setFont(11.0f);
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
         g.drawText("Click another block to link",
                    getLocalBounds().removeFromTop(16),
                    juce::Justification::centred);

@@ -18,7 +18,7 @@ public:
         inlineEditor.setInputRestrictions(8, "0123456789.");
         inlineEditor.setJustification(juce::Justification::centred);
         inlineEditor.setSelectAllWhenFocused(true);
-        inlineEditor.setFont(juce::Font(juce::FontOptions(14.0f)));
+        inlineEditor.setFont(LookAndFeel_BlockShuffler::monoFont(13.0f));
         inlineEditor.setColour(juce::TextEditor::backgroundColourId,
                                juce::Colour(LookAndFeel_BlockShuffler::bgLight));
         inlineEditor.setColour(juce::TextEditor::textColourId,
@@ -64,9 +64,9 @@ private:
         g.fillRoundedRectangle(getLocalBounds().toFloat(), 4.0f);
         if (!editing) {
             g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
-            g.setFont(juce::Font(juce::FontOptions(14.0f)));
-            g.drawFittedText(juce::String(value, decimals), getLocalBounds().reduced(4),
-                             juce::Justification::centred, 1);
+            g.setFont(LookAndFeel_BlockShuffler::monoFont(13.0f));
+            g.drawFittedText(juce::String(value, decimals), getLocalBounds().withTrimmedRight(6),
+                             juce::Justification::centredRight, 1);
         }
     }
 

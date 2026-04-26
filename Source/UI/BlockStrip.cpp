@@ -34,7 +34,7 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
 
     // Mode label renders on top of the viewport
     modeLabel.setJustificationType(juce::Justification::centred);
-    modeLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Italic")));
+    modeLabel.setFont(LookAndFeel_BlockShuffler::uiFont(12.0f));
     modeLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::accentCol));
     modeLabel.setColour(juce::Label::backgroundColourId,
@@ -78,7 +78,7 @@ void BlockStrip::paintOverChildren(juce::Graphics& g) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentTeal).withAlpha(0.85f));
         g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 5.0f, 2.5f);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
-        g.setFont(10.0f);
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
         g.drawText("STACK", r.withTrimmedTop(r.getHeight() / 2), juce::Justification::centred);
 
     } else if (currentDropAction == DropAction::RearrangeInStack
@@ -94,7 +94,7 @@ void BlockStrip::paintOverChildren(juce::Graphics& g) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol).withAlpha(0.9f));
         g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 5.0f, 2.5f);
         g.setColour(juce::Colours::white);
-        g.setFont(10.0f);
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
         g.drawText("SWAP", r.withTrimmedTop(r.getHeight() / 2), juce::Justification::centred);
 
     } else if (currentDropAction == DropAction::Reorder && !originalBounds.isEmpty()) {
