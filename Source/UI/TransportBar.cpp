@@ -11,6 +11,9 @@ TransportBar::TransportBar() {
     saveBtn  .onClick = [this] { if (onSave)   onSave();   };
     openBtn  .onClick = [this] { if (onOpen)   onOpen();   };
 
+    // Mark Play as a primary button so drawButtonBackground applies the accent treatment
+    playBtn.getProperties().set("primary", true);
+
     rewindBtn.setTooltip("Rewind to start");
     playBtn  .setTooltip("Play / Pause  [Space]");
     stopBtn  .setTooltip("Stop and rewind");

@@ -79,6 +79,28 @@ public:
     static juce::Array<juce::Colour> getBlockPalette();
     static juce::Colour              getBlockColour(int index);
 
+    // ── Custom draw overrides ─────────────────────────────────────────────────
+
+    void drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
+                          float sliderPos, float minSliderPos, float maxSliderPos,
+                          juce::Slider::SliderStyle style, juce::Slider& slider) override;
+
+    void drawButtonBackground(juce::Graphics& g, juce::Button& button,
+                              const juce::Colour& backgroundColour,
+                              bool shouldDrawButtonAsHighlighted,
+                              bool shouldDrawButtonAsDown) override;
+
+    void drawTickBox(juce::Graphics& g, juce::Component& component,
+                     float x, float y, float w, float h,
+                     bool ticked, bool isEnabled,
+                     bool shouldDrawButtonAsHighlighted,
+                     bool shouldDrawButtonAsDown) override;
+
+    void drawTooltip(juce::Graphics& g, const juce::String& text,
+                     int width, int height) override;
+
+    juce::Font getTextButtonFont(juce::TextButton& button, int buttonHeight) override;
+
 private:
     juce::Typeface::Ptr interRegular;
     juce::Typeface::Ptr interBold;

@@ -132,4 +132,145 @@ juce::Colour LookAndFeel_BlockShuffler::getBlockColour(int index) {
     return palette[((index % palette.size()) + palette.size()) % palette.size()];
 }
 
+// ── drawLinearSlider ──────────────────────────────────────────────────────────
+
+void LookAndFeel_BlockShuffler::drawLinearSlider(juce::Graphics& g,
+                                                  int x, int y, int width, int height,
+                                                  float sliderPos,
+                                                  float /*minSliderPos*/,
+                                                  float /*maxSliderPos*/,
+                                                  juce::Slider::SliderStyle style,
+                                                  juce::Slider& slider)
+{
+    if (style != juce::Slider::LinearHorizontal && style != juce::Slider::LinearBar) {
+        LookAndFeel_V4::drawLinearSlider(g, x, y, width, height, sliderPos,
+                                         0.0f, 0.0f, style, slider);
+        return;
+    }
+
+    const float trackH  = 3.0f;
+    const float thumbDia = 12.0f;
+    const float thumbR  = thumbDia * 0.5f;
+    const float cy      = (float)y + (float)height * 0.5f;
+    const float trackX  = (float)x + thumbR;
+    const float trackW  = (float)width - thumbDia;
+    const float trackY  = cy - trackH * 0.5f;
+
+    // Empty track
+    g.setColour(juce::Colour(borderSubtle));
+    g.fillRoundedRectangle(trackX, trackY, trackW, trackH, trackH * 0.5f);
+
+    // Filled portion up to thumb
+    float fillEnd = sliderPos - thumbR;
+    if (fillEnd > trackX) {
+        g.setColour(juce::Colour(accentCol));
+        g.fillRoundedRectangle(trackX, trackY, fillEnd - trackX, trackH, trackH * 0.5f);
+    }
+
+    // Thumb — dark fill + accent ring (2px on hover, 1px otherwise)
+    const float thumbX = sliderPos - thumbR;
+    const float thumbY = cy - thumbR;
+    const float ringW  = slider.isMouseOverOrDragging() ? 2.0f : 1.0f;
+
+    g.setColour(juce::Colour(bgLight));
+    g.fillEllipse(thumbX, thumbY, thumbDia, thumbDia);
+    g.setColour(juce::Colour(accentCol));
+    g.drawEllipse(thumbX + ringW * 0.5f, thumbY + ringW * 0.5f,
+                  thumbDia - ringW, thumbDia - ringW, ringW);
+}
+
+// ── drawButtonBackground ──────────────────────────────────────────────────────
+
+void LookAndFeel_BlockShuffler::drawButtonBackground(juce::Graphics& g,
+                                                      juce::Button& button,
+                                                      const juce::Colour& /*backgroundColour*/,
+                                                      bool shouldDrawButtonAsHighlighted,
+                                                      bool shouldDrawButtonAsDown)
+{
+    const auto  bounds       = button.getLocalBounds().toFloat().reduced(0.5f);
+    const float cornerRadius = 5.0f;
+    const bool  isPrimary    = button.getProperties().contains("primary");
+
+    juce::Colour bg, border;
+    if (isPrimary) {
+        bg = shouldDrawButtonAsDown        ? juce::Colour(accentCol).withAlpha(0.38f)
+           : shouldDrawButtonAsHighlighted ? juce::Colour(accentCol).withAlpha(0.26f)
+                                           : juce::Colour(accentCol).withAlpha(0.15f);
+        border = juce::Colour(accentCol);
+    } else {
+        bg = shouldDrawButtonAsDown        ? juce::Colour(borderStrong).withAlpha(0.6f)
+           : shouldDrawButtonAsHighlighted ? juce::Colour(bgLight).withAlpha(0.55f)
+                                           : juce::Colours::transparentBlack;
+        border = shouldDrawButtonAsHighlighted ? juce::Colour(borderStrong)
+                                               : juce::Colour(borderSubtle);
+    }
+
+    g.setColour(bg);
+    g.fillRoundedRectangle(bounds, cornerRadius);
+    g.setColour(border);
+    g.drawRoundedRectangle(bounds, cornerRadius, 1.0f);
+}
+
+// ── drawTickBox ───────────────────────────────────────────────────────────────
+
+void LookAndFeel_BlockShuffler::drawTickBox(juce::Graphics& g,
+                                             juce::Component& /*component*/,
+                                             float x, float y, float w, float h,
+                                             bool ticked, bool isEnabled,
+                                             bool shouldDrawButtonAsHighlighted,
+                                             bool /*shouldDrawButtonAsDown*/)
+{
+    const float size = juce::jmin(w, h, 16.0f);
+    const float bx   = x + (w - size) * 0.5f;
+    const float by   = y + (h - size) * 0.5f;
+    juce::Rectangle<float> box(bx, by, size, size);
+
+    if (ticked) {
+        g.setColour(juce::Colour(accentCol));
+        g.fillRoundedRectangle(box, 3.5f);
+
+        // Checkmark path
+        juce::Path check;
+        const float pad = size * 0.22f;
+        check.startNewSubPath(bx + pad,            by + size * 0.54f);
+        check.lineTo         (bx + size * 0.42f,   by + size - pad);
+        check.lineTo         (bx + size - pad,      by + pad);
+        g.setColour(juce::Colours::white);
+        g.strokePath(check, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+    } else {
+        if (shouldDrawButtonAsHighlighted) {
+            g.setColour(juce::Colour(accentCol).withAlpha(0.10f));
+            g.fillRoundedRectangle(box, 3.5f);
+        }
+        g.setColour(isEnabled ? juce::Colour(borderStrong) : juce::Colour(textTertiary));
+        g.drawRoundedRectangle(box.reduced(0.5f), 3.5f, 1.0f);
+    }
+}
+
+// ── drawTooltip ───────────────────────────────────────────────────────────────
+
+void LookAndFeel_BlockShuffler::drawTooltip(juce::Graphics& g,
+                                             const juce::String& text,
+                                             int width, int height)
+{
+    juce::Rectangle<float> bounds(0.5f, 0.5f, (float)width - 1.0f, (float)height - 1.0f);
+    g.setColour(juce::Colour(bgLight));
+    g.fillRoundedRectangle(bounds, 4.0f);
+    g.setColour(juce::Colour(borderStrong));
+    g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
+    g.setColour(juce::Colour(textPrimary));
+    g.setFont(uiFont(11.5f));
+    g.drawText(text, juce::Rectangle<int>(8, 4, width - 16, height - 8),
+               juce::Justification::centredLeft, true);
+}
+
+// ── getTextButtonFont ─────────────────────────────────────────────────────────
+
+juce::Font LookAndFeel_BlockShuffler::getTextButtonFont(juce::TextButton& /*button*/,
+                                                         int buttonHeight)
+{
+    return uiFont(juce::jmin(13.0f, (float)buttonHeight * 0.55f));
+}
+
 } // namespace BlockShuffler
