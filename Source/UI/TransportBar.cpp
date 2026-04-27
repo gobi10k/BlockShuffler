@@ -33,15 +33,30 @@ void TransportBar::paint(juce::Graphics& g) {
     // ── Background ────────────────────────────────────────────────────────────
     g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
 
-    // Top separator line (panel colour — subtle)
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::panelCol));
+    // Top separator line
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderSubtle));
     g.drawLine(0.0f, 0.0f, (float)getWidth(), 0.0f, 1.0f);
 
-    // ── Time display ─────────────────────────────────────────────────────────
-    auto timeText = formatTime(currentSecs) + " / " + formatTime(totalSecs);
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-    g.setFont(LookAndFeel_BlockShuffler::monoFont(14.0f));
-    g.drawText(timeText, timeDisplayArea, juce::Justification::centred);
+    // ── Time display — current in primary, separator + total in tertiary ─────
+    {
+        auto font     = LookAndFeel_BlockShuffler::monoFont(14.0f);
+        auto curText  = formatTime(currentSecs);
+        auto sepText  = juce::String(" / ");
+        auto totText  = formatTime(totalSecs);
+        float w1      = font.getStringWidthFloat(curText);
+        float w2      = font.getStringWidthFloat(sepText + totText);
+        float totalW  = w1 + w2;
+        float startX  = (float)timeDisplayArea.getCentreX() - totalW * 0.5f;
+        float midY    = (float)timeDisplayArea.getCentreY();
+        const float rowH = 18.0f;
+        g.setFont(font);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+        g.drawText(curText, juce::Rectangle<float>(startX, midY - rowH * 0.5f, w1 + 1.0f, rowH),
+                   juce::Justification::centredLeft, false);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textTertiary));
+        g.drawText(sepText + totText, juce::Rectangle<float>(startX + w1, midY - rowH * 0.5f, w2 + 1.0f, rowH),
+                   juce::Justification::centredLeft, false);
+    }
 
     // ── App branding ──────────────────────────────────────────────────────────
     if (brandingArea.isEmpty()) return;
@@ -66,8 +81,8 @@ void TransportBar::paint(juce::Graphics& g) {
     g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
     g.fillRoundedRectangle((float)(iconX + 20), (float)iconY, 7.0f, (float)iconH, r);
 
-    // Arrow dots (Hot Magenta) connecting the blocks
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentMagenta));
+    // Connector dots — accent at reduced alpha for consistency
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.55f));
     g.fillEllipse((float)(iconX + 8), (float)(cy - 1), 2.0f, 2.0f);
     g.fillEllipse((float)(iconX + 18), (float)(cy - 1), 2.0f, 2.0f);
 
@@ -88,7 +103,7 @@ void TransportBar::resized() {
     // Left: transport controls
     rewindBtn.setBounds(area.removeFromLeft(36).withSizeKeepingCentre(36, btnH));
     area.removeFromLeft(gap);
-    playBtn  .setBounds(area.removeFromLeft(60).withSizeKeepingCentre(60, btnH));
+    playBtn  .setBounds(area.removeFromLeft(68).withSizeKeepingCentre(68, btnH));
     area.removeFromLeft(gap);
     stopBtn  .setBounds(area.removeFromLeft(60).withSizeKeepingCentre(60, btnH));
     area.removeFromLeft(gap * 4);
