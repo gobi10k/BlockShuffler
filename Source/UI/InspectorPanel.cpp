@@ -275,13 +275,15 @@ void InspectorPanel::rebuildLinkRows() {
         const juce::String otherId = (link->blockA == selectedBlock->id)
                                      ? link->blockB : link->blockA;
         juce::String otherName = otherId;
-        if (auto* other = project->getBlockById(otherId))
-            otherName = other->name;
+        juce::Colour labelColor = juce::Colour(LookAndFeel_BlockShuffler::textPrimary);
+        if (auto* other = project->getBlockById(otherId)) {
+            otherName  = other->name;
+            labelColor = other->color;
+        }
 
         row->label.setText("<-> " + otherName, juce::dontSendNotification);
         row->label.setFont(LookAndFeel_BlockShuffler::uiFont(12.0f));
-        row->label.setColour(juce::Label::textColourId,
-                             juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+        row->label.setColour(juce::Label::textColourId, labelColor);
         row->slider.setValue(link->swapProbability * 100.0, juce::dontSendNotification);
         row->slider.setColour(juce::Slider::textBoxTextColourId,
                               juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
@@ -741,6 +743,20 @@ void InspectorPanel::paint(juce::Graphics& g) {
         g.drawHorizontalLine(stackSectionY, 0.0f, (float)getWidth());
         g.drawHorizontalLine(stackSectionY + stackSectionH, 0.0f, (float)getWidth());
     }
+
+    // Section header divider lines — 1 px below each visible title
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderSubtle));
+    auto drawDivider = [&](const juce::Label& title) {
+        if (!title.isVisible()) return;
+        float y = (float)(title.getBottom() + 1);
+        g.drawHorizontalLine((int)y, 8.0f, (float)(getWidth() - 8));
+    };
+    drawDivider(clipTitle);
+    drawDivider(blockTitle);
+    drawDivider(playsOverTitle);
+    drawDivider(stackSectionTitle);
+    drawDivider(projectTitle);
+    drawDivider(linksTitle);
 }
 
 void InspectorPanel::resized() {

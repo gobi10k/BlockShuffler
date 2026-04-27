@@ -45,7 +45,7 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
                           juce::PathStrokeType::curved,
                           juce::PathStrokeType::rounded));
 
-        // Label at arc peak: "NameA ↔ NameB" (Inter) then "30%" (mono)
+        // Labels at arc peak: "NameA ↔ NameB" above, then probability pill
         g.setColour(col.withAlpha(1.0f));
         juce::String nameA = link->blockA;
         juce::String nameB = link->blockB;
@@ -56,12 +56,19 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         float labelW = 120.0f;
         g.setFont(LookAndFeel_BlockShuffler::uiFont(10.0f));
         g.drawText(labelText,
-                   juce::Rectangle<float>(midX - labelW * 0.5f, peakY - 26.0f, labelW, 13.0f),
+                   juce::Rectangle<float>(midX - labelW * 0.5f, peakY - 28.0f, labelW, 13.0f),
                    juce::Justification::centred);
-        g.setFont(LookAndFeel_BlockShuffler::monoFont(10.0f));
-        g.drawText(probText,
-                   juce::Rectangle<float>(midX - 20.0f, peakY - 13.0f, 40.0f, 13.0f),
-                   juce::Justification::centred);
+
+        // Probability pill: rounded rect background + mono text
+        auto  probFont = LookAndFeel_BlockShuffler::monoFont(10.0f);
+        float pillW    = probFont.getStringWidthFloat(probText) + 12.0f;
+        float pillH    = 15.0f;
+        juce::Rectangle<float> pill(midX - pillW * 0.5f, peakY - 15.0f, pillW, pillH);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight).withAlpha(0.88f));
+        g.fillRoundedRectangle(pill, 5.5f);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+        g.setFont(probFont);
+        g.drawText(probText, pill, juce::Justification::centred);
     }
 
     // Linking mode indicator
