@@ -86,11 +86,13 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
         return;
     }
 
-    const int w  = area.getWidth();
-    const int cy = area.getCentreY();
-    const int halfH = area.getHeight() / 2;
+    const int w      = area.getWidth();
+    const int cy     = area.getCentreY();
+    const int halfH  = area.getHeight() / 2;
+    const auto waveCol = juce::Colour(LookAndFeel_BlockShuffler::waveformFill);
 
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::waveformFill));
+    // Compute min/max for each pixel column in one pass
+    juce::HeapBlock<int> peakY(w), troughY(w);
     for (int px = 0; px < w; ++px) {
         int s0 = (int)((int64_t)px * numSamples / w);
         int s1 = juce::jmin((int)((int64_t)(px + 1) * numSamples / w), numSamples - 1);
@@ -107,9 +109,26 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
         int y1 = cy - (int)(mn * (float)halfH);
         if (y0 > y1) std::swap(y0, y1);
         if (y0 == y1) ++y1;
-        g.drawLine((float)(area.getX() + px), (float)y0,
-                   (float)(area.getX() + px), (float)y1);
+        peakY[px]   = y0;
+        troughY[px] = y1;
     }
+
+    // Fill pass — outline path traced peak→trough, filled at low alpha
+    juce::Path fillPath;
+    fillPath.startNewSubPath((float)area.getX(), (float)cy);
+    for (int px = 0; px < w; ++px)
+        fillPath.lineTo((float)(area.getX() + px), (float)peakY[px]);
+    for (int px = w - 1; px >= 0; --px)
+        fillPath.lineTo((float)(area.getX() + px), (float)troughY[px]);
+    fillPath.closeSubPath();
+    g.setColour(waveCol.withAlpha(0.18f));
+    g.fillPath(fillPath);
+
+    // Line pass — 1px peak-to-trough at full opacity
+    g.setColour(waveCol);
+    for (int px = 0; px < w; ++px)
+        g.drawLine((float)(area.getX() + px), (float)peakY[px],
+                   (float)(area.getX() + px), (float)troughY[px]);
 }
 
 void ClipRowComponent::paint(juce::Graphics& g) {
@@ -130,7 +149,7 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     auto headerTextCol = (lum > 0.55f) ? juce::Colours::black : juce::Colours::white;
     nameLabel.setColour(juce::Label::textColourId, headerTextCol);
 
-    // Effective (normalized) probability on right of header
+    // Effective probability — drawn as a dark pill so it reads on any header color
     juce::String probText;
     if (clip->isDone) {
         probText = "excl.";
@@ -143,9 +162,19 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     } else {
         probText = juce::String((int)(clip->probability * 100.0f)) + "%";
     }
-    g.setFont(LookAndFeel_BlockShuffler::monoFont(11.0f));
-    g.setColour(headerTextCol);
-    g.drawText(probText, headerRect.withTrimmedRight(4), juce::Justification::centredRight);
+    {
+        auto pillFont  = LookAndFeel_BlockShuffler::monoFont(10.5f);
+        float pillW    = pillFont.getStringWidthFloat(probText) + 10.0f;
+        float pillH    = 14.0f;
+        float pillX    = (float)headerRect.getRight() - pillW - 4.0f;
+        float pillY    = (float)headerRect.getCentreY() - pillH * 0.5f;
+        auto  pillRect = juce::Rectangle<float>(pillX, pillY, pillW, pillH);
+        g.setColour(juce::Colours::black.withAlpha(0.28f));
+        g.fillRoundedRectangle(pillRect, 3.5f);
+        g.setFont(pillFont);
+        g.setColour(juce::Colours::white.withAlpha(0.92f));
+        g.drawText(probText, pillRect.toNearestInt(), juce::Justification::centred);
+    }
 
     // Waveform
     auto wa = waveArea();
@@ -158,12 +187,12 @@ void ClipRowComponent::paint(juce::Graphics& g) {
         // Wrap the offset into [0, spb) so lines start at the right phase
         double offset = std::fmod((double)clip->gridOffsetSamples, spb);
         if (offset < 0.0) offset += spb;
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::gridLineColor));
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderStrong));
         for (double s = offset; s < (double)total; s += spb) {
             int gx = sampleToX((int64_t)s);
             if (gx >= wa.getX() && gx < wa.getRight())
                 g.drawLine((float)gx, (float)wa.getY(),
-                           (float)gx, (float)wa.getBottom(), 1.0f);
+                           (float)gx, (float)wa.getBottom(), 1.5f);
         }
     }
 
@@ -202,12 +231,12 @@ void ClipRowComponent::paint(juce::Graphics& g) {
         g.fillPath(tri);
     }
 
-    // Border: 2-px accent outline for selection, 1-px subtle for others
+    // Border: 2px accent for selected, 1px borderSubtle separator otherwise
     if (selected) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
         g.drawRect(getLocalBounds(), 2);
     } else {
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight));
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderSubtle));
         g.drawRect(getLocalBounds(), 1);
     }
 }
@@ -215,7 +244,7 @@ void ClipRowComponent::paint(juce::Graphics& g) {
 void ClipRowComponent::resized() {
     auto hdr = getLocalBounds().removeFromTop(headerH);
     // Leave right 44px for the probability label (drawn in paint)
-    nameLabel.setBounds(hdr.withTrimmedLeft(5).withTrimmedRight(44));
+    nameLabel.setBounds(hdr.withTrimmedLeft(5).withTrimmedRight(72));
 }
 
 void ClipRowComponent::mouseDown(const juce::MouseEvent& e) {
@@ -616,8 +645,12 @@ void ClipWaveformView::paintOverChildren(juce::Graphics& g) {
 
         if (drawBottom <= drawTop) break;
 
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::playheadCol).withAlpha(0.85f));
-        g.drawLine((float)waveX, (float)drawTop, (float)waveX, (float)drawBottom, 2.0f);
+        // Glow pass — wide soft halo
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::playheadCol).withAlpha(0.18f));
+        g.drawLine((float)waveX, (float)drawTop, (float)waveX, (float)drawBottom, 5.0f);
+        // Sharp pass — 1px crisp line at full opacity
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::playheadCol));
+        g.drawLine((float)waveX, (float)drawTop, (float)waveX, (float)drawBottom, 1.0f);
 
         juce::Path tri;
         tri.addTriangle((float)waveX - 5, (float)drawTop,
