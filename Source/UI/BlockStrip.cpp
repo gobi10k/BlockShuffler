@@ -76,7 +76,7 @@ void BlockStrip::paintOverChildren(juce::Graphics& g) {
         auto r  = juce::Rectangle<int>(contentToStripX(cb.getX()), contentToStripY(cb.getY()),
                                        cb.getWidth(), cb.getHeight());
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentTeal).withAlpha(0.85f));
-        g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 5.0f, 2.5f);
+        g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 7.0f, 2.5f);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
         g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
         g.drawText("STACK", r.withTrimmedTop(r.getHeight() / 2), juce::Justification::centred);
@@ -90,9 +90,9 @@ void BlockStrip::paintOverChildren(juce::Graphics& g) {
         auto r  = juce::Rectangle<int>(contentToStripX(cb.getX()), contentToStripY(cb.getY()),
                                        cb.getWidth(), cb.getHeight());
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol).withAlpha(0.3f));
-        g.fillRoundedRectangle(r.toFloat().reduced(2.0f), 5.0f);
+        g.fillRoundedRectangle(r.toFloat().reduced(2.0f), 7.0f);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol).withAlpha(0.9f));
-        g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 5.0f, 2.5f);
+        g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 7.0f, 2.5f);
         g.setColour(juce::Colours::white);
         g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
         g.drawText("SWAP", r.withTrimmedTop(r.getHeight() / 2), juce::Justification::centred);

@@ -31,6 +31,8 @@ public:
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
+    void mouseEnter(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
 
     void setSelected(bool s);
     void setHighlighted(bool h);  ///< Pending link/stack target highlight
@@ -50,6 +52,7 @@ private:
     bool selected          = false;
     bool highlighted       = false;
     bool playing           = false;
+    bool hovered           = false;  ///< mouse is over the tile (hover state)
     bool clipDropHighlight = false;  ///< true = a clip drag is hovering over this block
 
     // ComponentDragger — block follows the mouse; parent strip handles the drop.
