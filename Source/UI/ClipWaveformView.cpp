@@ -164,7 +164,7 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     }
     {
         auto pillFont  = LookAndFeel_BlockShuffler::monoFont(10.5f);
-        float pillW    = pillFont.getStringWidthFloat(probText) + 10.0f;
+        float pillW    = LookAndFeel_BlockShuffler::measureTextWidth(pillFont, probText) + 10.0f;
         float pillH    = 14.0f;
         float pillX    = (float)headerRect.getRight() - pillW - 4.0f;
         float pillY    = (float)headerRect.getCentreY() - pillH * 0.5f;

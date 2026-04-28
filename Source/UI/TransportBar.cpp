@@ -43,8 +43,8 @@ void TransportBar::paint(juce::Graphics& g) {
         auto curText  = formatTime(currentSecs);
         auto sepText  = juce::String(" / ");
         auto totText  = formatTime(totalSecs);
-        float w1      = font.getStringWidthFloat(curText);
-        float w2      = font.getStringWidthFloat(sepText + totText);
+        float w1      = LookAndFeel_BlockShuffler::measureTextWidth(font, curText);
+        float w2      = LookAndFeel_BlockShuffler::measureTextWidth(font, sepText + totText);
         float totalW  = w1 + w2;
         float startX  = (float)timeDisplayArea.getCentreX() - totalW * 0.5f;
         float midY    = (float)timeDisplayArea.getCentreY();

@@ -61,7 +61,7 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
 
         // Probability pill: rounded rect background + mono text
         auto  probFont = LookAndFeel_BlockShuffler::monoFont(10.0f);
-        float pillW    = probFont.getStringWidthFloat(probText) + 12.0f;
+        float pillW    = LookAndFeel_BlockShuffler::measureTextWidth(probFont, probText) + 12.0f;
         float pillH    = 15.0f;
         juce::Rectangle<float> pill(midX - pillW * 0.5f, peakY - 15.0f, pillW, pillH);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight).withAlpha(0.88f));

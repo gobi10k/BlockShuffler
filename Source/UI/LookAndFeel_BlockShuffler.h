@@ -101,6 +101,14 @@ public:
 
     juce::Font getTextButtonFont(juce::TextButton& button, int buttonHeight) override;
 
+    /** Measure the advance width of a single line of text.
+     *  Replaces the deprecated juce::Font::getStringWidthFloat(). */
+    static float measureTextWidth(const juce::Font& font, const juce::String& text) {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText(font, text, 0.0f, 0.0f);
+        return ga.getNumGlyphs() > 0 ? ga.getBoundingBox(0, -1, true).getWidth() : 0.0f;
+    }
+
 private:
     juce::Typeface::Ptr interRegular;
     juce::Typeface::Ptr interBold;
