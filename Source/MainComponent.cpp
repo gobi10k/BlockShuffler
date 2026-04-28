@@ -102,7 +102,7 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     addAndMakeVisible(transportBar);
 
     inspectorViewport.setViewedComponent(&inspectorPanel);
-    inspectorViewport.setScrollBarsShown(true, true, false, false);
+    inspectorViewport.setScrollBarsShown(true, false, false, false);
     inspectorViewport.setColour(juce::ScrollBar::backgroundColourId,
                                juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
     inspectorViewport.setColour(juce::ScrollBar::thumbColourId,

@@ -80,7 +80,15 @@ private:
         }
     };
     ScrollNotifyViewport viewport;
-    juce::Component  contentArea;
+
+    // Plain Component has no paint() — JUCE 8 renders viewport content into an
+    // offscreen buffer that starts black. Override paint() to fill the background.
+    struct ContentArea : public juce::Component {
+        void paint(juce::Graphics& g) override {
+            g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
+        }
+    };
+    ContentArea      contentArea;
     juce::TextButton addButton { "+" };
     juce::Label      modeLabel;   ///< overlay shown during link/stack pending mode
 

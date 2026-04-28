@@ -140,7 +140,7 @@ InspectorPanel::InspectorPanel()
         selectedBlock->stackPlayMode = (playModeCombo.getSelectedId() == 2)
                                        ? StackPlayMode::Simultaneous
                                        : StackPlayMode::Sequential;
-        project->propagateStackSettings(selectedBlock->stackGroup);
+        project->propagateStackSettings(selectedBlock->stackGroup, selectedBlock);
         project->applyExternalMutation(pre);
     };
     addAndMakeVisible(playModeCombo);
