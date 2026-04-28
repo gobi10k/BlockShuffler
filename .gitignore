@@ -13,3 +13,4 @@ ehthumbs.db
 Source/.DS_Store
 Resources/.DS_Store
 Builds/
+build/
