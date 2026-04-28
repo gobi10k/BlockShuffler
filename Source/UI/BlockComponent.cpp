@@ -292,6 +292,12 @@ void BlockComponent::itemDropped(const SourceDetails& details) {
     }
 }
 
+juce::String BlockComponent::getTooltip() {
+    if (block && block->stackGroup >= 0 && !isDragging)
+        return "Hold Shift and drag to move the entire stack";
+    return juce::SettableTooltipClient::getTooltip();
+}
+
 // ── Context menu ──────────────────────────────────────────────────────────────
 
 void BlockComponent::showContextMenu() {

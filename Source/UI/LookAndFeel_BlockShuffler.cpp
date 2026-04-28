@@ -69,6 +69,9 @@ LookAndFeel_BlockShuffler::LookAndFeel_BlockShuffler() {
     setColour(juce::ScrollBar::thumbColourId,      juce::Colour(borderStrong));
     setColour(juce::ScrollBar::backgroundColourId, juce::Colour(bgMedium));
 
+    // ── Viewport — LookAndFeel_V4 never sets this, so it defaults to black ───
+    setColour(juce::Viewport::backgroundColourId,  juce::Colour(bgMedium));
+
     // ── ComboBox ──────────────────────────────────────────────────────────────
     setColour(juce::ComboBox::backgroundColourId, juce::Colour(bgLight));
     setColour(juce::ComboBox::textColourId,       juce::Colour(textPrimary));

@@ -15,7 +15,8 @@ namespace BlockShuffler {
  * DragAndDropTarget is kept only for "clip:" drags (from ClipRowComponent).
  */
 class BlockComponent : public juce::Component,
-                       public juce::DragAndDropTarget {
+                       public juce::DragAndDropTarget,
+                       public juce::SettableTooltipClient {
 public:
     BlockComponent(Block& block,
                    std::function<void(Block*)>              onSelected,
@@ -39,6 +40,9 @@ public:
     void setPlaying(bool p);      ///< Currently playing in the arrangement
     bool isSelected()   const { return selected; }
     Block* getBlock()         { return block.get(); }
+
+    /** Dynamic tooltip: shows the Shift+drag hint for stacked blocks. */
+    juce::String getTooltip() override;
 
     // DragAndDropTarget — accepts clip drops only (from ClipRowComponent)
     bool isInterestedInDragSource(const SourceDetails& details) override;
