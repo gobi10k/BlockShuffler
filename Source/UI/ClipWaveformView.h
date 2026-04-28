@@ -9,7 +9,8 @@ namespace BlockShuffler {
 /**
  * A single clip row: colored header with editable name + waveform with markers.
  */
-class ClipRowComponent : public juce::Component {
+class ClipRowComponent : public juce::Component,
+                         public juce::SettableTooltipClient {
 public:
     ClipRowComponent(Clip& clip,
                      double projectSampleRate,

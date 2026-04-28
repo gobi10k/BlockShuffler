@@ -407,6 +407,10 @@ ClipWaveformView::ClipWaveformView() {
     zoomInBtn .setTooltip("Zoom in  [Cmd+scroll]");
     zoomOutBtn.setTooltip("Zoom out  [Cmd+scroll]");
     zoomFitBtn.setTooltip("Reset zoom to fit");
+    // Tag buttons so LookAndFeel can draw them as a joined segmented control
+    zoomOutBtn.getProperties().set("segmentPos", "left");
+    zoomFitBtn.getProperties().set("segmentPos", "middle");
+    zoomInBtn .getProperties().set("segmentPos", "right");
     addAndMakeVisible(zoomInBtn);
     addAndMakeVisible(zoomOutBtn);
     addAndMakeVisible(zoomFitBtn);
@@ -464,6 +468,7 @@ void ClipWaveformView::rebuildRows() {
         row->onPlayClipRequested = onPlayClipRequested;
         row->ownerBlock = currentBlock.get();
         row->setSelected(clipPtr == selectedClip);
+        row->setTooltip("eff: effective play probability — this clip\xe2\x80\x99s weight as a percentage of all active clips in the block");
         contentArea.addAndMakeVisible(row);
     }
 }
@@ -680,9 +685,7 @@ void ClipWaveformView::resized() {
 
     auto zoomBar = area.removeFromBottom(zoomBarH).reduced(4, 2);
     zoomOutBtn.setBounds(zoomBar.removeFromLeft(24));
-    zoomBar.removeFromLeft(2);
     zoomFitBtn.setBounds(zoomBar.removeFromLeft(36));
-    zoomBar.removeFromLeft(2);
     zoomInBtn .setBounds(zoomBar.removeFromLeft(24));
 
     viewport.setBounds(area);

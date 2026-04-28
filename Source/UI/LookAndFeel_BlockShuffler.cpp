@@ -216,6 +216,23 @@ void LookAndFeel_BlockShuffler::drawButtonBackground(juce::Graphics& g,
                                                : juce::Colour(borderSubtle);
     }
 
+    // Segmented control: round only the outer corners of the segment group
+    auto seg = button.getProperties()["segmentPos"].toString();
+    if (seg.isNotEmpty()) {
+        bool roundLeft  = (seg == "left");
+        bool roundRight = (seg == "right");
+        juce::Path path;
+        path.addRoundedRectangle(bounds.getX(), bounds.getY(),
+                                 bounds.getWidth(), bounds.getHeight(),
+                                 cornerRadius, cornerRadius,
+                                 roundLeft, roundRight, roundLeft, roundRight);
+        g.setColour(bg);
+        g.fillPath(path);
+        g.setColour(border);
+        g.strokePath(path, juce::PathStrokeType(1.0f));
+        return;
+    }
+
     g.setColour(bg);
     g.fillRoundedRectangle(bounds, cornerRadius);
     g.setColour(border);
