@@ -72,6 +72,10 @@ class ZoomableViewport : public juce::Viewport {
 public:
     std::function<void(float deltaY)> onZoomScroll;
 
+    void paint(juce::Graphics& g) override {
+        g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
+    }
+
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override {
         if (e.mods.isCommandDown() && onZoomScroll) {
             onZoomScroll(w.deltaY);

@@ -3,6 +3,7 @@
 #include "../Model/Project.h"
 #include "BlockComponent.h"
 #include "BlockLinkOverlay.h"
+#include "LookAndFeel_BlockShuffler.h"
 
 namespace BlockShuffler {
 
@@ -73,6 +74,9 @@ private:
         std::function<void()> onScrollChanged;
         void visibleAreaChanged(const juce::Rectangle<int>&) override {
             if (onScrollChanged) onScrollChanged();
+        }
+        void paint(juce::Graphics& g) override {
+            g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
         }
     };
     ScrollNotifyViewport viewport;

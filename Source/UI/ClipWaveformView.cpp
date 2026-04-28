@@ -375,8 +375,6 @@ ClipWaveformView::ClipWaveformView() {
     viewport.setViewedComponent(&contentArea, false);
     viewport.setScrollBarsShown(true, true);
     viewport.setScrollBarThickness(8);
-    viewport.setColour(juce::Viewport::backgroundColourId,
-                       juce::Colour(LookAndFeel_BlockShuffler::bgDark));
     // Prevent the viewport from stealing keyboard focus away from ClipWaveformView.
     // Without this, clicking a clip row calls grabKeyboardFocus() here but the viewport
     // immediately reclaims focus and consumes arrow keys for scrolling instead of nudging.
