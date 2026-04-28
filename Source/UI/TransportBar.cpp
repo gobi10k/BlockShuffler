@@ -1,6 +1,13 @@
 #include "TransportBar.h"
 #include "LookAndFeel_BlockShuffler.h"
 
+#if __has_include(<BinaryData.h>)
+  #include <BinaryData.h>
+  #define TRANSPORT_HAS_BINARY 1
+#else
+  #define TRANSPORT_HAS_BINARY 0
+#endif
+
 namespace BlockShuffler {
 
 TransportBar::TransportBar() {
@@ -58,41 +65,26 @@ void TransportBar::paint(juce::Graphics& g) {
                    juce::Justification::centredLeft, false);
     }
 
-    // ── App branding ──────────────────────────────────────────────────────────
+    // ── Company logo ──────────────────────────────────────────────────────────
     if (brandingArea.isEmpty()) return;
 
-    const int iconW = 28;
-    const int iconH = 18;
-    const int gap   = 6;
-    const int cy    = brandingArea.getCentreY();
-
-    // Mini block-arrangement icon (3 coloured rectangles + arrows)
-    const int iconX = brandingArea.getX() + (brandingArea.getWidth() - iconW - gap - 80) / 2;
-    const int iconY = cy - iconH / 2;
-
-    float r = 2.5f;
-    // Block 1 — Neon Cyan
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-    g.fillRoundedRectangle((float)iconX, (float)iconY, 7.0f, (float)iconH, r);
-    // Block 2 — Electric Violet (slightly shorter, offset down)
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentViolet));
-    g.fillRoundedRectangle((float)(iconX + 10), (float)(iconY + 3), 7.0f, (float)(iconH - 6), r);
-    // Block 3 — Neon Cyan
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-    g.fillRoundedRectangle((float)(iconX + 20), (float)iconY, 7.0f, (float)iconH, r);
-
-    // Connector dots — accent at reduced alpha for consistency
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.55f));
-    g.fillEllipse((float)(iconX + 8), (float)(cy - 1), 2.0f, 2.0f);
-    g.fillEllipse((float)(iconX + 18), (float)(cy - 1), 2.0f, 2.0f);
-
-    // App name
-    const int textX = iconX + iconW + gap;
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-    g.setFont(LookAndFeel_BlockShuffler::uiFontBold(14.0f));
-    g.drawText("BlockShuffler",
-               juce::Rectangle<int>(textX, cy - 9, 90, 18),
-               juce::Justification::centredLeft);
+#if TRANSPORT_HAS_BINARY
+    auto logo = juce::ImageCache::getFromMemory(BinaryData::icon_png,
+                                                BinaryData::icon_pngSize);
+    if (logo.isValid()) {
+        // Scale to fit height of branding area, preserve aspect ratio, centre horizontally
+        const int maxH  = brandingArea.getHeight() - 8;
+        const int maxW  = brandingArea.getWidth();
+        float scale     = juce::jmin((float)maxH / (float)logo.getHeight(),
+                                     (float)maxW / (float)logo.getWidth());
+        int drawW       = juce::roundToInt((float)logo.getWidth()  * scale);
+        int drawH       = juce::roundToInt((float)logo.getHeight() * scale);
+        int drawX       = brandingArea.getCentreX() - drawW / 2;
+        int drawY       = brandingArea.getCentreY() - drawH / 2;
+        g.drawImage(logo, drawX, drawY, drawW, drawH, 0, 0,
+                    logo.getWidth(), logo.getHeight());
+    }
+#endif
 }
 
 void TransportBar::resized() {

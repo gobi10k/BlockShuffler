@@ -132,7 +132,12 @@ private:
     double projectSampleRate = 48000.0;
 
     ZoomableViewport viewport;
-    juce::Component contentArea;
+    struct ContentArea : public juce::Component {
+        void paint(juce::Graphics& g) override {
+            g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
+        }
+    };
+    ContentArea contentArea;
     juce::OwnedArray<ClipRowComponent> clipRows;
     juce::TextButton addClipBtn  { "+ Add Clip" };
     juce::TextButton zoomInBtn   { "+" };
