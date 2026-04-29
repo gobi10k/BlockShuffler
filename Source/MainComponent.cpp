@@ -135,23 +135,6 @@ void MainComponent::paint(juce::Graphics& g) {
     g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
 }
 
-static void dumpTree(juce::Component* c, int depth, juce::Point<int> parentOrigin)
-{
-    auto b   = c->getBounds();
-    auto abs = parentOrigin + b.getPosition();
-    juce::String line = juce::String::repeatedString("  ", depth)
-        + juce::String(typeid(*c).name())
-        + "  local=" + b.toString()
-        + "  abs=(" + juce::String(abs.x) + "," + juce::String(abs.y)
-        + " " + juce::String(b.getWidth()) + "x" + juce::String(b.getHeight()) + ")"
-        + (c->isOpaque() ? " [OPAQUE]" : "")
-        + (c->isVisible() ? "" : " [HIDDEN]");
-    fprintf(stderr, "%s\n", line.toRawUTF8());
-    auto childOrigin = juce::Point<int>(abs.x, abs.y);
-    for (auto* child : c->getChildren())
-        dumpTree(child, depth + 1, childOrigin);
-}
-
 void MainComponent::resized() {
     if (auto* topLevel = getTopLevelComponent()) {
         auto bounds = topLevel->getBounds();
@@ -174,17 +157,6 @@ void MainComponent::resized() {
     blockStrip .setBounds(blockArea);
     linkOverlay.setBounds(blockArea);
     waveformView.setBounds(area);
-
-    // DEBUG: dump component tree once after first real layout
-    static bool dumped = false;
-    if (!dumped && getWidth() > 0 && getHeight() > 0) {
-        dumped = true;
-        juce::MessageManager::callAsync([this] {
-            fprintf(stderr, "\n=== COMPONENT TREE (post-layout) ===\n");
-            dumpTree(this, 0, {});
-            fprintf(stderr, "=== END COMPONENT TREE ===\n\n");
-        });
-    }
 }
 
 bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files) {
