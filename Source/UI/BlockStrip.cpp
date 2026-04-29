@@ -41,8 +41,7 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
     modeLabel.setColour(juce::Label::backgroundColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::bgDark).withAlpha(0.85f));
     modeLabel.setInterceptsMouseClicks(false, false);
-    modeLabel.setVisible(false);
-    addAndMakeVisible(modeLabel);
+    addChildComponent(&modeLabel);
 
     rebuildBlocks();
 }
