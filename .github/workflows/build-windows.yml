@@ -2,9 +2,10 @@ name: Build Windows
 
 on:
   push:
-    branches: [ master, final_draft ]
+    branches: [ master, final_draft, blockshuffler-ui-polish-wt6M4 ]
   pull_request:
     branches: [ master ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,14 +21,24 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: List build artifacts
+        run: |
+          dir build /s
+          if exist "build\BlockShuffler_artefacts\Release\Standalone" dir "build\BlockShuffler_artefacts\Release\Standalone" /s
+          if exist "build\BlockShuffler_artefacts\Release\VST3" dir "build\BlockShuffler_artefacts\Release\VST3" /s
+
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
           name: BlockShuffler-VST3-Windows
           path: build/BlockShuffler_artefacts/Release/VST3/
+          if-no-files-found: warn
 
       - name: Upload Standalone artifact
         uses: actions/upload-artifact@v4
         with:
           name: BlockShuffler-Standalone-Windows
-          path: build/BlockShuffler_artefacts/Release/Standalone/
+          path: |
+            build/BlockShuffler_artefacts/Release/Standalone/
+            build/BlockShuffler_artefacts/Release/Standalone/*.exe
+          if-no-files-found: warn
