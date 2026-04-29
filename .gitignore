@@ -1,0 +1,13 @@
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Builds/
+*.a
+*.dll
+*.exe
+*.app
+*.vst3
+.github/.DS_Store
+Source/.DS_Store
+Resources/.DS_Store
