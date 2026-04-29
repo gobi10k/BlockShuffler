@@ -11,6 +11,7 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
     project = &proj;
     overlay = ov;
     project->addChangeListener(this);
+    setOpaque(true);
     setWantsKeyboardFocus(true);
 
     viewport.setViewedComponent(&contentArea, false);

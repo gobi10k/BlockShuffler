@@ -133,6 +133,7 @@ private:
 
     ZoomableViewport viewport;
     struct ContentArea : public juce::Component {
+        ContentArea() { setOpaque(true); }
         void paint(juce::Graphics& g) override {
             g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
         }

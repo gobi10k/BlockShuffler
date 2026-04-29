@@ -370,6 +370,7 @@ void ClipRowComponent::showContextMenu() {
 //==============================================================================
 
 ClipWaveformView::ClipWaveformView() {
+    setOpaque(true);  // ensures paint() runs first so transparent children show bgDark
     setWantsKeyboardFocus(true);
 
     viewport.setViewedComponent(&contentArea, false);
@@ -693,7 +694,7 @@ void ClipWaveformView::resized() {
     int visW   = juce::jmax(viewport.getMaximumVisibleWidth(), 1);
     int rowW   = (int)(visW * zoomFactor);
     int totalH = juce::jmax((int)clipRows.size() * (rowH + rowGap),
-                            viewport.getMaximumVisibleHeight());
+                            juce::jmax(viewport.getMaximumVisibleHeight(), 1));
     contentArea.setBounds(0, 0, rowW, totalH);
 
     int y = 0;

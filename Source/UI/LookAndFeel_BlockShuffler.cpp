@@ -91,6 +91,7 @@ LookAndFeel_BlockShuffler::LookAndFeel_BlockShuffler() {
     setColour(juce::TooltipWindow::backgroundColourId, juce::Colour(bgLight));
     setColour(juce::TooltipWindow::textColourId,       juce::Colour(textPrimary));
     setColour(juce::TooltipWindow::outlineColourId,    juce::Colour(borderStrong));
+
 }
 
 // ── Font routing ──────────────────────────────────────────────────────────────

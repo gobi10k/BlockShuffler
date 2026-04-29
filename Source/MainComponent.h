@@ -62,7 +62,7 @@ private:
     TransportBar     transportBar;
 
     static constexpr int inspectorWidth   = 210;
-    static constexpr int transportHeight  = 48;
+    static constexpr int transportHeight  = 56;
     static constexpr int blockStripHeight = 160;
 
     void onPlayPressed();

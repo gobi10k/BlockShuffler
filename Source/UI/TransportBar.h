@@ -34,6 +34,8 @@ private:
     double currentSecs = 0.0;
     double totalSecs   = 0.0;
 
+    juce::Image logoImage;  // loaded once in constructor from BinaryData
+
     // Rects calculated in resized(), used in paint()
     juce::Rectangle<int> timeDisplayArea;
     juce::Rectangle<int> brandingArea;

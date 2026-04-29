@@ -15,6 +15,11 @@ TransportBar::TransportBar() {
     playBtn  .onClick = [this] { if (onPlay)   onPlay();   };
     stopBtn  .onClick = [this] { if (onStop)   onStop();   };
     exportBtn.onClick = [this] { if (onExport) onExport(); };
+
+#if TRANSPORT_HAS_BINARY
+    logoImage = juce::ImageCache::getFromMemory(BinaryData::icon_png,
+                                                BinaryData::icon_pngSize);
+#endif
     saveBtn  .onClick = [this] { if (onSave)   onSave();   };
     openBtn  .onClick = [this] { if (onOpen)   onOpen();   };
 
@@ -66,25 +71,21 @@ void TransportBar::paint(juce::Graphics& g) {
     }
 
     // ── Company logo ──────────────────────────────────────────────────────────
-    if (brandingArea.isEmpty()) return;
+    if (brandingArea.getWidth() < 20 || brandingArea.getHeight() < 4) return;
 
-#if TRANSPORT_HAS_BINARY
-    auto logo = juce::ImageCache::getFromMemory(BinaryData::icon_png,
-                                                BinaryData::icon_pngSize);
-    if (logo.isValid()) {
-        // Scale to fit height of branding area, preserve aspect ratio, centre horizontally
-        const int maxH  = brandingArea.getHeight() - 8;
+    if (logoImage.isValid()) {
+        // Scale to fill the full branding height, preserve aspect ratio, centre horizontally
+        const int maxH  = brandingArea.getHeight();
         const int maxW  = brandingArea.getWidth();
-        float scale     = juce::jmin((float)maxH / (float)logo.getHeight(),
-                                     (float)maxW / (float)logo.getWidth());
-        int drawW       = juce::roundToInt((float)logo.getWidth()  * scale);
-        int drawH       = juce::roundToInt((float)logo.getHeight() * scale);
+        float scale     = juce::jmin((float)maxH / (float)logoImage.getHeight(),
+                                     (float)maxW / (float)logoImage.getWidth());
+        int drawW       = juce::roundToInt((float)logoImage.getWidth()  * scale);
+        int drawH       = juce::roundToInt((float)logoImage.getHeight() * scale);
         int drawX       = brandingArea.getCentreX() - drawW / 2;
         int drawY       = brandingArea.getCentreY() - drawH / 2;
-        g.drawImage(logo, drawX, drawY, drawW, drawH, 0, 0,
-                    logo.getWidth(), logo.getHeight());
+        g.drawImage(logoImage, drawX, drawY, drawW, drawH, 0, 0,
+                    logoImage.getWidth(), logoImage.getHeight());
     }
-#endif
 }
 
 void TransportBar::resized() {
