@@ -2,7 +2,7 @@ name: Build Windows
 
 on:
   push:
-    branches: [ master, final_draft, blockshuffler-ui-polish-wt6M4 ]
+    branches: [ master, final_draft, blockshuffler-ui-polish-wt6M4, UI_noLogo ]
   pull_request:
     branches: [ master ]
   workflow_dispatch:
