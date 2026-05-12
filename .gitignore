@@ -3,6 +3,7 @@
 .LSOverride
 ._*
 Builds/
+build/
 *.a
 *.dll
 *.exe
