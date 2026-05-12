@@ -65,12 +65,11 @@ void BlockComponent::paint(juce::Graphics& g) {
              : highlighted ? juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.22f)
              : hovered     ? juce::Colour(LookAndFeel_BlockShuffler::bgLight)
                            : juce::Colour(LookAndFeel_BlockShuffler::bgMedium);
-    if (block->isDone) bg = bg.withAlpha(0.45f);
     g.setColour(bg);
     g.fillRoundedRectangle(inner, cr);
 
     // Subtle identity-color tint in body
-    g.setColour(block->color.withAlpha(block->isDone ? 0.05f : 0.10f));
+    g.setColour(block->color.withAlpha(0.10f));
     g.fillRoundedRectangle(inner, cr);
 
     // ── 2. Header strip (rounded top corners only) ────────────────────────────
@@ -80,7 +79,7 @@ void BlockComponent::paint(juce::Graphics& g) {
     hdrPath.addRoundedRectangle(headerF.getX(), headerF.getY(),
                                 headerF.getWidth(), headerF.getHeight(),
                                 cr, cr, true, true, false, false);
-    g.setColour(block->color.withAlpha(block->isDone ? 0.5f : 1.0f));
+    g.setColour(block->color.withAlpha(1.0f));
     g.fillPath(hdrPath);
 
     // Block number — left of header
@@ -108,10 +107,12 @@ void BlockComponent::paint(juce::Graphics& g) {
                    juce::Justification::centredRight);
     }
 
-    // ── 3. Playing indicator (3px accent bar at very top) ────────────────────
+    // ── 3. Playing indicator — white bar + shadow so it reads on any block colour ──
     if (playing) {
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol));
-        g.fillRect(full.withHeight(3));
+        g.setColour(juce::Colours::white);
+        g.fillRect(full.withHeight(4));
+        g.setColour(juce::Colours::black.withAlpha(0.45f));
+        g.fillRect(juce::Rectangle<int>(full.getX(), 4, full.getWidth(), 1));
     }
 
     // ── 4. Border ─────────────────────────────────────────────────────────────
@@ -128,7 +129,7 @@ void BlockComponent::paint(juce::Graphics& g) {
         }
     } else {
         // Identity-color border — brightens on hover
-        float ba = block->isDone ? 0.30f : (hovered ? 0.85f : 0.55f);
+        float ba = hovered ? 0.85f : 0.55f;
         g.setColour(block->color.withAlpha(ba));
         if (block->isOverlapping) {
             juce::Path sp; sp.addRoundedRectangle(inner, cr);
@@ -144,14 +145,11 @@ void BlockComponent::paint(juce::Graphics& g) {
     auto botArea = juce::Rectangle<int>(full.getX(), full.getBottom() - botH,
                                         full.getWidth(), botH);
     g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textTertiary)
-                   .withAlpha(block->isDone ? 0.5f : 1.0f));
+    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textTertiary));
     if (block->tempo > 0.0)
         g.drawText(juce::String((int)block->tempo) + " bpm",
                    botArea.withTrimmedLeft(5).withTrimmedRight(22),
                    juce::Justification::centredLeft);
-    if (block->isDone)
-        g.drawText("done", botArea.withTrimmedRight(4), juce::Justification::centredRight);
 
     // ── 6. Clip-drop highlight ────────────────────────────────────────────────
     if (clipDropHighlight) {
@@ -160,6 +158,22 @@ void BlockComponent::paint(juce::Graphics& g) {
         g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
         g.drawText("ADD CLIP", full.withTrimmedTop(full.getHeight() / 2),
                    juce::Justification::centred);
+    }
+
+    // ── 7. Done overlay — semi-transparent dark + red X + bold "DONE" label ──
+    if (block->isDone) {
+        g.setColour(juce::Colour(0x88000000));
+        g.fillRoundedRectangle(inner, cr);
+        // Red X diagonals
+        g.setColour(juce::Colour(0xAAFF4444));
+        g.drawLine(inner.getX() + 4.0f, inner.getY() + 4.0f,
+                   inner.getRight() - 4.0f, inner.getBottom() - 4.0f, 2.0f);
+        g.drawLine(inner.getRight() - 4.0f, inner.getY() + 4.0f,
+                   inner.getX() + 4.0f, inner.getBottom() - 4.0f, 2.0f);
+        // "DONE" text
+        g.setColour(juce::Colour(0xCCFFFFFF));
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(14.0f));
+        g.drawText("DONE", full, juce::Justification::centred);
     }
 }
 

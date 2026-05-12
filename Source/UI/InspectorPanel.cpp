@@ -87,6 +87,19 @@ InspectorPanel::InspectorPanel()
     blockDoneToggle.addListener(this);
     addAndMakeVisible(blockDoneToggle);
 
+    setupLabel(this, playChanceLabel, "Block Chance (%)", 12.0f);
+
+    playChanceSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    playChanceSlider.setRange(0.0, 100.0, 1.0);
+    playChanceSlider.setValue(100.0, juce::dontSendNotification);
+    playChanceSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 20);
+    playChanceSlider.setColour(juce::Slider::textBoxTextColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+    playChanceSlider.setColour(juce::Slider::textBoxBackgroundColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::bgLight));
+    playChanceSlider.addListener(this);
+    addAndMakeVisible(playChanceSlider);
+
     overlapSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     overlapSlider.setRange(0.0, 100.0, 1.0);
     overlapSlider.setValue(50.0, juce::dontSendNotification);
@@ -478,30 +491,29 @@ void InspectorPanel::updateFromModel() {
     }
 
     if (hasClip && hasBlock) {
-        juce::String effText;
-        if (selectedClip->isDone) {
-            effText = "0% effective (excluded)";
-        } else {
-            float total = 0.0f;
-            for (auto* c : selectedBlock->clips)
-                if (!c->isDone) total += c->probability;
-            float eff = (total > 0.0f)
-                      ? (selectedClip->probability / total) * 100.0f : 0.0f;
-            effText = juce::String(eff, 1) + "% effective";
-        }
-        effectiveProbLabel.setText(effText, juce::dontSendNotification);
+        float total = 0.0f;
+        for (auto* c : selectedBlock->clips)
+            total += c->probability;
+        float eff = (total > 0.0f)
+                  ? (selectedClip->probability / total) * 100.0f : 0.0f;
+        effectiveProbLabel.setText(juce::String(eff, 1) + "% effective",
+                                   juce::dontSendNotification);
         effectiveProbLabel.setVisible(true);
     } else {
         effectiveProbLabel.setVisible(false);
     }
 
     // ── Block section
-    blockDoneToggle .setEnabled(hasBlock);
-    blockTempoField .setEnabled(hasBlock);
-    blockTempoLabel .setVisible(hasBlock);
-    blockTempoField .setVisible(hasBlock);
+    blockDoneToggle  .setEnabled(hasBlock);
+    blockTempoField  .setEnabled(hasBlock);
+    blockTempoLabel  .setVisible(hasBlock);
+    blockTempoField  .setVisible(hasBlock);
+    playChanceLabel  .setVisible(hasBlock);
+    playChanceSlider .setVisible(hasBlock);
+    playChanceSlider .setEnabled(hasBlock);
     if (hasBlock) {
         blockDoneToggle.setToggleState(selectedBlock->isDone, juce::dontSendNotification);
+        playChanceSlider.setValue(selectedBlock->playChance * 100.0, juce::dontSendNotification);
         // Show the block's stored tempo.  This is authoritative: it stays fixed even when
         // individual clip tempos are overridden, and is what new clips inherit.
         // Fall back to project default only if the block tempo is somehow 0.
@@ -611,13 +623,17 @@ void InspectorPanel::sliderValueChanged(juce::Slider* slider) {
         if (selectedBlock) {
             float total = 0.0f;
             for (auto* c : selectedBlock->clips)
-                if (!c->isDone) total += c->probability;
+                total += c->probability;
             float eff = (total > 0.0f)
                       ? (selectedClip->probability / total) * 100.0f : 0.0f;
             effectiveProbLabel.setText(juce::String(eff, 1) + "% effective",
                                        juce::dontSendNotification);
         }
         if (onClipProbabilityChanged) onClipProbabilityChanged();
+        return;
+    }
+    if (slider == &playChanceSlider && selectedBlock) {
+        selectedBlock->playChance = (float)(playChanceSlider.getValue() / 100.0);
         return;
     }
     if (slider == &overlapSlider && selectedBlock) {
@@ -638,6 +654,8 @@ void InspectorPanel::sliderDragStarted(juce::Slider* slider) {
     if (updatingFromModel) return;
     if (slider == &probSlider && selectedClip && project)
         probSliderDragPre = project->toJSON();
+    else if (slider == &playChanceSlider && selectedBlock && project)
+        playChanceSliderDragPre = project->toJSON();
     else if (slider == &overlapSlider && selectedBlock && project)
         overlapSliderDragPre = project->toJSON();
     else {
@@ -654,6 +672,11 @@ void InspectorPanel::sliderDragEnded(juce::Slider* slider) {
     if (slider == &probSlider && selectedClip && project && !probSliderDragPre.isVoid()) {
         project->applyExternalMutation(probSliderDragPre);
         probSliderDragPre = juce::var{};
+        return;
+    }
+    if (slider == &playChanceSlider && selectedBlock && project && !playChanceSliderDragPre.isVoid()) {
+        project->applyExternalMutation(playChanceSliderDragPre);
+        playChanceSliderDragPre = juce::var{};
         return;
     }
     if (slider == &overlapSlider && selectedBlock && project && !overlapSliderDragPre.isVoid()) {
@@ -791,6 +814,11 @@ void InspectorPanel::resized() {
         area.removeFromTop(gap);
     }
     blockDoneToggle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
+    if (playChanceLabel.isVisible()) {
+        playChanceLabel .setBounds(area.removeFromTop(rh));
+        playChanceSlider.setBounds(area.removeFromTop(slh));
+        area.removeFromTop(gap);
+    }
     if (overlapLabel.isVisible()) {
         overlapLabel .setBounds(area.removeFromTop(rh));
         overlapSlider.setBounds(area.removeFromTop(slh));

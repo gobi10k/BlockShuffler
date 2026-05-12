@@ -31,7 +31,8 @@ juce::var projectToJSON(const Project& project) {
         for (auto& s : block->allowedParentClipIds) apciArr.add(juce::var(s));
         bObj->setProperty("allowedParentClipIds", juce::var(apciArr));
 
-        bObj->setProperty("isDone",           block->isDone);
+        bObj->setProperty("isDone",            block->isDone);
+        bObj->setProperty("playChance",       (double)block->playChance);
         bObj->setProperty("tempo",            block->tempo);
 
         // stackPlayCount
@@ -116,6 +117,7 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                 for (auto& v : *apciArr) block->allowedParentClipIds.add(v.toString());
 
             block->isDone         = (bool)  bVar.getProperty("isDone",         false);
+            block->playChance     = (float)(double)bVar.getProperty("playChance", 1.0);
             block->tempo          = (double)bVar.getProperty("tempo",          120.0);
 
             // stackPlayCount

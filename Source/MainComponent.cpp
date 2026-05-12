@@ -117,6 +117,8 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     // first user action should undo that action, not remove the startup block.
     project->undoManager.clearUndoHistory();
     blockStrip.selectBlock(defaultBlock);  // fires onBlockSelected → applyBlockSelection
+
+    startTimer(33);  // ~30fps for playhead and transport bar updates
 }
 
 MainComponent::~MainComponent() {
@@ -458,6 +460,10 @@ void MainComponent::loadProject(const juce::File& file) {
     project->sendChangeMessage();  // ensures BlockStrip runs its async rebuildBlocks()+resized()
 }
 
+void MainComponent::timerCallback() {
+    updateTimeDisplay();
+}
+
 void MainComponent::updateTimeDisplay() {
     double current = engine.getPlayheadSeconds();
     double total   = engine.getTotalSeconds();
@@ -610,7 +616,7 @@ void MainComponent::exportProject() {
                         juce::NativeMessageBox::showMessageBoxAsync(
                             juce::MessageBoxIconType::WarningIcon,
                             "Nothing to Export",
-                            "All blocks are marked as Done. Unmark at least one block to export.");
+                            "The arrangement is empty. Add blocks with clips to export.");
                         return;
                     }
 

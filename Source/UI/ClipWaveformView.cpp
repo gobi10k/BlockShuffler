@@ -151,12 +151,10 @@ void ClipRowComponent::paint(juce::Graphics& g) {
 
     // Effective probability — drawn as a dark pill so it reads on any header color
     juce::String probText;
-    if (clip->isDone) {
-        probText = "excl.";
-    } else if (ownerBlock) {
+    if (ownerBlock) {
         float totalWeight = 0.0f;
         for (auto* c : ownerBlock->clips)
-            if (!c->isDone) totalWeight += c->probability;
+            totalWeight += c->probability;
         float eff = (totalWeight > 0.0f) ? (clip->probability / totalWeight) * 100.0f : 0.0f;
         probText = "eff: " + juce::String(eff, 1) + "%";
     } else {
@@ -180,19 +178,30 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     auto wa = waveArea();
     renderWaveform(g, wa);
 
-    // Grid lines — offset by gridOffsetSamples so the nudge is visible
+    // Grid lines — adaptive density: coarsen grid until lines are >= 8px apart
     if (clip->tempo > 0.0 && projectSampleRate > 0.0) {
-        double spb   = (projectSampleRate * 60.0) / clip->tempo;
         int64_t total = (clip->audioBuffer) ? (int64_t)clip->audioBuffer->getNumSamples() : 0;
-        // Wrap the offset into [0, spb) so lines start at the right phase
-        double offset = std::fmod((double)clip->gridOffsetSamples, spb);
-        if (offset < 0.0) offset += spb;
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderStrong));
-        for (double s = offset; s < (double)total; s += spb) {
-            int gx = sampleToX((int64_t)s);
-            if (gx >= wa.getX() && gx < wa.getRight())
-                g.drawLine((float)gx, (float)wa.getY(),
-                           (float)gx, (float)wa.getBottom(), 1.5f);
+        double spb = (projectSampleRate * 60.0) / clip->tempo;
+        if (total > 0 && wa.getWidth() > 0 && spb > 0.0) {
+            double pixelsPerSample = (double)wa.getWidth() / (double)total;
+            double drawSpb = spb;
+            double pixelsPerLine = drawSpb * pixelsPerSample;
+            while (pixelsPerLine < 8.0 && drawSpb < (double)total) {
+                drawSpb *= 2.0;
+                pixelsPerLine *= 2.0;
+            }
+            if (pixelsPerLine >= 8.0) {
+                float alpha = juce::jmap((float)pixelsPerLine, 8.0f, 40.0f, 0.15f, 0.40f);
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderStrong).withAlpha(alpha));
+                double offset = std::fmod((double)clip->gridOffsetSamples, drawSpb);
+                if (offset < 0.0) offset += drawSpb;
+                for (double s = offset; s < (double)total; s += drawSpb) {
+                    int gx = sampleToX((int64_t)s);
+                    if (gx >= wa.getX() && gx < wa.getRight())
+                        g.drawLine((float)gx, (float)wa.getY(),
+                                   (float)gx, (float)wa.getBottom(), 1.5f);
+                }
+            }
         }
     }
 
@@ -229,6 +238,19 @@ void ClipRowComponent::paint(juce::Graphics& g) {
         tri.addTriangle((float)ex-5, (float)wa.getBottom(), (float)ex+5, (float)wa.getBottom(),
                         (float)ex, (float)(wa.getBottom()-10));
         g.fillPath(tri);
+    }
+
+    // Done overlay — semi-transparent dark + strikethrough + "DONE" label
+    if (clip->isDone) {
+        auto wa2 = waveArea();
+        g.setColour(juce::Colour(0x88000000));
+        g.fillRect(wa2);
+        g.setColour(juce::Colour(0xAAFF4444));
+        g.drawLine((float)wa2.getX(), (float)wa2.getCentreY(),
+                   (float)wa2.getRight(), (float)wa2.getCentreY(), 2.0f);
+        g.setColour(juce::Colour(0xCCFFFFFF));
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(13.0f));
+        g.drawText("DONE", wa2, juce::Justification::centred);
     }
 
     // Border: 2px accent for selected, 1px borderSubtle separator otherwise

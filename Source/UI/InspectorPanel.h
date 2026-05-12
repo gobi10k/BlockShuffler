@@ -182,8 +182,11 @@ private:
     juce::Label        blockTempoLabel;
     DraggableNumberBox blockTempoField  { 20.0, 300.0, 1 };
     juce::ToggleButton blockDoneToggle  { "Mark Block as Done" };
+    juce::Label        playChanceLabel;
+    juce::Slider       playChanceSlider;
     juce::Label        overlapLabel;
     juce::Slider       overlapSlider;
+    juce::var          playChanceSliderDragPre;
 
     // ── Project section (shown when no block selected) ───────────────────────
     juce::Label        projectTitle;

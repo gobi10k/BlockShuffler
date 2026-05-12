@@ -95,11 +95,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             if (b->isOverlapping) overlapping.push_back(b);
             else                  normal.push_back(b);
         }
-        // Remove done normal blocks
-        normal.erase(std::remove_if(normal.begin(), normal.end(),
-            [](Block* b){ return b->isDone; }), normal.end());
-
-            if (normal.empty())
+        if (normal.empty())
         {
             // No non-overlapping blocks in this slot.  If there are overlapping
             // blocks, attach them to the most recent primary entry already
@@ -120,10 +116,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 {
                     for (auto* ob : overlapping)
                     {
-                        if (ob->isDone || ob->clips.isEmpty()) continue;
+                        if (ob->clips.isEmpty()) continue;
                         // Each clip rolls independently against its own probability
                         for (auto* oc : ob->clips) {
-                            if (oc->isDone) continue;
                             if (rng.nextFloat() < oc->probability) {
                                 auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
                                 if (trimmed) {
@@ -145,6 +140,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         if (normal.size() == 1 && overlapping.empty()) {
             // ── Simple standalone block ───────────────────────────────────
             auto* block = normal[0];
+            if (rng.nextFloat() >= block->playChance) continue;  // block skipped this time
             if (block->clips.isEmpty()) continue;
             auto* clip = pickClip(*block, rng);
             if (!clip) continue;
@@ -215,6 +211,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 int64_t bodyStart  = -1;  // latched on first valid clip
 
                 for (auto* b : picked) {
+                    if (rng.nextFloat() >= b->playChance) continue;  // block skipped this time
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
@@ -245,7 +242,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
                 // Overlapping blocks layer on top of this slot (timelinePos = bodyStart)
                 for (auto* ob : overlapping) {
-                    if (ob->isDone || ob->clips.isEmpty()) continue;
+                    if (ob->clips.isEmpty()) continue;
                     if (!ob->allowedParentClipIds.isEmpty()) {
                         bool anyAllowed = false;
                         for (auto* sc : simultaneousClips)
@@ -254,7 +251,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     }
                     // Each clip rolls independently against its own probability
                     for (auto* oc : ob->clips) {
-                        if (oc->isDone) continue;
                         if (rng.nextFloat() < oc->probability) {
                             auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
                             if (trimmed) {
@@ -274,6 +270,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 // Sequential: each picked block occupies its own time slot.
                 for (auto* b : picked) {
                     if (songEnded) break;
+                    if (rng.nextFloat() >= b->playChance) continue;  // block skipped this time
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
@@ -299,14 +296,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     // Layer overlapping blocks on top of this picked block (bodies aligned).
                     // Each clip rolls independently against its own probability.
                     for (auto* ob : overlapping) {
-                        if (ob->isDone || ob->clips.isEmpty()) continue;
+                        if (ob->clips.isEmpty()) continue;
                         if (!ob->allowedParentClipIds.isEmpty() &&
                             !ob->allowedParentClipIds.contains(clip->id))
                         {
                             continue;
                         }
                         for (auto* oc : ob->clips) {
-                            if (oc->isDone) continue;
                             if (rng.nextFloat() < oc->probability) {
                                 auto trimmedOverlay = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
                                 if (trimmedOverlay) {
@@ -431,10 +427,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 Clip* ArrangementResolver::pickClip(const Block& block, juce::Random& rng) {
     if (block.clips.isEmpty()) return nullptr;
 
-    // Filter out done clips
     juce::Array<Clip*> available;
     for (auto* c : block.clips)
-        if (!c->isDone) available.add(c);
+        available.add(c);
     if (available.isEmpty()) return nullptr;
     if (available.size() == 1) return available[0];
 

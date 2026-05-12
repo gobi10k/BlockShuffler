@@ -175,8 +175,9 @@ void BlockStrip::resized() {
         int n = slot.indices.size();
         // Each block in the stack gets an equal share of the slot height,
         // with a 4-px gap between stacked tiles so they're visually distinct.
+        // Never shrink tiles below 24px so the name stays readable.
         int totalGaps = (n - 1) * 4;
-        int perH      = (areaH - totalGaps) / n;
+        int perH      = juce::jmax(24, (areaH - totalGaps) / n);
         int startY    = (areaH - (perH * n + totalGaps)) / 2;
 
         for (int j = 0; j < n; ++j) {

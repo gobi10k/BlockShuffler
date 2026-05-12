@@ -22,6 +22,7 @@ public:
           overlapProbability(0.5f),
           probability(1.0f),
           isDone(false),
+          playChance(1.0f),
           tempo(120.0) {
         stackPlayCount.values.add(1);
         stackPlayCount.weights.add(1.0f);
@@ -51,6 +52,7 @@ public:
 
     // Flags
     bool isDone;
+    float playChance;  // 0.0–1.0, probability that this block is included in the arrangement
 
     // Tempo
     double tempo;
