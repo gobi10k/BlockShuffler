@@ -18,15 +18,13 @@ namespace BlockShuffler {
 class MainComponent : public juce::Component,
                       public juce::DragAndDropContainer,
                       public juce::FileDragAndDropTarget,
-                      public juce::ChangeListener,
-                      public juce::Timer {
+                      public juce::ChangeListener {
 public:
     explicit MainComponent(PlaybackEngine& engine);
     ~MainComponent() override;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
-    void timerCallback() override;
 
     // FileDragAndDropTarget
     bool isInterestedInFileDrag(const juce::StringArray& files) override;

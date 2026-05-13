@@ -118,7 +118,7 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     project->undoManager.clearUndoHistory();
     blockStrip.selectBlock(defaultBlock);  // fires onBlockSelected → applyBlockSelection
 
-    startTimer(33);  // ~30fps for playhead and transport bar updates
+    // Transport display refresh is driven by the MainWindow timer at 30fps.
 }
 
 MainComponent::~MainComponent() {
@@ -460,65 +460,57 @@ void MainComponent::loadProject(const juce::File& file) {
     project->sendChangeMessage();  // ensures BlockStrip runs its async rebuildBlocks()+resized()
 }
 
-void MainComponent::timerCallback() {
-    updateTimeDisplay();
-}
-
 void MainComponent::updateTimeDisplay() {
     double current = engine.getPlayheadSeconds();
     double total   = engine.getTotalSeconds();
     transportBar.setTimeDisplay(current, total);
 
-    const bool playing = engine.isPlaying();
-    if (!playing) {
+    if (!engine.isPlaying()) {
         transportBar.setIsPlaying(false);
         blockStrip.setPlayingBlock({});
         waveformView.setPlayingClip({}, 0, 0.0);
-    } else {
-        // Find which entry is at the current playhead position.
-        // With the current timeline model: timelinePos = lead-in start,
-        // body occupies [timelinePos + startMark, timelinePos + endMark).
-        int64_t headSamples = (int64_t)(current * currentArrangement.sampleRate);
-        juce::String nowPlayingBlockId;
-        juce::String nowPlayingClipId;
-        int64_t clipSamplePos = 0;
+        return;
+    }
 
-        // Always show the first entry at start
-        if (!currentArrangement.entries.isEmpty()) {
-            const auto& firstEntry = currentArrangement.entries.getReference(0);
-            nowPlayingBlockId = firstEntry.blockId;
-            nowPlayingClipId = firstEntry.clipId;
+    const double sr = currentArrangement.sampleRate;
+    int64_t headSamples = (sr > 0.0) ? (int64_t)(current * sr) : 0;
 
-            // timelinePos = body start; lead-in at [timelinePos - startMark, timelinePos)
-            int64_t bodyStart = firstEntry.timelinePos;
-            int64_t bodyEnd   = firstEntry.timelinePos + (firstEntry.endMark - firstEntry.startMark);
+    juce::String nowPlayingBlockId;
+    juce::String nowPlayingClipId;
+    int64_t clipSamplePos = 0;
 
-            if (headSamples >= bodyStart && headSamples < bodyEnd) {
-                // Currently within clip body - map to original clip position
-                int64_t posInTrimmed = headSamples - bodyStart;
-                clipSamplePos = firstEntry.startMark + posInTrimmed;
-            } else if (headSamples < bodyStart) {
-                // Before body starts (still in lead-in) - show at start marker
-                clipSamplePos = firstEntry.startMark;
-            } else {
-                // After first clip - use normal tracking
-                for (const auto& entry : currentArrangement.entries) {
-                    int64_t eb = entry.timelinePos;
-                    int64_t ee = entry.timelinePos + (entry.endMark - entry.startMark);
-                    if (headSamples >= eb && headSamples < ee) {
-                        nowPlayingBlockId = entry.blockId;
-                        nowPlayingClipId = entry.clipId;
-                        int64_t posInTrimmed = headSamples - eb;
-                        clipSamplePos = entry.startMark + posInTrimmed;
-                        break;
-                    }
-                }
+    // Forward scan through primary (non-overlay) entries only.
+    // Pick the first entry whose body has not yet ended — this naturally handles:
+    //   • lead-in (headSamples < timelinePos): clamp clipSamplePos to startMark
+    //   • body (headSamples in [timelinePos, bodyEnd)): compute exact position
+    //   • tail / gap (headSamples >= bodyEnd): move on to next entry
+    for (const auto& entry : currentArrangement.entries) {
+        if (entry.isOverlay) continue;
+        int64_t bodyEnd = entry.timelinePos + (entry.endMark - entry.startMark);
+        if (headSamples < bodyEnd) {
+            nowPlayingBlockId = entry.blockId;
+            nowPlayingClipId  = entry.clipId;
+            int64_t offsetIntoBody = headSamples - entry.timelinePos;
+            clipSamplePos = entry.startMark + juce::jmax((int64_t)0, offsetIntoBody);
+            break;
+        }
+    }
+
+    // Fallback: playhead is past all entries (playing through the tail of the last block).
+    if (nowPlayingBlockId.isEmpty()) {
+        for (int i = currentArrangement.entries.size() - 1; i >= 0; --i) {
+            const auto& e = currentArrangement.entries.getReference(i);
+            if (!e.isOverlay) {
+                nowPlayingBlockId = e.blockId;
+                nowPlayingClipId  = e.clipId;
+                clipSamplePos     = e.endMark;
+                break;
             }
         }
-
-        blockStrip.setPlayingBlock(nowPlayingBlockId);
-        waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, currentArrangement.sampleRate);
     }
+
+    blockStrip.setPlayingBlock(nowPlayingBlockId);
+    waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, sr);
 }
 
 namespace {
