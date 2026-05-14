@@ -149,17 +149,9 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     auto headerTextCol = (lum > 0.55f) ? juce::Colours::black : juce::Colours::white;
     nameLabel.setColour(juce::Label::textColourId, headerTextCol);
 
-    // Effective probability — drawn as a dark pill so it reads on any header color
-    juce::String probText;
-    if (ownerBlock) {
-        float totalWeight = 0.0f;
-        for (auto* c : ownerBlock->clips)
-            totalWeight += c->probability;
-        float eff = (totalWeight > 0.0f) ? (clip->probability / totalWeight) * 100.0f : 0.0f;
-        probText = "eff: " + juce::String(eff, 1) + "%";
-    } else {
-        probText = juce::String((int)(clip->probability * 100.0f)) + "%";
-    }
+    // Raw probability weight displayed in the header pill.
+    // Effective (normalized) probability is shown in the inspector's label when the clip is selected.
+    juce::String probText = juce::String((int)(clip->probability * 100.0f)) + "%";
     {
         auto pillFont  = LookAndFeel_BlockShuffler::monoFont(10.5f);
         float pillW    = LookAndFeel_BlockShuffler::measureTextWidth(pillFont, probText) + 10.0f;
@@ -277,9 +269,18 @@ void ClipRowComponent::mouseDown(const juce::MouseEvent& e) {
     }
     if (onSelectedCallback) onSelectedCallback();
 
-    // Check marker hit in wave area
+    if (!clip) { activeDrag = DragTarget::None; return; }
+
     auto wa = waveArea();
-    if (!wa.contains(e.x, e.y) || !clip) { activeDrag = DragTarget::None; return; }
+    if (!wa.contains(e.x, e.y)) {
+        // Header area: arm for a potential clip drag
+        activeDrag = DragTarget::Clip;
+        clipDragStartX = e.x;
+        clipDragStartY = e.y;
+        return;
+    }
+
+    // Wave area: check for marker hit
     int sx = sampleToX(clip->startMark);
     int ex = sampleToX(clip->endMark);
     if (std::abs(e.x - sx) <= markerHit)      activeDrag = DragTarget::StartMarker;
@@ -300,6 +301,17 @@ void ClipRowComponent::mouseDoubleClick(const juce::MouseEvent& e) {
 }
 
 void ClipRowComponent::mouseDrag(const juce::MouseEvent& e) {
+    if (activeDrag == DragTarget::Clip) {
+        int dx = e.x - clipDragStartX;
+        int dy = e.y - clipDragStartY;
+        if (std::abs(dx) + std::abs(dy) > 5 && clip) {
+            if (auto* dc = juce::DragAndDropContainer::findParentDragContainerFor(this))
+                dc->startDragging("clip:" + clip->id, this);
+            activeDrag = DragTarget::None;
+        }
+        return;
+    }
+
     if (activeDrag == DragTarget::None) return;
 
     // Snap to tempo grid unless Shift is held (Shift = free drag)

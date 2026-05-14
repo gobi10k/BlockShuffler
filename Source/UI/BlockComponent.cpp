@@ -107,12 +107,12 @@ void BlockComponent::paint(juce::Graphics& g) {
                    juce::Justification::centredRight);
     }
 
-    // ── 3. Playing indicator — white bar + shadow so it reads on any block colour ──
+    // ── 3. Playing indicator — white border + dark inner line, readable on any colour ──
     if (playing) {
         g.setColour(juce::Colours::white);
-        g.fillRect(full.withHeight(4));
-        g.setColour(juce::Colours::black.withAlpha(0.45f));
-        g.fillRect(juce::Rectangle<int>(full.getX(), 4, full.getWidth(), 1));
+        g.drawRect(getLocalBounds(), 3);
+        g.setColour(juce::Colour(0x44000000));
+        g.drawRect(getLocalBounds().reduced(3), 1);
     }
 
     // ── 4. Border ─────────────────────────────────────────────────────────────

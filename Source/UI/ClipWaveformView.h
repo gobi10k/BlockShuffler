@@ -57,8 +57,10 @@ private:
     juce::var   nameLabelEditPre;   // snapshot captured when name editor opens
     juce::var   markerDragPre;      // snapshot captured when a marker drag begins
 
-    enum class DragTarget { None, StartMarker, EndMarker };
+    enum class DragTarget { None, StartMarker, EndMarker, Clip };
     DragTarget activeDrag = DragTarget::None;
+    int clipDragStartX = 0;
+    int clipDragStartY = 0;
 
     int     sampleToX(int64_t sample) const;
     int64_t xToSample(int x) const;
