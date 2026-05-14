@@ -45,11 +45,11 @@ public:
     static constexpr juce::uint32 accentMuted = 0xFF2D9E9A;
 
     // ── Functional / audio UI ─────────────────────────────────────────────────
-    static constexpr juce::uint32 waveformFill   = 0xFF4DD6D1;  // accent
+    static constexpr juce::uint32 waveformFill   = 0xFFCCCCCC;  // light gray
     static constexpr juce::uint32 gridLineColor  = 0xFF242B35;  // borderSubtle
     static constexpr juce::uint32 startMarkerCol = 0xFF4CC87A;  // green
     static constexpr juce::uint32 endMarkerCol   = 0xFFE86060;  // coral red
-    static constexpr juce::uint32 playheadCol    = 0xFF4DD6D1;  // accent (was magenta)
+    static constexpr juce::uint32 playheadCol    = 0xFFFF3333;  // red playhead
 
     // ── Block identity palette (8 hues, consistent luminance) ─────────────────
     // Also accessible via getBlockColour(index) and getBlockPalette().
