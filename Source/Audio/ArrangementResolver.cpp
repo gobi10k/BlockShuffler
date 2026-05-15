@@ -30,15 +30,15 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     for (auto* b : project.blocks)
         blockById[b->id.toStdString()] = b;
 
-    // Build a (position, Block*) array so swaps and sorting are unambiguous.
-    // Using operator[] on unordered_map inside a sort comparator is UB if the
-    // map rehashes; a plain vector avoids that entirely.
-    std::vector<std::pair<int, Block*>> order;
-    order.reserve((size_t)project.blocks.size());
-    for (auto* b : project.blocks)
-        order.push_back({b->position, b});
-
     // ── 2. Shuffle links and apply bidirectional position swaps ─────────────
+    // Work on a local position map — never touch block->position directly.
+    // The resolver must not mutate the project model; direct writes would cause
+    // positions to drift across successive resolve() calls.
+    std::unordered_map<std::string, int> localPos;
+    localPos.reserve((size_t)project.blocks.size());
+    for (auto* b : project.blocks)
+        localPos[b->id.toStdString()] = b->position;
+
     std::vector<BlockLink*> shuffledLinks;
     shuffledLinks.reserve((size_t)project.links.size());
     for (auto* lnk : project.links) shuffledLinks.push_back(lnk);
@@ -49,18 +49,21 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     }
     for (auto* lnk : shuffledLinks) {
         if (rng.nextFloat() < lnk->swapProbability) {
-            int* posA = nullptr;
-            int* posB = nullptr;
-            for (auto& [pos, blk] : order) {
-                if (blk->id == lnk->blockA) posA = &pos;
-                else if (blk->id == lnk->blockB) posB = &pos;
-            }
-            if (posA && posB)
-                std::swap(*posA, *posB);  // both sides updated — true bidirectional swap
+            auto itA = localPos.find(lnk->blockA.toStdString());
+            auto itB = localPos.find(lnk->blockB.toStdString());
+            if (itA != localPos.end() && itB != localPos.end())
+                std::swap(itA->second, itB->second);  // both sides updated, model untouched
         }
     }
 
     // ── 3. Sort by resolved positions ────────────────────────────────────────
+    // Rebuild order from the local (possibly-swapped) position map.
+    std::vector<std::pair<int, Block*>> order;
+    order.reserve((size_t)project.blocks.size());
+    for (auto* b : project.blocks) {
+        auto it = localPos.find(b->id.toStdString());
+        order.push_back({ it != localPos.end() ? it->second : b->position, b });
+    }
     std::sort(order.begin(), order.end(),
               [](const std::pair<int,Block*>& a, const std::pair<int,Block*>& b) {
                   return a.first < b.first;
