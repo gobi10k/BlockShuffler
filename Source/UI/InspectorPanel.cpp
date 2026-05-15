@@ -179,7 +179,7 @@ InspectorPanel::InspectorPanel()
     setupLabel(this, linksTitle, "LINKS", 11.0f, true);
 
     // Tooltips
-    probSlider     .setTooltip("Relative probability this clip plays when its block is reached");
+    probSlider     .setTooltip("Relative weight for clip selection. For overlapping blocks: if the overlay triggers, this weight determines which clip plays.");
     tempoField     .setTooltip("BPM of this clip - sets the tempo grid for the waveform editor");
     songEnderToggle.setTooltip("If this clip plays, the arrangement stops after it ends");
     clipDoneToggle .setTooltip("Exclude this clip from random selection");
@@ -187,6 +187,7 @@ InspectorPanel::InspectorPanel()
     retainTail     .setTooltip("Play the tail at its original speed instead of stretching");
     blockDoneToggle.setTooltip("Exclude this entire block from the arrangement");
     overlapSlider  .setTooltip("Chance (%) this overlapping block plays on top of the block beneath it");
+    playChanceSlider.setTooltip("Chance (%) this block plays. For overlapping blocks: controls whether the overlay triggers at all.");
     playModeCombo  .setTooltip("Sequential: play chosen blocks one after another. Simultaneous: layer them.");
 
     updateFromModel();
@@ -523,8 +524,8 @@ void InspectorPanel::updateFromModel() {
         blockTempoField.setValue(bt, juce::dontSendNotification);
     }
 
-    // Overlap probability is now controlled per-clip via each clip's probability slider.
-    // The block-level overlap slider is hidden; it no longer drives the resolver.
+    // Overlay triggering is controlled by playChance (block-level).
+    // The separate overlapSlider is deprecated and hidden.
     overlapLabel .setVisible(false);
     overlapSlider.setVisible(false);
 
