@@ -301,21 +301,38 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
 
 void MainComponent::playBlock(const juce::String& blockId) {
     if (!project) return;
-    // Resolve the full arrangement, then keep only entries belonging to this block.
-    auto fullArr = resolver.resolve(*project, rng);
+    auto* block = project->getBlockById(blockId);
+    if (!block || block->clips.isEmpty()) return;
+
+    // Always stop before starting — prevents the engine ignoring a new play()
+    // call while the audio thread still thinks it is playing.
+    engine.stop();
+
+    // Pick a clip by weighted selection directly. Using the full probabilistic
+    // resolver here caused ~50% silent failures: the resolver might not include
+    // this block (e.g. a link swap placed a different block in its slot, or
+    // playChance < 1 skipped it), so single.isEmpty() triggered an early return.
+    auto* clip = ArrangementResolver::pickClip(*block, rng);
+    if (!clip || !clip->audioBuffer || clip->audioBuffer->getNumSamples() == 0)
+        return;
+
+    ResolvedEntry entry;
+    entry.audioBuffer        = clip->audioBuffer;
+    entry.startMark          = clip->startMark;
+    entry.endMark            = clip->endMark;
+    entry.originalStartMark  = clip->startMark;
+    entry.clipId             = clip->id;
+    entry.clipName           = clip->name;
+    entry.blockId            = blockId;
+    entry.timelinePos        = 0;
+    entry.gain               = 1.0f;
+    entry.isOverlay          = false;
+
     ResolvedArrangement single;
-    single.sampleRate = fullArr.sampleRate;
-    int64_t cursor = 0;
-    for (const auto& entry : fullArr.entries) {
-        if (entry.blockId == blockId) {
-            auto e = entry;
-            e.timelinePos = cursor;
-            cursor += e.endMark - e.startMark;
-            single.entries.add(e);
-        }
-    }
-    single.totalDurationSamples = cursor;
-    if (single.isEmpty()) return;
+    single.sampleRate           = project->sampleRate;
+    single.totalDurationSamples = clip->endMark - clip->startMark;
+    single.entries.add(entry);
+
     currentArrangement = std::move(single);
     engine.play(currentArrangement);
     transportBar.setIsPlaying(true);
