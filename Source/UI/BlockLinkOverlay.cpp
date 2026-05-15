@@ -51,7 +51,7 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         juce::String nameB = link->blockB;
         if (auto* ba = project->getBlockById(link->blockA)) nameA = ba->name;
         if (auto* bb = project->getBlockById(link->blockB)) nameB = bb->name;
-        juce::String labelText = nameA + " \xe2\x86\x94 " + nameB;  // ↔ (UTF-8)
+        juce::String labelText = nameA + " <-> " + nameB;
         juce::String probText  = juce::String((int)(link->swapProbability * 100)) + "%";
         float labelW = 120.0f;
         g.setFont(LookAndFeel_BlockShuffler::uiFont(10.0f));

@@ -180,7 +180,7 @@ InspectorPanel::InspectorPanel()
 
     // Tooltips
     probSlider     .setTooltip("Relative probability this clip plays when its block is reached");
-    tempoField     .setTooltip("BPM of this clip — sets the tempo grid for the waveform editor");
+    tempoField     .setTooltip("BPM of this clip - sets the tempo grid for the waveform editor");
     songEnderToggle.setTooltip("If this clip plays, the arrangement stops after it ends");
     clipDoneToggle .setTooltip("Exclude this clip from random selection");
     retainLeadIn   .setTooltip("Play the lead-in at its original speed instead of stretching");

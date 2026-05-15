@@ -491,6 +491,11 @@ void ClipWaveformView::rebuildRows() {
         }
     }
 
+    // Pre-compute total weight for effective-probability tooltip
+    float totalWeight = 0.0f;
+    for (auto* c : currentBlock->clips)
+        totalWeight += c->probability;
+
     for (auto* clipPtr : currentBlock->clips) {
         auto* row = clipRows.add(new ClipRowComponent(
             *clipPtr,
@@ -504,7 +509,13 @@ void ClipWaveformView::rebuildRows() {
         row->onPlayClipRequested = onPlayClipRequested;
         row->ownerBlock = currentBlock.get();
         row->setSelected(clipPtr == selectedClip);
-        row->setTooltip("eff: effective play probability — this clip\xe2\x80\x99s weight as a percentage of all active clips in the block");
+
+        float rawPct = clipPtr->probability * 100.0f;
+        float effPct = (totalWeight > 0.0f) ? (clipPtr->probability / totalWeight) * 100.0f : 0.0f;
+        row->setTooltip(clipPtr->name
+            + " | Weight: " + juce::String((int)rawPct) + "%"
+            + " | Effective: " + juce::String(effPct, 1) + "%");
+
         contentArea.addAndMakeVisible(row);
     }
 }
