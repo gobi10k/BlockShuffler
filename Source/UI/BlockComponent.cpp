@@ -160,20 +160,20 @@ void BlockComponent::paint(juce::Graphics& g) {
                    juce::Justification::centred);
     }
 
-    // ── 7. Done overlay — semi-transparent dark + red X + bold "DONE" label ──
+    // ── 7. Done overlay — dim + diagonal line + corner badge, name stays readable ──
     if (block->isDone) {
-        g.setColour(juce::Colour(0x88000000));
-        g.fillRoundedRectangle(inner, cr);
-        // Red X diagonals
-        g.setColour(juce::Colour(0xAAFF4444));
-        g.drawLine(inner.getX() + 4.0f, inner.getY() + 4.0f,
-                   inner.getRight() - 4.0f, inner.getBottom() - 4.0f, 2.0f);
-        g.drawLine(inner.getRight() - 4.0f, inner.getY() + 4.0f,
-                   inner.getX() + 4.0f, inner.getBottom() - 4.0f, 2.0f);
-        // "DONE" text
-        g.setColour(juce::Colour(0xCCFFFFFF));
-        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(14.0f));
-        g.drawText("DONE", full, juce::Justification::centred);
+        g.setColour(juce::Colour(0x66000000));
+        g.fillRect(getLocalBounds());
+
+        g.setColour(juce::Colour(0x88FF4444));
+        g.drawLine(0.0f, 0.0f, (float)getWidth(), (float)getHeight(), 1.5f);
+
+        auto badgeBounds = getLocalBounds().removeFromBottom(16).removeFromRight(40);
+        g.setColour(juce::Colour(0xCC444444));
+        g.fillRoundedRectangle(badgeBounds.toFloat(), 3.0f);
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::Font(10.0f, juce::Font::bold));
+        g.drawText("DONE", badgeBounds, juce::Justification::centred);
     }
 }
 
