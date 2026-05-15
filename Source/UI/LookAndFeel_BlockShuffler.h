@@ -51,16 +51,26 @@ public:
     static constexpr juce::uint32 endMarkerCol   = 0xFFE86060;  // coral red
     static constexpr juce::uint32 playheadCol    = 0xFFFF3333;  // red playhead
 
-    // ── Block identity palette (8 hues, consistent luminance) ─────────────────
-    // Also accessible via getBlockColour(index) and getBlockPalette().
+    // ── Block identity palette — also used for UI accents ────────────────────
+    // getBlockPalette() / getBlockColour() expose the user-assignable subset.
     static constexpr juce::uint32 accentCoral   = 0xFFD45C5C;  // Coral Red
     static constexpr juce::uint32 accentAmber   = 0xFFD4883C;  // Amber Orange
-    static constexpr juce::uint32 accentLime    = 0xFF7FC43C;  // Lime Green
-    static constexpr juce::uint32 accentTeal    = 0xFF2DB88A;  // Mint Teal
-    static constexpr juce::uint32 accentIceBlue = 0xFF3C94D4;  // Sky Blue
-    static constexpr juce::uint32 accentViolet  = 0xFF6868CC;  // Indigo
+    static constexpr juce::uint32 accentLime    = 0xFF7FC43C;  // Lime Green  (UI accent only)
+    static constexpr juce::uint32 accentTeal    = 0xFF2DB88A;  // Mint Teal   (UI accent only)
+    static constexpr juce::uint32 accentIceBlue = 0xFF3C94D4;  // Sky Blue    (UI accent only)
+    static constexpr juce::uint32 accentViolet  = 0xFF6868CC;  // Indigo      (app icon)
     static constexpr juce::uint32 accentPurple  = 0xFF9060CC;  // Violet
-    static constexpr juce::uint32 accentMagenta = 0xFFCC4E90;  // Rose Pink
+    static constexpr juce::uint32 accentMagenta = 0xFFCC4E90;  // Rose Pink   (app icon)
+
+    // ── User-palette hues — named to match what they look like ───────────────
+    static constexpr juce::uint32 paletteRed    = 0xFFE05252;  // Red
+    static constexpr juce::uint32 paletteOrange = 0xFFE08840;  // Orange
+    static constexpr juce::uint32 paletteYellow = 0xFFD4C840;  // Yellow
+    static constexpr juce::uint32 paletteGreen  = 0xFF4CC840;  // Green
+    static constexpr juce::uint32 paletteCyan   = 0xFF40C0D4;  // Cyan
+    static constexpr juce::uint32 paletteBlue   = 0xFF4488D4;  // Blue
+    static constexpr juce::uint32 palettePurple = 0xFF9060CC;  // Purple
+    static constexpr juce::uint32 palettePink   = 0xFFCC4E90;  // Pink
 
     LookAndFeel_BlockShuffler();
     ~LookAndFeel_BlockShuffler() override = default;

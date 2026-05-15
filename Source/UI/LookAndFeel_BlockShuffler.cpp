@@ -127,14 +127,14 @@ juce::Font LookAndFeel_BlockShuffler::monoFont(float size) {
 
 juce::Array<juce::Colour> LookAndFeel_BlockShuffler::getBlockPalette() {
     return {
-        juce::Colour(accentCoral),   // Coral Red
-        juce::Colour(accentAmber),   // Amber Orange
-        juce::Colour(accentLime),    // Lime Green
-        juce::Colour(accentTeal),    // Mint Teal
-        juce::Colour(accentIceBlue), // Sky Blue
-        juce::Colour(accentViolet),  // Indigo
-        juce::Colour(accentPurple),  // Violet
-        juce::Colour(accentMagenta), // Rose Pink
+        juce::Colour(paletteRed),    // Red
+        juce::Colour(paletteOrange), // Orange
+        juce::Colour(paletteYellow), // Yellow
+        juce::Colour(paletteGreen),  // Green
+        juce::Colour(paletteCyan),   // Cyan
+        juce::Colour(paletteBlue),   // Blue
+        juce::Colour(palettePurple), // Purple
+        juce::Colour(palettePink),   // Pink
     };
 }
 

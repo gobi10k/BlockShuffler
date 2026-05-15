@@ -39,6 +39,7 @@ ClipRowComponent::ClipRowComponent(Clip& c,
     nameLabel.setInterceptsMouseClicks(false, false);
     addAndMakeVisible(nameLabel);
     setInterceptsMouseClicks(true, true);
+    setOpaque(true);  // paint() covers every pixel; skip alpha-compositing path
 }
 
 void ClipRowComponent::setSelected(bool sel) {
