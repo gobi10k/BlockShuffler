@@ -54,8 +54,6 @@ class ArrangementResolver {
 public:
     ArrangementResolver() = default;
     ResolvedArrangement resolve(const Project& project, juce::Random& rng) const;
-
-private:
     static Clip* pickClip(const Block& block, juce::Random& rng);
 };
 
