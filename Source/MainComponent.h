@@ -50,7 +50,8 @@ private:
     juce::File                currentProjectFile;
 
     Block*       selectedBlock   = nullptr;
-    juce::String selectedBlockId;  // survive undo-rebuild
+    juce::String selectedBlockId;   // survive undo-rebuild
+    Block*       lastPlayingBlock = nullptr;  // tracks which block the waveform is following during playback
 
     ResolvedArrangement currentArrangement;  // kept so updateTimeDisplay can find playing block
 

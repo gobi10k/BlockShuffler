@@ -374,6 +374,12 @@ void MainComponent::onStopPressed() {
     transportBar.setTimeDisplay(0.0, engine.getTotalSeconds());
     blockStrip.setPlayingBlock({});
     waveformView.setPlayingClip({}, 0, 0.0);
+    if (lastPlayingBlock != nullptr) {
+        lastPlayingBlock = nullptr;
+        waveformView.setBlock(selectedBlock, project->sampleRate,
+                              selectedBlock ? &project->formatManager : nullptr);
+        inspectorPanel.setBlock(selectedBlock);
+    }
 }
 
 void MainComponent::onRewindPressed() {
@@ -469,6 +475,12 @@ void MainComponent::updateTimeDisplay() {
         transportBar.setIsPlaying(false);
         blockStrip.setPlayingBlock({});
         waveformView.setPlayingClip({}, 0, 0.0);
+        if (lastPlayingBlock != nullptr) {
+            lastPlayingBlock = nullptr;
+            waveformView.setBlock(selectedBlock, project->sampleRate,
+                                  selectedBlock ? &project->formatManager : nullptr);
+            inspectorPanel.setBlock(selectedBlock);
+        }
         return;
     }
 
@@ -506,6 +518,16 @@ void MainComponent::updateTimeDisplay() {
                 clipSamplePos     = e.endMark;
                 break;
             }
+        }
+    }
+
+    // Follow the playing block: switch waveform + inspector when block changes
+    if (nowPlayingBlockId.isNotEmpty()) {
+        auto* playingBlock = project->getBlockById(nowPlayingBlockId);
+        if (playingBlock != nullptr && playingBlock != lastPlayingBlock) {
+            lastPlayingBlock = playingBlock;
+            waveformView.setBlock(playingBlock, project->sampleRate, &project->formatManager);
+            inspectorPanel.setBlock(playingBlock);
         }
     }
 
