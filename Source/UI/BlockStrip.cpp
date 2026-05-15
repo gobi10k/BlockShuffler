@@ -15,7 +15,7 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
     setWantsKeyboardFocus(true);
 
     viewport.setViewedComponent(&contentArea, false);
-    viewport.setScrollBarsShown(false, true);
+    viewport.setScrollBarsShown(true, true);
     viewport.setScrollBarThickness(8);
     viewport.onScrollChanged = [this] { updateOverlay(); };
     addAndMakeVisible(viewport);
@@ -164,21 +164,35 @@ void BlockStrip::resized() {
     }
 
     int numSlots = slots.size();
-    int totalW   = juce::jmax(numSlots * (blockW + blockGap), area.getWidth());
-    contentArea.setBounds(0, 0, totalW, areaH);
+
+    // First pass: find the tallest stack to size contentArea height correctly.
+    // Tiles are at least 16px tall; stacks too tall to fit get a vertical scrollbar.
+    int maxContentH = areaH;
+    for (auto& slot : slots) {
+        int n         = slot.indices.size();
+        int totalGaps = (n - 1) * 4;
+        int perH      = juce::jmax(16, (areaH - totalGaps) / n);
+        int neededH   = perH * n + totalGaps;
+        maxContentH   = juce::jmax(maxContentH, neededH);
+    }
+
+    int totalW = juce::jmax(numSlots * (blockW + blockGap), area.getWidth());
+    contentArea.setBounds(0, 0, totalW, maxContentH);
 
     blockCentreXCache.resize(project->blocks.size());
     originalBounds.resize(project->blocks.size());
 
     int x = 0;
     for (auto& slot : slots) {
-        int n = slot.indices.size();
+        int n         = slot.indices.size();
         // Each block in the stack gets an equal share of the slot height,
         // with a 4-px gap between stacked tiles so they're visually distinct.
-        // Never shrink tiles below 24px so the name stays readable.
+        // Never shrink tiles below 16px; stacks that don't fit scroll vertically.
         int totalGaps = (n - 1) * 4;
-        int perH      = juce::jmax(24, (areaH - totalGaps) / n);
-        int startY    = (areaH - (perH * n + totalGaps)) / 2;
+        int perH      = juce::jmax(16, (areaH - totalGaps) / n);
+        int neededH   = perH * n + totalGaps;
+        // Centre stacks that fit; top-align ones that need vertical scrolling.
+        int startY    = (neededH <= areaH) ? (areaH - neededH) / 2 : 0;
 
         for (int j = 0; j < n; ++j) {
             int bi = slot.indices[j];

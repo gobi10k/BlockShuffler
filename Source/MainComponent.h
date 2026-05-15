@@ -64,7 +64,7 @@ private:
 
     static constexpr int inspectorWidth   = 210;
     static constexpr int transportHeight  = 56;
-    static constexpr int blockStripHeight = 160;
+    static constexpr int blockStripHeight = 360;
 
     void onPlayPressed();
     void onStopPressed();

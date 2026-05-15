@@ -58,7 +58,8 @@ void BlockComponent::paint(juce::Graphics& g) {
     static constexpr int   botH = 14;
     const auto full  = getLocalBounds();
     const auto inner = full.toFloat().reduced(1.0f);
-    const bool active = (selected || highlighted);
+    const bool active    = (selected || highlighted);
+    const bool tinyTile  = (full.getHeight() <= 26);  // compact rendering for small stacks
 
     // ── 1. Base background ────────────────────────────────────────────────────
     auto bg = selected    ? juce::Colour(LookAndFeel_BlockShuffler::bgLight)
@@ -68,43 +69,49 @@ void BlockComponent::paint(juce::Graphics& g) {
     g.setColour(bg);
     g.fillRoundedRectangle(inner, cr);
 
-    // Subtle identity-color tint in body
-    g.setColour(block->color.withAlpha(0.10f));
-    g.fillRoundedRectangle(inner, cr);
-
-    // ── 2. Header strip (rounded top corners only) ────────────────────────────
-    auto headerF = juce::Rectangle<float>(inner.getX(), inner.getY(),
-                                          inner.getWidth(), (float)hdrH);
-    juce::Path hdrPath;
-    hdrPath.addRoundedRectangle(headerF.getX(), headerF.getY(),
-                                headerF.getWidth(), headerF.getHeight(),
-                                cr, cr, true, true, false, false);
-    g.setColour(block->color.withAlpha(1.0f));
-    g.fillPath(hdrPath);
-
-    // Block number — left of header
-    g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
-    g.setColour(juce::Colours::white.withAlpha(0.80f));
-    g.drawText(juce::String(block->position + 1),
-               juce::Rectangle<int>(full.getX() + 5, full.getY(), 18, hdrH),
-               juce::Justification::centredLeft);
-
-    // Clip count or stack-group badge — right of header
-    if (block->stackGroup >= 0) {
-        auto badge = juce::Rectangle<float>(inner.getRight() - 15.0f,
-                                            inner.getY() + 4.0f, 12.0f, 12.0f);
-        g.setColour(juce::Colours::white.withAlpha(0.22f));
-        g.fillEllipse(badge);
-        g.setColour(juce::Colours::white);
-        g.setFont(LookAndFeel_BlockShuffler::monoFont(8.0f));
-        g.drawText(juce::String(block->stackGroup + 1),
-                   badge.toNearestInt(), juce::Justification::centred);
+    if (tinyTile) {
+        // Compact mode: full-height color strip + name only
+        g.setColour(block->color.withAlpha(0.80f));
+        g.fillRoundedRectangle(inner, juce::jmin(cr, (float)full.getHeight() * 0.4f));
     } else {
+        // Subtle identity-color tint in body
+        g.setColour(block->color.withAlpha(0.10f));
+        g.fillRoundedRectangle(inner, cr);
+
+        // ── 2. Header strip (rounded top corners only) ────────────────────────
+        auto headerF = juce::Rectangle<float>(inner.getX(), inner.getY(),
+                                              inner.getWidth(), (float)hdrH);
+        juce::Path hdrPath;
+        hdrPath.addRoundedRectangle(headerF.getX(), headerF.getY(),
+                                    headerF.getWidth(), headerF.getHeight(),
+                                    cr, cr, true, true, false, false);
+        g.setColour(block->color.withAlpha(1.0f));
+        g.fillPath(hdrPath);
+
+        // Block number — left of header
         g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
-        g.setColour(juce::Colours::white.withAlpha(0.65f));
-        g.drawText(juce::String(block->clips.size()),
-                   juce::Rectangle<int>(full.getRight() - 22, full.getY(), 18, hdrH),
-                   juce::Justification::centredRight);
+        g.setColour(juce::Colours::white.withAlpha(0.80f));
+        g.drawText(juce::String(block->position + 1),
+                   juce::Rectangle<int>(full.getX() + 5, full.getY(), 18, hdrH),
+                   juce::Justification::centredLeft);
+
+        // Clip count or stack-group badge — right of header
+        if (block->stackGroup >= 0) {
+            auto badge = juce::Rectangle<float>(inner.getRight() - 15.0f,
+                                                inner.getY() + 4.0f, 12.0f, 12.0f);
+            g.setColour(juce::Colours::white.withAlpha(0.22f));
+            g.fillEllipse(badge);
+            g.setColour(juce::Colours::white);
+            g.setFont(LookAndFeel_BlockShuffler::monoFont(8.0f));
+            g.drawText(juce::String(block->stackGroup + 1),
+                       badge.toNearestInt(), juce::Justification::centred);
+        } else {
+            g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
+            g.setColour(juce::Colours::white.withAlpha(0.65f));
+            g.drawText(juce::String(block->clips.size()),
+                       juce::Rectangle<int>(full.getRight() - 22, full.getY(), 18, hdrH),
+                       juce::Justification::centredRight);
+        }
     }
 
     // ── 3. Playing indicator — white border + dark inner line, readable on any colour ──
@@ -116,40 +123,43 @@ void BlockComponent::paint(juce::Graphics& g) {
     }
 
     // ── 4. Border ─────────────────────────────────────────────────────────────
+    const float borderCr = tinyTile ? juce::jmin(cr, (float)full.getHeight() * 0.4f) : cr;
     if (active) {
-        // 2px accent ring for selected / highlighted state
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
         if (block->isOverlapping) {
-            juce::Path sp; sp.addRoundedRectangle(inner, cr);
+            juce::Path sp; sp.addRoundedRectangle(inner, borderCr);
             juce::Path dp; float dl[] = {6.0f, 3.0f};
             juce::PathStrokeType(2.0f).createDashedStroke(dp, sp, dl, 2);
             g.fillPath(dp);
         } else {
-            g.drawRoundedRectangle(inner, cr, 2.0f);
+            g.drawRoundedRectangle(inner, borderCr, 2.0f);
         }
     } else {
-        // Identity-color border — brightens on hover
         float ba = hovered ? 0.85f : 0.55f;
-        g.setColour(block->color.withAlpha(ba));
-        if (block->isOverlapping) {
-            juce::Path sp; sp.addRoundedRectangle(inner, cr);
-            juce::Path dp; float dl[] = {5.0f, 3.0f};
-            juce::PathStrokeType(1.0f).createDashedStroke(dp, sp, dl, 2);
-            g.fillPath(dp);
-        } else {
-            g.drawRoundedRectangle(inner, cr, 1.0f);
+        g.setColour(block->color.withAlpha(tinyTile ? 0.0f : ba));  // border already merged into bg for tiny
+        if (!tinyTile) {
+            if (block->isOverlapping) {
+                juce::Path sp; sp.addRoundedRectangle(inner, borderCr);
+                juce::Path dp; float dl[] = {5.0f, 3.0f};
+                juce::PathStrokeType(1.0f).createDashedStroke(dp, sp, dl, 2);
+                g.fillPath(dp);
+            } else {
+                g.drawRoundedRectangle(inner, borderCr, 1.0f);
+            }
         }
     }
 
-    // ── 5. Bottom readout ─────────────────────────────────────────────────────
-    auto botArea = juce::Rectangle<int>(full.getX(), full.getBottom() - botH,
-                                        full.getWidth(), botH);
-    g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textTertiary));
-    if (block->tempo > 0.0)
-        g.drawText(juce::String((int)block->tempo) + " bpm",
-                   botArea.withTrimmedLeft(5).withTrimmedRight(22),
-                   juce::Justification::centredLeft);
+    // ── 5. Bottom readout (full-size tiles only) ──────────────────────────────
+    if (!tinyTile) {
+        auto botArea = juce::Rectangle<int>(full.getX(), full.getBottom() - botH,
+                                            full.getWidth(), botH);
+        g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textTertiary));
+        if (block->tempo > 0.0)
+            g.drawText(juce::String((int)block->tempo) + " bpm",
+                       botArea.withTrimmedLeft(5).withTrimmedRight(22),
+                       juce::Justification::centredLeft);
+    }
 
     // ── 6. Clip-drop highlight ────────────────────────────────────────────────
     if (clipDropHighlight) {
@@ -168,17 +178,25 @@ void BlockComponent::paint(juce::Graphics& g) {
         g.setColour(juce::Colour(0x88FF4444));
         g.drawLine(0.0f, 0.0f, (float)getWidth(), (float)getHeight(), 1.5f);
 
-        auto badgeBounds = getLocalBounds().removeFromBottom(16).removeFromRight(40);
-        g.setColour(juce::Colour(0xCC444444));
-        g.fillRoundedRectangle(badgeBounds.toFloat(), 3.0f);
-        g.setColour(juce::Colours::white);
-        g.setFont(juce::Font(10.0f, juce::Font::bold));
-        g.drawText("DONE", badgeBounds, juce::Justification::centred);
+        if (!tinyTile) {
+            auto badgeBounds = getLocalBounds().removeFromBottom(16).removeFromRight(40);
+            g.setColour(juce::Colour(0xCC444444));
+            g.fillRoundedRectangle(badgeBounds.toFloat(), 3.0f);
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(10.0f, juce::Font::bold));
+            g.drawText("DONE", badgeBounds, juce::Justification::centred);
+        }
     }
 }
 
 void BlockComponent::resized() {
-    nameLabel.setBounds(getLocalBounds().reduced(4).withTrimmedTop(20).withTrimmedBottom(16));
+    if (getHeight() <= 26) {
+        nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(9.0f));
+        nameLabel.setBounds(getLocalBounds().reduced(2));
+    } else {
+        nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(12.0f));
+        nameLabel.setBounds(getLocalBounds().reduced(4).withTrimmedTop(20).withTrimmedBottom(16));
+    }
 }
 
 void BlockComponent::setSelected(bool s) {
