@@ -25,19 +25,20 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     ResolvedArrangement result;
     result.sampleRate = project.sampleRate;
 
-    // ── 1. Collect blocks + build mutable position map ───────────────────────
-    std::vector<Block*> sorted;
-    sorted.reserve((size_t)project.blocks.size());
-    for (auto* b : project.blocks) sorted.push_back(b);
-
-    std::unordered_map<std::string, int> posMap;
+    // ── 1. Collect blocks + build lookup map ────────────────────────────────
     std::unordered_map<std::string, const Block*> blockById;
     for (auto* b : project.blocks)
         blockById[b->id.toStdString()] = b;
 
-    for (auto* b : sorted) posMap[b->id.toStdString()] = b->position;
+    // Build a (position, Block*) array so swaps and sorting are unambiguous.
+    // Using operator[] on unordered_map inside a sort comparator is UB if the
+    // map rehashes; a plain vector avoids that entirely.
+    std::vector<std::pair<int, Block*>> order;
+    order.reserve((size_t)project.blocks.size());
+    for (auto* b : project.blocks)
+        order.push_back({b->position, b});
 
-    // ── 2. Shuffle links and apply swaps ─────────────────────────────────────
+    // ── 2. Shuffle links and apply bidirectional position swaps ─────────────
     std::vector<BlockLink*> shuffledLinks;
     shuffledLinks.reserve((size_t)project.links.size());
     for (auto* lnk : project.links) shuffledLinks.push_back(lnk);
@@ -47,15 +48,28 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         std::swap(shuffledLinks[(size_t)i], shuffledLinks[(size_t)j]);
     }
     for (auto* lnk : shuffledLinks) {
-        if (rng.nextFloat() < lnk->swapProbability)
-            std::swap(posMap[lnk->blockA.toStdString()],
-                      posMap[lnk->blockB.toStdString()]);
+        if (rng.nextFloat() < lnk->swapProbability) {
+            int* posA = nullptr;
+            int* posB = nullptr;
+            for (auto& [pos, blk] : order) {
+                if (blk->id == lnk->blockA) posA = &pos;
+                else if (blk->id == lnk->blockB) posB = &pos;
+            }
+            if (posA && posB)
+                std::swap(*posA, *posB);  // both sides updated — true bidirectional swap
+        }
     }
 
     // ── 3. Sort by resolved positions ────────────────────────────────────────
-    std::sort(sorted.begin(), sorted.end(), [&posMap](Block* a, Block* b) {
-        return posMap[a->id.toStdString()] < posMap[b->id.toStdString()];
-    });
+    std::sort(order.begin(), order.end(),
+              [](const std::pair<int,Block*>& a, const std::pair<int,Block*>& b) {
+                  return a.first < b.first;
+              });
+
+    std::vector<Block*> sorted;
+    sorted.reserve(order.size());
+    for (auto& [pos, blk] : order)
+        sorted.push_back(blk);
 
     // ── 4. Group into slots by stackGroup ────────────────────────────────────
     // A slot is one or more blocks sharing the same stackGroup.
