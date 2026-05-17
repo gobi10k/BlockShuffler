@@ -182,10 +182,10 @@ InspectorPanel::InspectorPanel()
     probSlider     .setTooltip("Relative weight for clip selection. For overlapping blocks: if the overlay triggers, this weight determines which clip plays.");
     tempoField     .setTooltip("BPM of this clip - sets the tempo grid for the waveform editor");
     songEnderToggle.setTooltip("If this clip plays, the arrangement stops after it ends");
-    clipDoneToggle .setTooltip("Exclude this clip from random selection");
+    clipDoneToggle .setTooltip("Mark this clip as done (visual flag only — does not affect playback or export)");
     retainLeadIn   .setTooltip("Play the lead-in at its original speed instead of stretching");
     retainTail     .setTooltip("Play the tail at its original speed instead of stretching");
-    blockDoneToggle.setTooltip("Exclude this entire block from the arrangement");
+    blockDoneToggle.setTooltip("Mark this block as done (visual flag only — does not affect playback or export)");
     overlapSlider  .setTooltip("Chance (%) this overlapping block plays on top of the block beneath it");
     playChanceSlider.setTooltip("Chance (%) this block plays. For overlapping blocks: controls whether the overlay triggers at all.");
     playModeCombo  .setTooltip("Sequential: play chosen blocks one after another. Simultaneous: layer them.");

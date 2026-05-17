@@ -103,6 +103,11 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     bool    songEnded     = false;
     bool    firstEntryAdded = false;  // used to offset cursor so first clip's lead-in starts at t=0
 
+    // Standalone overlapping blocks (stackGroup == -1, isOverlapping == true) that
+    // appear before any primary entry in position order cannot be attached yet.
+    // We defer them and fire at the first primary entry added to the timeline.
+    std::vector<Block*> deferredStandaloneOverlays;
+
     // Helper: resolve one overlapping block onto the timeline.
     // Step 1: block->playChance determines if the overlay triggers at all.
     // Step 2: pickClip() picks exactly one clip by weighted selection.
@@ -138,21 +143,31 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             // blocks, attach them to the most recent primary entry already
             // in the arrangement (handles standalone isOverlapping blocks
             // whose stackGroup was never set, i.e. stackGroup == -1).
-            if (!overlapping.empty() && !result.entries.isEmpty())
+            if (!overlapping.empty())
             {
-                // Find the last non-overlapping entry's timeline position.
-                int64_t overlayStart = -1;
-                for (int i = result.entries.size() - 1; i >= 0; --i)
+                if (!result.entries.isEmpty())
                 {
-                    const auto& e = result.entries.getReference(i);
-                    auto it = blockById.find(e.blockId.toStdString());
-                    bool isOver = (it != blockById.end() && it->second->isOverlapping);
-                    if (!isOver) { overlayStart = e.timelinePos; break; }
+                    // Find the last non-overlapping entry's timeline position.
+                    int64_t overlayStart = -1;
+                    for (int i = result.entries.size() - 1; i >= 0; --i)
+                    {
+                        const auto& e = result.entries.getReference(i);
+                        auto it = blockById.find(e.blockId.toStdString());
+                        bool isOver = (it != blockById.end() && it->second->isOverlapping);
+                        if (!isOver) { overlayStart = e.timelinePos; break; }
+                    }
+                    if (overlayStart >= 0)
+                    {
+                        for (auto* ob : overlapping)
+                            addOverlay(ob, overlayStart);
+                    }
                 }
-                if (overlayStart >= 0)
+                else
                 {
+                    // No primary entries exist yet — this overlapping block comes before any
+                    // normal block in position order.  Defer it to the first primary entry.
                     for (auto* ob : overlapping)
-                        addOverlay(ob, overlayStart);
+                        deferredStandaloneOverlays.push_back(ob);
                 }
             }
             continue;
@@ -182,6 +197,14 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 clip->name, clip->id,
                 tPos, 1.0f, block->id
             });
+
+            // Fire any overlapping blocks that were positioned before this entry in the
+            // arrangement order and had to be deferred until the first primary entry appeared.
+            if (!deferredStandaloneOverlays.empty()) {
+                for (auto* ob : deferredStandaloneOverlays)
+                    addOverlay(ob, tPos);
+                deferredStandaloneOverlays.clear();
+            }
 
             cursor += bodyLen;
             if (clip->isSongEnder) songEnded = true;
@@ -261,6 +284,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
                 if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid
 
+                // Fire any deferred standalone overlays at this first primary entry.
+                if (!deferredStandaloneOverlays.empty()) {
+                    for (auto* ob : deferredStandaloneOverlays)
+                        addOverlay(ob, bodyStart < 0 ? cursor : bodyStart);
+                    deferredStandaloneOverlays.clear();
+                }
+
                 // Overlapping blocks layer on top of this slot (timelinePos = bodyStart)
                 for (auto* ob : overlapping) {
                     if (!ob->allowedParentClipIds.isEmpty()) {
@@ -299,6 +329,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         clip->name, clip->id,
                         tPos, 1.0f, b->id
                     });
+
+                    // Fire any deferred standalone overlays at this first primary entry.
+                    if (!deferredStandaloneOverlays.empty()) {
+                        for (auto* ob : deferredStandaloneOverlays)
+                            addOverlay(ob, bodyStart);
+                        deferredStandaloneOverlays.clear();
+                    }
 
                     // Layer overlapping blocks on top of this picked block (bodies aligned).
                     for (auto* ob : overlapping) {
