@@ -58,6 +58,7 @@ target_sources(BlockShuffler PRIVATE
     # Audio
     Source/Audio/ArrangementResolver.h
     Source/Audio/ArrangementResolver.cpp
+    Source/Audio/EntryMixer.h
     Source/Audio/PlaybackEngine.h
     Source/Audio/PlaybackEngine.cpp
     Source/Audio/TempoStretcher.h

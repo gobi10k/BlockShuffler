@@ -589,8 +589,17 @@ void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> cent
             for (auto* b : project->blocks) {
                 if (b->stackGroup == oldGroup) { ++remaining; lastInStack = b; }
             }
-            if (remaining == 1 && lastInStack != nullptr)
+            if (remaining == 1 && lastInStack != nullptr) {
+                // FIX H6/H7: reset stack settings when dissolving a solo stack
                 lastInStack->stackGroup = -1;
+                lastInStack->stackPlayCount.values.clearQuick();
+                lastInStack->stackPlayCount.values.add(1);
+                lastInStack->stackPlayCount.weights.clearQuick();
+                lastInStack->stackPlayCount.weights.add(1.0f);
+                lastInStack->stackPlayMode = StackPlayMode::Sequential;
+            } else if (remaining > 1) {
+                project->propagateStackSettings(oldGroup);
+            }
 
             // Move to drop position.
             int insertBefore = juce::jlimit(0, project->blocks.size(), dropTargetIndex);

@@ -634,7 +634,8 @@ void InspectorPanel::sliderValueChanged(juce::Slider* slider) {
         return;
     }
     if (slider == &playChanceSlider && selectedBlock) {
-        selectedBlock->playChance = (float)(playChanceSlider.getValue() / 100.0);
+        // FIX M7/M10: clamp to [0,1]; apply without recording undo (drag end does that)
+        selectedBlock->playChance = juce::jlimit(0.0f, 1.0f, (float)(playChanceSlider.getValue() / 100.0));
         return;
     }
     if (slider == &overlapSlider && selectedBlock) {

@@ -256,7 +256,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     });
                     maxBodyLen = std::max(maxBodyLen, bodyLen);
                     simultaneousClips.add(clip);
-                    if (clip->isSongEnder) songEnded = true;
+                    if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
 
                 if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid
@@ -310,7 +310,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         addOverlay(ob, bodyStart);
                     }
                     cursor += bodyLen;
-                    if (clip->isSongEnder) songEnded = true;
+                    if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
             }
         }
@@ -346,9 +346,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             // For now we look them up via the pointers, which is acceptable on the UI thread
             // inside resolve().
 
-            // Actually, we can get tempos from the project during resolve()
-            auto* bA = blockById.find(entA.blockId.toStdString())->second;
-            auto* bB = blockById.find(entB.blockId.toStdString())->second;
+            // FIX C4: guard every blockById lookup before dereferencing
+            auto itA = blockById.find(entA.blockId.toStdString());
+            if (itA == blockById.end()) continue;
+            auto itB = blockById.find(entB.blockId.toStdString());
+            if (itB == blockById.end()) continue;
+            auto* bA = itA->second;
+            auto* bB = itB->second;
             const Clip* cA = bA->getClipById(entA.clipId);
             const Clip* cB = bB->getClipById(entB.clipId);
 

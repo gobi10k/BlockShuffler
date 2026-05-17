@@ -117,7 +117,9 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                 for (auto& v : *apciArr) block->allowedParentClipIds.add(v.toString());
 
             block->isDone         = (bool)  bVar.getProperty("isDone",         false);
-            block->playChance     = (float)(double)bVar.getProperty("playChance", 1.0);
+            // FIX M7: clamp on load so out-of-range saved values don't cause silent skips
+            block->playChance     = juce::jlimit(0.0f, 1.0f,
+                                        (float)(double)bVar.getProperty("playChance", 1.0));
             block->tempo          = (double)bVar.getProperty("tempo",          120.0);
 
             // stackPlayCount
@@ -151,6 +153,9 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                     if (clip->audioFile.existsAsFile()) {
                         clip->loadFromFile(clip->audioFile, project.formatManager,
                                            project.sampleRate);
+                        // FIX M6: warn when a file exists but can't be decoded
+                        if (!clip->audioBuffer)
+                            project.missingFilesOnLoad.add(clip->audioFile.getFullPathName());
                     } else if (clip->audioFile != juce::File{}) {
                         project.missingFilesOnLoad.add(clip->audioFile.getFullPathName());
                     }

@@ -83,6 +83,7 @@ MainComponent::MainComponent(PlaybackEngine& eng)
 
     blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
         currentArrangement = resolver.resolve(*project, rng);
+        if (currentArrangement.entries.isEmpty()) return;  // FIX H5: nothing to play
         // Find the body start of the target block in the resolved arrangement
         int64_t seekPos = 0;
         for (const auto& entry : currentArrangement.entries) {
@@ -182,6 +183,7 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
         if (project->blocks.isEmpty()) project->addBlock("Block 1");
         blockStrip.selectBlock(project->blocks.getFirst());  // fires onBlockSelected → applyBlockSelection
     }
+    if (selectedBlock == nullptr) return;  // FIX C2: guard against null after fallback
     auto pre = project->toJSON();
     bool anyAdded = false;
     for (auto& filePath : files) {
@@ -210,6 +212,11 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) 
 
     // Re-validate the selected block pointer — undo/redo may have deleted/recreated it.
     auto* found = project->getBlockById(selectedBlockId);
+    // FIX C1: if the id is gone (deleted by undo), fall back to the first block
+    if (found == nullptr && !project->blocks.isEmpty()) {
+        found = project->blocks.getFirst();
+        selectedBlockId = found->id;
+    }
     if (found != selectedBlock) {
         // Block changed (deleted, recreated, or new project) — full refresh
         selectedBlock = found;
