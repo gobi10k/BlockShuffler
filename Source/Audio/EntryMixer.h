@@ -79,6 +79,9 @@ inline void mixEntryToBuffer(
             double skip = -srcStart;
             srcStart   = 0.0;
             srcSamples -= skip;
+            destOff    += (int)skip;   // advance dest by same amount so time alignment is preserved
+            destCount  -= (int)skip;
+            if (destCount <= 0 || srcSamples <= 0.0) return;
         }
 
         const int64_t regLen = regionEnd - regionStart;

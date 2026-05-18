@@ -64,9 +64,8 @@ InspectorPanel::InspectorPanel()
     clipDoneToggle .addListener(this); addAndMakeVisible(clipDoneToggle);
 
     // ── Block section ────────────────────────────────────────────────────────
-    setupLabel(this, blockTitle,      "BLOCK",                   11.0f, true);
-    setupLabel(this, blockTempoLabel, "Block Tempo (BPM)",       12.0f);
-    setupLabel(this, overlapLabel,    "Overlap Probability (%)", 12.0f);
+    setupLabel(this, blockTitle,      "BLOCK",          11.0f, true);
+    setupLabel(this, blockTempoLabel, "Block Tempo (BPM)", 12.0f);
 
     blockTempoField.onValueChanged = [this](double t) {
         if (selectedBlock && !updatingFromModel && project) {
@@ -99,17 +98,6 @@ InspectorPanel::InspectorPanel()
                                juce::Colour(LookAndFeel_BlockShuffler::bgLight));
     playChanceSlider.addListener(this);
     addAndMakeVisible(playChanceSlider);
-
-    overlapSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    overlapSlider.setRange(0.0, 100.0, 1.0);
-    overlapSlider.setValue(50.0, juce::dontSendNotification);
-    overlapSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 20);
-    overlapSlider.setColour(juce::Slider::textBoxTextColourId,
-                            juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
-    overlapSlider.setColour(juce::Slider::textBoxBackgroundColourId,
-                            juce::Colour(LookAndFeel_BlockShuffler::bgLight));
-    overlapSlider.addListener(this);
-    addAndMakeVisible(overlapSlider);
 
     // ── "Plays Over" section ─────────────────────────────────────────────────
     setupLabel(this, playsOverTitle, "PLAYS OVER", 11.0f, true);
@@ -186,7 +174,6 @@ InspectorPanel::InspectorPanel()
     retainLeadIn   .setTooltip("Play the lead-in at its original speed instead of stretching");
     retainTail     .setTooltip("Play the tail at its original speed instead of stretching");
     blockDoneToggle.setTooltip("Mark this block as done (visual flag only — does not affect playback or export)");
-    overlapSlider  .setTooltip("Chance (%) this overlapping block plays on top of the block beneath it");
     playChanceSlider.setTooltip("Chance (%) this block plays. For overlapping blocks: controls whether the overlay triggers at all.");
     playModeCombo  .setTooltip("Sequential: play chosen blocks one after another. Simultaneous: layer them.");
 
@@ -343,27 +330,29 @@ void InspectorPanel::rebuildStackCountRows() {
             if (idx < 0 || idx >= selectedBlock->stackPlayCount.values.size()) return;
             int cur = selectedBlock->stackPlayCount.values[idx];
             if (cur <= 1) return;
+            auto pre = project->toJSON();
             selectedBlock->stackPlayCount.values.set(idx, cur - 1);
-            row->countLbl.setText("Play " + juce::String(cur - 1), juce::dontSendNotification);
             project->propagateStackSettings(selectedBlock->stackGroup, selectedBlock);
+            project->applyExternalMutation(pre);
         };
 
         row->incBtn.onClick = [this, row] {
             if (!selectedBlock || updatingFromModel || !project) return;
             int idx = stackCountRows.indexOf(row);
             if (idx < 0 || idx >= selectedBlock->stackPlayCount.values.size()) return;
-            // Clamp to number of non-overlapping, non-done blocks in this stack
+            // Clamp to number of non-overlapping blocks in this stack (isDone is cosmetic —
+            // the resolver plays Done blocks, so they count toward the max)
             int maxPlayable = 0;
             for (auto* b : project->blocks)
-                if (b->stackGroup == selectedBlock->stackGroup &&
-                    !b->isOverlapping && !b->isDone)
+                if (b->stackGroup == selectedBlock->stackGroup && !b->isOverlapping)
                     ++maxPlayable;
             maxPlayable = juce::jmax(1, maxPlayable);
             int cur = selectedBlock->stackPlayCount.values[idx];
             if (cur >= maxPlayable) return;
+            auto pre = project->toJSON();
             selectedBlock->stackPlayCount.values.set(idx, cur + 1);
-            row->countLbl.setText("Play " + juce::String(cur + 1), juce::dontSendNotification);
             project->propagateStackSettings(selectedBlock->stackGroup, selectedBlock);
+            project->applyExternalMutation(pre);
         };
 
         row->removeBtn.onClick = [this, row] {
@@ -372,11 +361,12 @@ void InspectorPanel::rebuildStackCountRows() {
             if (idx < 0) return;
             auto& spc2 = selectedBlock->stackPlayCount;
             if (spc2.values.size() <= 1) return;
+            auto pre = project->toJSON();
             spc2.values.remove(idx);
             spc2.weights.remove(idx);
             project->propagateStackSettings(selectedBlock->stackGroup, selectedBlock);
-            rebuildStackCountRows();
-            resized();
+            project->applyExternalMutation(pre);
+            // applyExternalMutation fires sendChangeMessage → refreshValues → rebuild
         };
 
         addAndMakeVisible(row->decBtn);
@@ -524,11 +514,6 @@ void InspectorPanel::updateFromModel() {
         blockTempoField.setValue(bt, juce::dontSendNotification);
     }
 
-    // Overlay triggering is controlled by playChance (block-level).
-    // The separate overlapSlider is deprecated and hidden.
-    overlapLabel .setVisible(false);
-    overlapSlider.setVisible(false);
-
     // ── "Plays Over" section
     const bool showPlaysOver = hasBlock && selectedBlock->isOverlapping;
     playsOverTitle.setVisible(showPlaysOver);
@@ -638,10 +623,6 @@ void InspectorPanel::sliderValueChanged(juce::Slider* slider) {
         selectedBlock->playChance = juce::jlimit(0.0f, 1.0f, (float)(playChanceSlider.getValue() / 100.0));
         return;
     }
-    if (slider == &overlapSlider && selectedBlock) {
-        selectedBlock->overlapProbability = (float)(overlapSlider.getValue() / 100.0);
-        return;
-    }
     for (auto* row : linkRows) {
         if (slider == &row->slider) {
             if (auto* link = findLinkForRow(row))
@@ -658,8 +639,6 @@ void InspectorPanel::sliderDragStarted(juce::Slider* slider) {
         probSliderDragPre = project->toJSON();
     else if (slider == &playChanceSlider && selectedBlock && project)
         playChanceSliderDragPre = project->toJSON();
-    else if (slider == &overlapSlider && selectedBlock && project)
-        overlapSliderDragPre = project->toJSON();
     else {
         for (auto* row : linkRows) {
             if (slider == &row->slider && project) {
@@ -679,11 +658,6 @@ void InspectorPanel::sliderDragEnded(juce::Slider* slider) {
     if (slider == &playChanceSlider && selectedBlock && project && !playChanceSliderDragPre.isVoid()) {
         project->applyExternalMutation(playChanceSliderDragPre);
         playChanceSliderDragPre = juce::var{};
-        return;
-    }
-    if (slider == &overlapSlider && selectedBlock && project && !overlapSliderDragPre.isVoid()) {
-        project->applyExternalMutation(overlapSliderDragPre);
-        overlapSliderDragPre = juce::var{};
         return;
     }
     for (auto* row : linkRows) {
@@ -821,12 +795,6 @@ void InspectorPanel::resized() {
         playChanceSlider.setBounds(area.removeFromTop(slh));
         area.removeFromTop(gap);
     }
-    if (overlapLabel.isVisible()) {
-        overlapLabel .setBounds(area.removeFromTop(rh));
-        overlapSlider.setBounds(area.removeFromTop(slh));
-        area.removeFromTop(gap);
-    }
-
     // ── Plays-over section
     if (playsOverTitle.isVisible()) {
         playsOverTitle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);

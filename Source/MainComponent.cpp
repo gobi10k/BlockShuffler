@@ -323,6 +323,9 @@ void MainComponent::playBlock(const juce::String& blockId) {
     if (!clip || !clip->audioBuffer || clip->audioBuffer->getNumSamples() == 0)
         return;
 
+    // Mirror the resolver's convention: timelinePos = body start = startMark, so
+    // the lead-in plays at [0, startMark) and the body at [startMark, endMark).
+    // totalDurationSamples = endMark so the engine stops after the body ends.
     ResolvedEntry entry;
     entry.audioBuffer        = clip->audioBuffer;
     entry.startMark          = clip->startMark;
@@ -331,13 +334,13 @@ void MainComponent::playBlock(const juce::String& blockId) {
     entry.clipId             = clip->id;
     entry.clipName           = clip->name;
     entry.blockId            = blockId;
-    entry.timelinePos        = 0;
+    entry.timelinePos        = clip->startMark;  // body starts after lead-in
     entry.gain               = 1.0f;
     entry.isOverlay          = false;
 
     ResolvedArrangement single;
     single.sampleRate           = project->sampleRate;
-    single.totalDurationSamples = clip->endMark - clip->startMark;
+    single.totalDurationSamples = clip->endMark;  // includes lead-in + body
     single.entries.add(entry);
 
     currentArrangement = std::move(single);
@@ -358,19 +361,19 @@ void MainComponent::playClip(const juce::String& clipId) {
     if (!found || !found->audioBuffer) return;
 
     ResolvedEntry entry;
-    entry.audioBuffer   = found->audioBuffer;
-    entry.startMark     = found->startMark;
-    entry.endMark       = found->endMark;
-    entry.originalStartMark = found->startMark;
-    entry.clipId        = found->id;
-    entry.clipName      = found->name;
-    entry.blockId       = foundBlockId;
-    entry.timelinePos   = 0;
-    entry.gain          = 1.0f;
+    entry.audioBuffer        = found->audioBuffer;
+    entry.startMark          = found->startMark;
+    entry.endMark            = found->endMark;
+    entry.originalStartMark  = found->startMark;
+    entry.clipId             = found->id;
+    entry.clipName           = found->name;
+    entry.blockId            = foundBlockId;
+    entry.timelinePos        = found->startMark;  // body starts after lead-in
+    entry.gain               = 1.0f;
 
     ResolvedArrangement single;
     single.sampleRate           = project->sampleRate;
-    single.totalDurationSamples = found->endMark - found->startMark;
+    single.totalDurationSamples = found->endMark;  // includes lead-in + body
     single.entries.add(entry);
 
     currentArrangement = std::move(single);

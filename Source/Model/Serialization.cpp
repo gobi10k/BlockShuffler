@@ -52,7 +52,7 @@ juce::var projectToJSON(const Project& project) {
             cObj->setProperty("name",               clip->name);
             cObj->setProperty("color",              clip->color.toString());
             cObj->setProperty("audioFile",          clip->audioFile.getFullPathName());
-            cObj->setProperty("nativeSampleRate",   clip->nativeSampleRate);
+            // nativeSampleRate is not persisted — it is recovered by loadFromFile on project open.
             // Store large int as string to avoid double precision loss
             cObj->setProperty("startMark",          juce::String(clip->startMark));
             cObj->setProperty("endMark",            juce::String(clip->endMark));

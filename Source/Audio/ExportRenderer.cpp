@@ -20,18 +20,18 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
     // FIX H4: guard against int overflow for very long arrangements
     if (totalSamples > (int64_t)std::numeric_limits<int>::max()) return false;
 
-    const int numChannels = 2;
-    const int numSamples  = (int)totalSamples;
+    const int     numChannels = 2;
+    const int64_t numSamples  = totalSamples;  // int64_t; cast to int only at point of use
 
     // Allocate output buffer
-    juce::AudioBuffer<float> output(numChannels, numSamples);
+    juce::AudioBuffer<float> output(numChannels, (int)numSamples);
     output.clear();
 
     // FIX H1: use shared mixEntryToBuffer so export and playback are identical.
     // Export always runs at project sample rate (pToH = hToP = 1.0, currentHead = 0).
     const int numEntries = arrangement.entries.size();
     for (int i = 0; i < numEntries; ++i) {
-        mixEntryToBuffer(arrangement.entries.getReference(i), output, numSamples, 0LL, 1.0, 1.0, i);
+        mixEntryToBuffer(arrangement.entries.getReference(i), output, (int)numSamples, 0LL, 1.0, 1.0, i);
         if (progress) progress((float)(i + 1) / (float)numEntries);
     }
 
@@ -49,8 +49,7 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
                                0));
     if (!writer) return false;
 
-
-    return writer->writeFromAudioSampleBuffer(output, 0, numSamples);
+    return writer->writeFromAudioSampleBuffer(output, 0, (int)numSamples);
 }
 
 

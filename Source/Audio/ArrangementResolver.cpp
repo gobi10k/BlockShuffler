@@ -248,14 +248,31 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             if (isSimultaneous) {
                 // All picked blocks' bodies start at the same timeline position.
                 // Lead-ins may extend before that position (each clip's own startMark back).
-                const float stackGain = 1.0f / (float)juce::jmax(1, (int)picked.size());
+                //
+                // Pre-roll every playChance gate first so we know the actual survivor
+                // count before computing the mix gain.  This prevents the surviving
+                // entries from being mixed too quietly when some picked blocks fail
+                // their playChance roll (e.g. 4 picked, 3 survive → gain = 1/3 not 1/4).
+                std::vector<bool> playChancePassed(picked.size(), false);
+                for (size_t pi = 0; pi < picked.size(); ++pi)
+                    playChancePassed[pi] = (rng.nextFloat() < picked[pi]->playChance);
+
+                int survivorCount = 0;
+                for (size_t pi = 0; pi < picked.size(); ++pi)
+                    if (playChancePassed[pi] && !picked[pi]->clips.isEmpty())
+                        ++survivorCount;
+
+                const float stackGain = (survivorCount > 0)
+                                      ? 1.0f / (float)survivorCount
+                                      : 1.0f;
 
                 juce::Array<Clip*> simultaneousClips;
                 int64_t maxBodyLen = 0;
                 int64_t bodyStart  = -1;  // latched on first valid clip
 
-                for (auto* b : picked) {
-                    if (rng.nextFloat() >= b->playChance) continue;  // block skipped this time
+                for (size_t pi = 0; pi < picked.size(); ++pi) {
+                    if (!playChancePassed[pi]) continue;  // playChance gate pre-rolled above
+                    auto* b = picked[pi];
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;

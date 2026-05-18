@@ -184,8 +184,6 @@ private:
     juce::ToggleButton blockDoneToggle  { "Mark Block as Done" };
     juce::Label        playChanceLabel;
     juce::Slider       playChanceSlider;
-    juce::Label        overlapLabel;
-    juce::Slider       overlapSlider;
     juce::var          playChanceSliderDragPre;
 
     // ── Project section (shown when no block selected) ───────────────────────
@@ -255,7 +253,6 @@ private:
     bool updatingFromModel = false;
 
     juce::var probSliderDragPre;
-    juce::var overlapSliderDragPre;
 
     void updateFromModel();
     void rebuildLinkRows();
