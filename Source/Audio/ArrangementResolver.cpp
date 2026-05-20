@@ -51,8 +51,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         if (rng.nextFloat() < lnk->swapProbability) {
             auto itA = localPos.find(lnk->blockA.toStdString());
             auto itB = localPos.find(lnk->blockB.toStdString());
-            if (itA != localPos.end() && itB != localPos.end())
+            if (itA != localPos.end() && itB != localPos.end()) {
+                DBG("LINK SWAP: " + lnk->blockA + " pos " + juce::String(itA->second)
+                    + " <-> " + lnk->blockB + " pos " + juce::String(itB->second));
                 std::swap(itA->second, itB->second);  // both sides updated, model untouched
+                DBG("  after: " + lnk->blockA + " pos " + juce::String(itA->second)
+                    + ", " + lnk->blockB + " pos " + juce::String(itB->second));
+            }
         }
     }
 
@@ -116,8 +121,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     auto addOverlay = [&](Block* ob, int64_t overlayStart) {
         if (ob->clips.isEmpty()) return;
         if (rng.nextFloat() >= ob->playChance) return;
+        DBG("OVERLAY PICK: block=" + ob->name + " numClips=" + juce::String(ob->clips.size()));
+        for (auto* c : ob->clips)
+            DBG("  clip=" + c->name + " weight=" + juce::String(c->probability));
         auto* oc = pickClip(*ob, rng);
         if (!oc || !oc->audioBuffer) return;
+        DBG("  picked=" + oc->name);
         auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
         if (!trimmed) return;
         result.entries.add({

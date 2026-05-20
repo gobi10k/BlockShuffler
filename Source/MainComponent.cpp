@@ -217,8 +217,14 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) 
         found = project->blocks.getFirst();
         selectedBlockId = found->id;
     }
-    if (found != selectedBlock) {
-        // Block changed (deleted, recreated, or new project) — full refresh
+    // Use waveformView.getCurrentBlock() in the staleness check as well as the pointer
+    // comparison: after undo/redo the model frees old blocks and allocates new ones,
+    // and the allocator may reuse the same address.  In that case found == selectedBlock
+    // would be true but the waveform's WeakReference (which null-clears on block
+    // destruction) would differ from 'found', revealing the stale state.
+    const bool waveformStale = (waveformView.getCurrentBlock() != found);
+    if (found != selectedBlock || waveformStale) {
+        // Block changed (deleted, recreated, undo/redo, or new project) — full refresh
         selectedBlock = found;
         waveformView.setBlock(found, project->sampleRate, found ? &project->formatManager : nullptr);
         inspectorPanel.setBlock(selectedBlock);
@@ -233,6 +239,27 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     // Arrow keys: forward to waveformView regardless of which child has focus
     if (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey) {
         return waveformView.keyPressed(key);
+    }
+
+    // Delete / Backspace:
+    //   • If a clip is selected in the waveform, delete the clip (existing behaviour).
+    //   • If no clip is selected but a block is selected, delete the block.
+    if (key.getKeyCode() == juce::KeyPress::deleteKey ||
+        key.getKeyCode() == juce::KeyPress::backspaceKey) {
+        if (waveformView.keyPressed(key)) return true;  // clip removed — done
+        if (selectedBlock && project) {
+            // Mirror the logic in BlockStrip::deleteBlock: clear selection before
+            // removing so changeListenerCallback doesn't try to reselect the deleted block.
+            juce::String idToDelete = selectedBlockId;
+            selectedBlock   = nullptr;
+            selectedBlockId = {};
+            waveformView.setBlock(nullptr, project->sampleRate);
+            inspectorPanel.setClip(nullptr, nullptr);
+            inspectorPanel.setBlock(nullptr);
+            project->removeBlock(idToDelete);   // fires sendChangeMessage + recordMutation
+            return true;
+        }
+        return false;
     }
 
     if (key == juce::KeyPress(juce::KeyPress::spaceKey, juce::ModifierKeys::shiftModifier, 0)) {

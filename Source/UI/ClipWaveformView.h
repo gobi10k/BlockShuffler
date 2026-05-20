@@ -104,7 +104,8 @@ public:
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override;
 
     void setBlock(Block* block, double sampleRate, juce::AudioFormatManager* fmtMgr = nullptr);
-    Clip* getSelectedClip() const { return selectedClip; }
+    Clip*  getSelectedClip()  const { return selectedClip; }
+    Block* getCurrentBlock()  const { return currentBlock; }
 
     /** Set the currently playing clip and its position.
         @param clipId The ID of the clip being played (empty = stop playback)
