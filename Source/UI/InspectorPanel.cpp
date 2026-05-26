@@ -275,7 +275,7 @@ void InspectorPanel::rebuildLinkRows() {
 
         const juce::String otherId = (link->blockA == selectedBlock->id)
                                      ? link->blockB : link->blockA;
-        juce::String otherName = otherId;
+        juce::String otherName = "Unknown";   // never show a raw UUID
         juce::Colour labelColor = juce::Colour(LookAndFeel_BlockShuffler::textPrimary);
         if (auto* other = project->getBlockById(otherId)) {
             otherName  = other->name;
@@ -591,9 +591,25 @@ void InspectorPanel::updateFromModel() {
         defaultTempoField.setValue(project->defaultClipTempo, juce::dontSendNotification);
 
     // ── Links section
-    for (auto* row : linkRows)
-        if (auto* link = findLinkForRow(row))
+    for (auto* row : linkRows) {
+        if (auto* link = findLinkForRow(row)) {
             row->slider.setValue(link->swapProbability * 100.0, juce::dontSendNotification);
+
+            // Refresh label text so block renames (and undo/redo) are always current.
+            const juce::String otherId = (row->blockA == (selectedBlock ? selectedBlock->id : juce::String{}))
+                                         ? row->blockB : row->blockA;
+            juce::String otherName = "Unknown";
+            juce::Colour labelColor = juce::Colour(LookAndFeel_BlockShuffler::textPrimary);
+            if (project) {
+                if (auto* other = project->getBlockById(otherId)) {
+                    otherName  = other->name;
+                    labelColor = other->color;
+                }
+            }
+            row->label.setText("<-> " + otherName, juce::dontSendNotification);
+            row->label.setColour(juce::Label::textColourId, labelColor);
+        }
+    }
 
     updatingFromModel = false;
     repaint();

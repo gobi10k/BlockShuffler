@@ -19,10 +19,12 @@ void BlockLinkOverlay::setLinkingSourceX(int x) {
 void BlockLinkOverlay::paint(juce::Graphics& g) {
     if (!project) return;
 
-    const int cy    = getHeight() / 2;
-    const int arcH  = 36;  // arc peak height above centre line
+    const int cy       = getHeight() / 2;
+    const int arcHBase = 36;   // arc peak height for the first link
+    const int arcHStep = 22;   // additional height per subsequent link (prevents overlap)
 
     // Draw arcs for all links
+    int linkIndex = 0;
     for (auto* link : project->links) {
         bool hasA = blockCentreX.contains(link->blockA);
         bool hasB = blockCentreX.contains(link->blockB);
@@ -31,6 +33,8 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         float x1 = (float)blockCentreX[link->blockA];
         float x2 = (float)blockCentreX[link->blockB];
         float midX = (x1 + x2) * 0.5f;
+        // Each link gets a taller arc than the previous so labels never share a Y position.
+        int   arcH  = arcHBase + linkIndex * arcHStep;
         float peakY = (float)(cy - arcH);
 
         juce::Path arc;
@@ -45,10 +49,11 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
                           juce::PathStrokeType::curved,
                           juce::PathStrokeType::rounded));
 
-        // Labels at arc peak: "NameA ↔ NameB" above, then probability pill
+        // Labels at arc peak: "NameA ↔ NameB" above, then probability pill.
+        // Names fall back to "?" if the block no longer exists.
         g.setColour(col.withAlpha(1.0f));
-        juce::String nameA = link->blockA;
-        juce::String nameB = link->blockB;
+        juce::String nameA = "?";
+        juce::String nameB = "?";
         if (auto* ba = project->getBlockById(link->blockA)) nameA = ba->name;
         if (auto* bb = project->getBlockById(link->blockB)) nameB = bb->name;
         juce::String labelText = nameA + " <-> " + nameB;
@@ -69,6 +74,8 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
         g.setFont(probFont);
         g.drawText(probText, pill, juce::Justification::centred);
+
+        ++linkIndex;
     }
 
     // Linking mode indicator
