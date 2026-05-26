@@ -2,7 +2,7 @@ name: Build Windows
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, fix-audit-issues-2BRgG  ]
   pull_request:
     branches: [ master ]
 
