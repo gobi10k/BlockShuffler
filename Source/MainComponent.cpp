@@ -510,6 +510,7 @@ void MainComponent::loadProject(const juce::File& file) {
     selectedBlock   = nullptr;
     selectedBlockId = {};
     blockStrip.init(*project, &linkOverlay);
+    blockStrip.resized();  // synchronous layout — blocks are visible immediately after load
     waveformView.setBlock(nullptr, project->sampleRate);
     inspectorPanel.setClip(nullptr, nullptr);
 
@@ -517,7 +518,6 @@ void MainComponent::loadProject(const juce::File& file) {
         blockStrip.selectBlock(project->blocks.getFirst());  // fires onBlockSelected → applyBlockSelection
     }
     waveformView.defaultTempo = project->defaultClipTempo;
-    project->sendChangeMessage();  // ensures BlockStrip runs its async rebuildBlocks()+resized()
 }
 
 void MainComponent::updateTimeDisplay() {

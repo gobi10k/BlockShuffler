@@ -217,7 +217,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
                 bm->setProperty("stackPlayMode",    bVar.getProperty("stackPlayMode", "sequential"));
                 bm->setProperty("isOverlapping",    bVar.getProperty("isOverlapping", false));
                 bm->setProperty("overlapProbability", bVar.getProperty("overlapProb", 0.0));
-                bm->setProperty("isDone",           bVar.getProperty("isDone",        false));
+                // isDone is cosmetic only — not written to export manifest
 
                 // Clips
                 juce::Array<juce::var> modelClips;
@@ -233,7 +233,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
                         cm->setProperty("retainLeadInTempo", cVar.getProperty("retainLeadInTempo",false));
                         cm->setProperty("retainTailTempo",   cVar.getProperty("retainTailTempo",  false));
                         cm->setProperty("isSongEnder",       cVar.getProperty("isSongEnder",      false));
-                        cm->setProperty("isDone",            cVar.getProperty("isDone",           false));
+                        // isDone is cosmetic only — not written to export manifest
                         cm->setProperty("startMark",         cVar.getProperty("startMark",        "0"));
                         cm->setProperty("endMark",           cVar.getProperty("endMark",          "0"));
 
