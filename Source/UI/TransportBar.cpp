@@ -21,6 +21,7 @@ TransportBar::TransportBar() {
                                                 BinaryData::icon_pngSize);
 #endif
     saveBtn  .onClick = [this] { if (onSave)   onSave();   };
+    saveAsBtn.onClick = [this] { if (onSaveAs) onSaveAs(); };
     openBtn  .onClick = [this] { if (onOpen)   onOpen();   };
 
     // Mark Play as a primary button so drawButtonBackground applies the accent treatment
@@ -31,6 +32,7 @@ TransportBar::TransportBar() {
     stopBtn  .setTooltip("Stop and rewind");
     exportBtn.setTooltip("Export arrangement to WAV, FLAC, or BSF bundle");
     saveBtn  .setTooltip("Save project  [Cmd+S]");
+    saveAsBtn.setTooltip("Save project to a new location  [Cmd+Shift+S]");
     openBtn  .setTooltip("Open project  [Cmd+O]");
 
     addAndMakeVisible(rewindBtn);
@@ -38,6 +40,7 @@ TransportBar::TransportBar() {
     addAndMakeVisible(stopBtn);
     addAndMakeVisible(exportBtn);
     addAndMakeVisible(saveBtn);
+    addAndMakeVisible(saveAsBtn);
     addAndMakeVisible(openBtn);
 }
 
@@ -104,9 +107,11 @@ void TransportBar::resized() {
     area.removeFromLeft(gap * 2);
 
     // Right: file operations
-    openBtn.setBounds(area.removeFromRight(60).withSizeKeepingCentre(60, btnH));
+    openBtn  .setBounds(area.removeFromRight(60).withSizeKeepingCentre(60, btnH));
     area.removeFromRight(gap);
-    saveBtn.setBounds(area.removeFromRight(60).withSizeKeepingCentre(60, btnH));
+    saveBtn  .setBounds(area.removeFromRight(60).withSizeKeepingCentre(60, btnH));
+    area.removeFromRight(gap);
+    saveAsBtn.setBounds(area.removeFromRight(68).withSizeKeepingCentre(68, btnH));
     area.removeFromRight(gap * 2);
 
     // Center: split — time display on left half, branding on right half

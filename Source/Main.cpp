@@ -101,8 +101,17 @@ public:
     const juce::String getApplicationVersion() override { return "0.1.0"; }
     bool moreThanOneInstanceAllowed() override           { return true; }
 
-    void initialise(const juce::String& /*commandLine*/) override {
+    void initialise(const juce::String& commandLine) override {
         mainWindow = std::make_unique<MainWindow>(getApplicationName());
+        // Open a .bsp file passed on the command line (double-click from Finder/Explorer).
+        if (commandLine.isNotEmpty()) {
+            juce::String path = commandLine.trim();
+            if (path.startsWithChar('"') && path.endsWithChar('"'))
+                path = path.substring(1, path.length() - 1);
+            juce::File f(path);
+            if (f.existsAsFile() && f.hasFileExtension(".bsp"))
+                mainWindow->openFile(f);
+        }
     }
 
     void shutdown() override {
@@ -179,6 +188,11 @@ public:
 
         void closeButtonPressed() override {
             juce::JUCEApplication::getInstance()->systemRequestedQuit();
+        }
+
+        void openFile(const juce::File& file) {
+            if (mainComponent)
+                mainComponent->loadProject(file);
         }
 
     private:

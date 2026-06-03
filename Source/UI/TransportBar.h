@@ -17,6 +17,7 @@ public:
     std::function<void()> onRewind;
     std::function<void()> onExport;
     std::function<void()> onSave;
+    std::function<void()> onSaveAs;
     std::function<void()> onOpen;
 
     void setIsPlaying(bool playing);
@@ -28,6 +29,7 @@ private:
     juce::TextButton stopBtn   { "Stop" };
     juce::TextButton exportBtn { "Export" };
     juce::TextButton saveBtn   { "Save" };
+    juce::TextButton saveAsBtn { "Save As" };
     juce::TextButton openBtn   { "Open" };
 
     bool   isPlaying   = false;

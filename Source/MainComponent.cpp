@@ -33,8 +33,9 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     transportBar.onStop   = [this] { onStopPressed();   };
     transportBar.onRewind = [this] { onRewindPressed(); };
     transportBar.onExport = [this] { exportProject(); };
-    transportBar.onSave   = [this] { saveProject(); };
-    transportBar.onOpen   = [this] { openProject(); };
+    transportBar.onSave   = [this] { saveProject();   };
+    transportBar.onSaveAs = [this] { saveProjectAs(); };
+    transportBar.onOpen   = [this] { openProject();   };
 
     blockStrip.onClipDropped = [this](const juce::String& clipId, const juce::String& targetBlockId) {
         if (!project) return;
@@ -270,6 +271,10 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
         onPlayPressed();
         return true;
     }
+    if (key.isKeyCode('S') && key.getModifiers().isCommandDown() && key.getModifiers().isShiftDown()) {
+        saveProjectAs();
+        return true;
+    }
     if (key.isKeyCode('S') && key.getModifiers().isCommandDown()) {
         saveProject();
         return true;
@@ -463,8 +468,10 @@ void MainComponent::saveProjectAs() {
             auto result = fc.getResult();
             if (result != juce::File{}) {
                 auto f = result.withFileExtension(".bsp");
-                if (project->saveToFile(f))
+                if (project->saveToFile(f)) {
                     currentProjectFile = f;
+                    updateWindowTitle(f.getFileNameWithoutExtension());
+                }
             }
         });
 }
@@ -490,15 +497,13 @@ void MainComponent::loadProject(const juce::File& file) {
     auto newProject = std::make_unique<Project>();
     if (!newProject->loadFromFile(file)) return;
 
-    // Warn about missing audio files before swapping the project in
-    if (!newProject->missingFilesOnLoad.isEmpty()) {
-        juce::String msg = "The following audio files could not be found and will be silent:\n\n"
-                         + newProject->missingFilesOnLoad.joinIntoString("\n");
-        juce::NativeMessageBox::showMessageBoxAsync(
-            juce::MessageBoxIconType::WarningIcon,
-            "Missing Audio Files",
-            msg);
-    }
+    // Clear UI references to the old project BEFORE destroying it so no component
+    // holds a dangling pointer during teardown.
+    selectedBlock   = nullptr;
+    selectedBlockId = {};
+    waveformView.setBlock(nullptr, project->sampleRate);
+    inspectorPanel.setClip(nullptr, nullptr);
+    inspectorPanel.setBlock(nullptr);
 
     project->removeChangeListener(this);
     project = std::move(newProject);
@@ -507,17 +512,27 @@ void MainComponent::loadProject(const juce::File& file) {
     currentProjectFile = file;
     inspectorPanel.setProject(project.get());
 
-    selectedBlock   = nullptr;
-    selectedBlockId = {};
     blockStrip.init(*project, &linkOverlay);
     blockStrip.resized();  // synchronous layout — blocks are visible immediately after load
-    waveformView.setBlock(nullptr, project->sampleRate);
-    inspectorPanel.setClip(nullptr, nullptr);
 
-    if (!project->blocks.isEmpty()) {
+    if (!project->blocks.isEmpty())
         blockStrip.selectBlock(project->blocks.getFirst());  // fires onBlockSelected → applyBlockSelection
-    }
+
     waveformView.defaultTempo = project->defaultClipTempo;
+    updateWindowTitle(file.getFileNameWithoutExtension());
+
+    if (!project->missingFilesOnLoad.isEmpty()) {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon,
+            "Missing Audio Files",
+            "The following audio files could not be found and will be silent:\n\n"
+            + project->missingFilesOnLoad.joinIntoString("\n"));
+    }
+}
+
+void MainComponent::updateWindowTitle(const juce::String& projectName) {
+    if (auto* dw = dynamic_cast<juce::DocumentWindow*>(getTopLevelComponent()))
+        dw->setName("BlockShuffler — " + projectName);
 }
 
 void MainComponent::updateTimeDisplay() {
