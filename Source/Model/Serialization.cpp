@@ -5,7 +5,7 @@
 namespace BlockShuffler {
 namespace Serialization {
 
-juce::var projectToJSON(const Project& project) {
+juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
     auto* root = new juce::DynamicObject();
     root->setProperty("version", 1);
     root->setProperty("name", project.name);
@@ -51,7 +51,15 @@ juce::var projectToJSON(const Project& project) {
             cObj->setProperty("id",                 clip->id);
             cObj->setProperty("name",               clip->name);
             cObj->setProperty("color",              clip->color.toString());
-            cObj->setProperty("audioFile",          clip->audioFile.getFullPathName());
+            // Store relative path (with forward slashes) when saving to disk so projects
+            // are portable across platforms and moveable directories.
+            // Absolute path is used for undo/redo snapshots (baseDir is invalid there).
+            juce::String audioPathStr;
+            if (baseDir.isDirectory() && clip->audioFile != juce::File{})
+                audioPathStr = clip->audioFile.getRelativePathFrom(baseDir).replaceCharacter('\\', '/');
+            else
+                audioPathStr = clip->audioFile.getFullPathName();
+            cObj->setProperty("audioFile", audioPathStr);
             // nativeSampleRate is not persisted — it is recovered by loadFromFile on project open.
             // Store large int as string to avoid double precision loss
             cObj->setProperty("startMark",          juce::String(clip->startMark));
@@ -87,7 +95,7 @@ juce::var projectToJSON(const Project& project) {
     return juce::var(root);
 }
 
-bool projectFromJSON(const juce::var& json, Project& project) {
+bool projectFromJSON(const juce::var& json, Project& project, const juce::File& baseDir) {
     if (!json.isObject()) return false;
 
     project.name             = json.getProperty("name",            "Untitled").toString();
@@ -141,7 +149,21 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                     clip->name             = cVar.getProperty("name", "Clip").toString();
                     clip->color            = juce::Colour::fromString(
                                                 cVar.getProperty("color", "FFFFFFFF").toString());
-                    clip->audioFile        = juce::File(cVar.getProperty("audioFile", "").toString());
+                    // Resolve audio path: relative paths are resolved against baseDir (project dir).
+                    // Absolute paths (from undo/redo snapshots or old project files) are used as-is.
+                    {
+                        const juce::String pathStr = cVar.getProperty("audioFile", "").toString();
+                        if (pathStr.isEmpty()) {
+                            clip->audioFile = juce::File{};
+                        } else if (pathStr.startsWithChar('/') ||
+                                   (pathStr.length() >= 2 && pathStr[1] == ':')) {
+                            clip->audioFile = juce::File(pathStr);  // already absolute
+                        } else if (baseDir.isDirectory()) {
+                            clip->audioFile = baseDir.getChildFile(pathStr);  // relative → absolute
+                        } else {
+                            clip->audioFile = juce::File(pathStr);  // fallback for in-memory snapshots
+                        }
+                    }
                     clip->probability      = (float)(double)cVar.getProperty("probability",     1.0);
                     clip->tempo            = (double)cVar.getProperty("tempo",            120.0);
                     clip->retainLeadInTempo= (bool)cVar.getProperty("retainLeadInTempo",  false);

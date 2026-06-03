@@ -231,7 +231,8 @@ bool Project::fromJSON(const juce::var& json) {
 }
 
 bool Project::saveToFile(const juce::File& file) {
-    auto json = toJSON();
+    // Pass project directory so audio paths are stored relative to the project file.
+    auto json = Serialization::projectToJSON(*this, file.getParentDirectory());
     auto jsonString = juce::JSON::toString(json);
     return file.replaceWithText(jsonString);
 }
@@ -241,7 +242,8 @@ bool Project::loadFromFile(const juce::File& file) {
     auto jsonString = file.loadFileAsString();
     auto json = juce::JSON::parse(jsonString);
     if (json.isVoid()) return false;
-    return fromJSON(json);
+    // Pass project directory so relative audio paths resolve correctly on any platform.
+    return Serialization::projectFromJSON(json, *this, file.getParentDirectory());
 }
 
 } // namespace BlockShuffler
