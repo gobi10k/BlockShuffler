@@ -35,13 +35,20 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         blockById[b->id.toStdString()] = b;
 
     // ── 2. Shuffle links and apply bidirectional position swaps ─────────────
-    // Work on a local position map — never touch block->position directly.
+    // Work on local position and stackGroup maps — never touch block fields directly.
     // The resolver must not mutate the project model; direct writes would cause
     // positions to drift across successive resolve() calls.
     std::unordered_map<std::string, int> localPos;
     localPos.reserve((size_t)project.blocks.size());
     for (auto* b : project.blocks)
         localPos[b->id.toStdString()] = b->position;
+
+    // Mirror stackGroup locally so that swapped blocks can be detached from their
+    // stacks for this resolution pass without affecting the model.
+    std::unordered_map<std::string, int> localStackGroup;
+    localStackGroup.reserve((size_t)project.blocks.size());
+    for (auto* b : project.blocks)
+        localStackGroup[b->id.toStdString()] = b->stackGroup;
 
     std::vector<BlockLink*> shuffledLinks;
     shuffledLinks.reserve((size_t)project.links.size());
@@ -55,8 +62,18 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         if (rng.nextFloat() < lnk->swapProbability) {
             auto itA = localPos.find(lnk->blockA.toStdString());
             auto itB = localPos.find(lnk->blockB.toStdString());
-            if (itA != localPos.end() && itB != localPos.end())
+            if (itA != localPos.end() && itB != localPos.end()) {
                 std::swap(itA->second, itB->second);  // both sides updated, model untouched
+
+                // Detach swapped blocks from their stacks for this pass.
+                // Without this, a block retains its stackGroup after being swapped to a
+                // new position and gets grouped into the same slot as its former stack
+                // partner — causing one of the two to be silently dropped by stackPlayCount.
+                auto sgItA = localStackGroup.find(lnk->blockA.toStdString());
+                auto sgItB = localStackGroup.find(lnk->blockB.toStdString());
+                if (sgItA != localStackGroup.end() && sgItA->second >= 0) sgItA->second = -1;
+                if (sgItB != localStackGroup.end() && sgItB->second >= 0) sgItB->second = -1;
+            }
         }
     }
 
@@ -88,7 +105,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     std::unordered_map<int, size_t> sgToSlot;
 
     for (auto* b : sorted) {
-        int sg = b->stackGroup;
+        auto sgIt = localStackGroup.find(b->id.toStdString());
+        int sg = (sgIt != localStackGroup.end()) ? sgIt->second : b->stackGroup;
         if (sg < 0) {
             slots.push_back({{b}});
         } else {

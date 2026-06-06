@@ -511,7 +511,9 @@ void ClipWaveformView::rebuildRows() {
         row->setSelected(clipPtr == selectedClip);
 
         float rawPct = clipPtr->probability * 100.0f;
-        float effPct = (totalWeight > 0.0f) ? (clipPtr->probability / totalWeight) * 100.0f : 0.0f;
+        float effPct = (totalWeight > 0.0f)
+                     ? (clipPtr->probability / totalWeight) * 100.0f
+                     : 100.0f / (float)currentBlock->clips.size();
         row->setTooltip(clipPtr->name
             + " | Weight: " + juce::String((int)rawPct) + "%"
             + " | Effective: " + juce::String(effPct, 1) + "%");
