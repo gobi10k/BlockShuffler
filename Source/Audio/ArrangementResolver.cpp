@@ -35,20 +35,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         blockById[b->id.toStdString()] = b;
 
     // ── 2. Shuffle links and apply bidirectional position swaps ─────────────
-    // Work on local position and stackGroup maps — never touch block fields directly.
+    // Work on a local position map — never touch block->position directly.
     // The resolver must not mutate the project model; direct writes would cause
     // positions to drift across successive resolve() calls.
     std::unordered_map<std::string, int> localPos;
     localPos.reserve((size_t)project.blocks.size());
     for (auto* b : project.blocks)
         localPos[b->id.toStdString()] = b->position;
-
-    // Mirror stackGroup locally so that swapped blocks can be detached from their
-    // stacks for this resolution pass without affecting the model.
-    std::unordered_map<std::string, int> localStackGroup;
-    localStackGroup.reserve((size_t)project.blocks.size());
-    for (auto* b : project.blocks)
-        localStackGroup[b->id.toStdString()] = b->stackGroup;
 
     std::vector<BlockLink*> shuffledLinks;
     shuffledLinks.reserve((size_t)project.links.size());
@@ -58,23 +51,43 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         int j = rng.nextInt(i + 1);
         std::swap(shuffledLinks[(size_t)i], shuffledLinks[(size_t)j]);
     }
-    for (auto* lnk : shuffledLinks) {
-        if (rng.nextFloat() < lnk->swapProbability) {
-            auto itA = localPos.find(lnk->blockA.toStdString());
-            auto itB = localPos.find(lnk->blockB.toStdString());
-            if (itA != localPos.end() && itB != localPos.end()) {
-                std::swap(itA->second, itB->second);  // both sides updated, model untouched
 
-                // Detach swapped blocks from their stacks for this pass.
-                // Without this, a block retains its stackGroup after being swapped to a
-                // new position and gets grouped into the same slot as its former stack
-                // partner — causing one of the two to be silently dropped by stackPlayCount.
-                auto sgItA = localStackGroup.find(lnk->blockA.toStdString());
-                auto sgItB = localStackGroup.find(lnk->blockB.toStdString());
-                if (sgItA != localStackGroup.end() && sgItA->second >= 0) sgItA->second = -1;
-                if (sgItB != localStackGroup.end() && sgItB->second >= 0) sgItB->second = -1;
-            }
-        }
+    // Pre-roll every link's swap decision.
+    //
+    // Cross-stack links (blocks in different stacks, or at least one standalone):
+    //   Apply the swap to localPos immediately.  The swapped block then has a
+    //   different position than its stack mates; the position-equality guard in
+    //   slot-building detects this and treats it as standalone for this pass.
+    //
+    // Same-stack links (both blocks share the same stackGroup >= 0):
+    //   Swapping localPos has no effect (all stack mates already share one position
+    //   value, so swapping A ↔ A is a no-op).  Instead, the decision is carried
+    //   forward into the sequential-stack slot loop, where it overrides the random
+    //   weighted-sample order to produce a deterministic play order.
+    struct LinkDecision { BlockLink* link; bool triggered; };
+    std::vector<LinkDecision> linkDecisions;
+    linkDecisions.reserve(shuffledLinks.size());
+
+    for (auto* lnk : shuffledLinks) {
+        bool triggered = (rng.nextFloat() < lnk->swapProbability);
+        linkDecisions.push_back({lnk, triggered});
+        if (!triggered) continue;
+
+        auto itBa = blockById.find(lnk->blockA.toStdString());
+        auto itBb = blockById.find(lnk->blockB.toStdString());
+        bool sameStack = (itBa != blockById.end() && itBb != blockById.end()
+                          && itBa->second->stackGroup >= 0
+                          && itBa->second->stackGroup == itBb->second->stackGroup);
+        if (sameStack) continue;  // order enforced in sequential slot loop
+
+        // Cross-stack: swap the two specific blocks in localPos.
+        // Stack mates of either block are NOT touched — they stay at the original
+        // slot position.  The position-equality guard in slot-building below will
+        // separate the swapped block from its former stack mates.
+        auto itA = localPos.find(lnk->blockA.toStdString());
+        auto itB = localPos.find(lnk->blockB.toStdString());
+        if (itA != localPos.end() && itB != localPos.end())
+            std::swap(itA->second, itB->second);  // model untouched
     }
 
     // ── 3. Sort by resolved positions ────────────────────────────────────────
@@ -105,14 +118,27 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     std::unordered_map<int, size_t> sgToSlot;
 
     for (auto* b : sorted) {
-        auto sgIt = localStackGroup.find(b->id.toStdString());
-        int sg = (sgIt != localStackGroup.end()) ? sgIt->second : b->stackGroup;
+        int sg = b->stackGroup;
+        auto posIt = localPos.find(b->id.toStdString());
+        int bPos = (posIt != localPos.end()) ? posIt->second : b->position;
+
         if (sg < 0) {
             slots.push_back({{b}});
         } else {
             auto it = sgToSlot.find(sg);
             if (it != sgToSlot.end()) {
-                slots[it->second].blocks.push_back(b);
+                // Only group into this slot when the block's resolved position matches.
+                // A cross-stack-swapped block ends up at a different position than its
+                // former stack mates; it must stand alone rather than be pooled with them
+                // (pooling would silently drop it or its mate via stackPlayCount).
+                auto* firstBlock = slots[it->second].blocks[0];
+                auto fposIt = localPos.find(firstBlock->id.toStdString());
+                int slotPos = (fposIt != localPos.end()) ? fposIt->second : firstBlock->position;
+                if (slotPos == bPos) {
+                    slots[it->second].blocks.push_back(b);
+                } else {
+                    slots.push_back({{b}});
+                }
             } else {
                 sgToSlot[sg] = slots.size();
                 slots.push_back({{b}});
@@ -344,6 +370,29 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
             } else {
                 // Sequential: each picked block occupies its own time slot.
+
+                // ── Same-stack link ordering ───────────────────────────────────
+                // For any link whose both endpoints are in this picked list, enforce
+                // a deterministic play order instead of the random weighted-sample
+                // order:  triggered → blockB before blockA,  not-triggered → blockA
+                // before blockB.  This guarantees a 100% swap probability always
+                // produces the same sequence every play.  Cross-stack links have at
+                // most one endpoint in picked, so they are silently skipped here.
+                for (const auto& ld : linkDecisions) {
+                    Block* la = nullptr;
+                    Block* lb = nullptr;
+                    for (auto* p : picked) {
+                        if (p->id == ld.link->blockA) la = p;
+                        if (p->id == ld.link->blockB) lb = p;
+                    }
+                    if (!la || !lb) continue;
+                    auto itA = std::find(picked.begin(), picked.end(), la);
+                    auto itB = std::find(picked.begin(), picked.end(), lb);
+                    bool aIsFirst = (itA < itB);
+                    if ( ld.triggered && aIsFirst)  std::swap(*itA, *itB);
+                    if (!ld.triggered && !aIsFirst) std::swap(*itA, *itB);
+                }
+
                 for (auto* b : picked) {
                     if (songEnded) break;
                     if (rng.nextFloat() >= b->playChance) continue;  // block skipped this time
