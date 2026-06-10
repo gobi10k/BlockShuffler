@@ -368,7 +368,6 @@ void MainComponent::playBlock(const juce::String& blockId) {
     entry.blockId            = blockId;
     entry.timelinePos        = clip->startMark;  // body starts after lead-in
     entry.gain               = 1.0f;
-    entry.isOverlay          = false;
 
     ResolvedArrangement single;
     single.sampleRate           = project->sampleRate;
@@ -560,13 +559,12 @@ void MainComponent::updateTimeDisplay() {
     juce::String nowPlayingClipId;
     int64_t clipSamplePos = 0;
 
-    // Forward scan through primary (non-overlay) entries only.
-    // Pick the first entry whose body has not yet ended — this naturally handles:
+    // Forward scan through entries — pick the first entry whose body has not yet ended.
+    // This naturally handles:
     //   • lead-in (headSamples < timelinePos): clamp clipSamplePos to startMark
     //   • body (headSamples in [timelinePos, bodyEnd)): compute exact position
     //   • tail / gap (headSamples >= bodyEnd): move on to next entry
     for (const auto& entry : currentArrangement.entries) {
-        if (entry.isOverlay) continue;
         int64_t bodyEnd = entry.timelinePos + (entry.endMark - entry.startMark);
         if (headSamples < bodyEnd) {
             nowPlayingBlockId = entry.blockId;
@@ -578,16 +576,12 @@ void MainComponent::updateTimeDisplay() {
     }
 
     // Fallback: playhead is past all entries (playing through the tail of the last block).
-    if (nowPlayingBlockId.isEmpty()) {
-        for (int i = currentArrangement.entries.size() - 1; i >= 0; --i) {
-            const auto& e = currentArrangement.entries.getReference(i);
-            if (!e.isOverlay) {
-                nowPlayingBlockId = e.blockId;
-                nowPlayingClipId  = e.clipId;
-                clipSamplePos     = e.endMark;
-                break;
-            }
-        }
+    if (nowPlayingBlockId.isEmpty() && !currentArrangement.entries.isEmpty()) {
+        const auto& e = currentArrangement.entries.getReference(
+            currentArrangement.entries.size() - 1);
+        nowPlayingBlockId = e.blockId;
+        nowPlayingClipId  = e.clipId;
+        clipSamplePos     = e.endMark;
     }
 
     // Follow the playing block: switch waveform + inspector when block changes

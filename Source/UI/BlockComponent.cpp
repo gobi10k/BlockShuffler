@@ -126,27 +126,12 @@ void BlockComponent::paint(juce::Graphics& g) {
     const float borderCr = tinyTile ? juce::jmin(cr, (float)full.getHeight() * 0.4f) : cr;
     if (active) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
-        if (block->isOverlapping) {
-            juce::Path sp; sp.addRoundedRectangle(inner, borderCr);
-            juce::Path dp; float dl[] = {6.0f, 3.0f};
-            juce::PathStrokeType(2.0f).createDashedStroke(dp, sp, dl, 2);
-            g.fillPath(dp);
-        } else {
-            g.drawRoundedRectangle(inner, borderCr, 2.0f);
-        }
+        g.drawRoundedRectangle(inner, borderCr, 2.0f);
     } else {
         float ba = hovered ? 0.85f : 0.55f;
         g.setColour(block->color.withAlpha(tinyTile ? 0.0f : ba));  // border already merged into bg for tiny
-        if (!tinyTile) {
-            if (block->isOverlapping) {
-                juce::Path sp; sp.addRoundedRectangle(inner, borderCr);
-                juce::Path dp; float dl[] = {5.0f, 3.0f};
-                juce::PathStrokeType(1.0f).createDashedStroke(dp, sp, dl, 2);
-                g.fillPath(dp);
-            } else {
-                g.drawRoundedRectangle(inner, borderCr, 1.0f);
-            }
-        }
+        if (!tinyTile)
+            g.drawRoundedRectangle(inner, borderCr, 1.0f);
     }
 
     // ── 5. Bottom readout (full-size tiles only) ──────────────────────────────
@@ -352,7 +337,6 @@ void BlockComponent::showContextMenu() {
     menu.addItem(3, "Stack with...");
     menu.addItem(9, "Unstack", block && block->stackGroup >= 0);
     menu.addSeparator();
-    menu.addItem(6, "Set as Overlapping", true, block && block->isOverlapping);
     menu.addItem(4, "Mark as Done",       true, block && block->isDone);
     menu.addSeparator();
     menu.addItem(5, "Delete Block");
@@ -376,10 +360,6 @@ void BlockComponent::showContextMenu() {
             if (self->onStackRequested) self->onStackRequested(self->block->id);
         } else if (result == 4 && self->block) {
             self->block->isDone = !self->block->isDone;
-            self->repaint();
-            if (self->onUndoableMutation) self->onUndoableMutation(pre);
-        } else if (result == 6 && self->block) {
-            self->block->isOverlapping = !self->block->isOverlapping;
             self->repaint();
             if (self->onUndoableMutation) self->onUndoableMutation(pre);
         } else if (result == 7 && self->block) {

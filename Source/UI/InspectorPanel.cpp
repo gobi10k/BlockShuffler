@@ -99,17 +99,6 @@ InspectorPanel::InspectorPanel()
     playChanceSlider.addListener(this);
     addAndMakeVisible(playChanceSlider);
 
-    // ── "Plays Over" section ─────────────────────────────────────────────────
-    setupLabel(this, playsOverTitle, "PLAYS OVER", 11.0f, true);
-
-    playsOverHint.setText("Stack with a block to configure clip targeting.",
-                          juce::dontSendNotification);
-    playsOverHint.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
-    playsOverHint.setColour(juce::Label::textColourId,
-                            juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-    playsOverHint.setJustificationType(juce::Justification::topLeft);
-    addAndMakeVisible(playsOverHint);
-
     // ── Stack settings section ───────────────────────────────────────────────
     stackSectionTitle.setText("STACK SETTINGS", juce::dontSendNotification);
     stackSectionTitle.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
@@ -167,14 +156,14 @@ InspectorPanel::InspectorPanel()
     setupLabel(this, linksTitle, "LINKS", 11.0f, true);
 
     // Tooltips
-    probSlider     .setTooltip("Relative weight for clip selection. For overlapping blocks: if the overlay triggers, this weight determines which clip plays.");
+    probSlider     .setTooltip("Relative weight for clip selection within a block.");
     tempoField     .setTooltip("BPM of this clip - sets the tempo grid for the waveform editor");
     songEnderToggle.setTooltip("If this clip plays, the arrangement stops after it ends");
     clipDoneToggle .setTooltip("Mark this clip as done (visual flag only — does not affect playback or export)");
     retainLeadIn   .setTooltip("Play the lead-in at its original speed instead of stretching");
     retainTail     .setTooltip("Play the tail at its original speed instead of stretching");
     blockDoneToggle.setTooltip("Mark this block as done (visual flag only — does not affect playback or export)");
-    playChanceSlider.setTooltip("Chance (%) this block plays. For overlapping blocks: controls whether the overlay triggers at all.");
+    playChanceSlider.setTooltip("Chance (%) this block is included in the arrangement.");
     playModeCombo  .setTooltip("Sequential: play chosen blocks one after another. Simultaneous: layer them.");
 
     updateFromModel();
@@ -196,7 +185,6 @@ void InspectorPanel::setBlock(Block* block) {
     rebuildLinkRows();
     rebuildStackCountRows();
     rebuildStackBlockLabels();
-    rebuildPlaysOverRows();
     updateFromModel();
     resized();
 }
@@ -228,18 +216,6 @@ void InspectorPanel::refreshValues() {
             }
         }
 
-        // Rebuild plays-over rows if sibling clip count changed
-        if (selectedBlock->isOverlapping && selectedBlock->stackGroup >= 0) {
-            int sibCount = 0;
-            for (auto* b : project->blocks)
-                if (b->stackGroup == selectedBlock->stackGroup &&
-                    !b->isOverlapping && b != selectedBlock)
-                    sibCount += b->clips.size();
-            if (sibCount != lastBuiltPlaysOverClipCount) {
-                rebuildPlaysOverRows();
-                resized();
-            }
-        }
     }
     updateFromModel();
 }
@@ -340,11 +316,11 @@ void InspectorPanel::rebuildStackCountRows() {
             if (!selectedBlock || updatingFromModel || !project) return;
             int idx = stackCountRows.indexOf(row);
             if (idx < 0 || idx >= selectedBlock->stackPlayCount.values.size()) return;
-            // Clamp to number of non-overlapping blocks in this stack (isDone is cosmetic —
+            // Clamp to total blocks in this stack (isDone is cosmetic —
             // the resolver plays Done blocks, so they count toward the max)
             int maxPlayable = 0;
             for (auto* b : project->blocks)
-                if (b->stackGroup == selectedBlock->stackGroup && !b->isOverlapping)
+                if (b->stackGroup == selectedBlock->stackGroup)
                     ++maxPlayable;
             maxPlayable = juce::jmax(1, maxPlayable);
             int cur = selectedBlock->stackPlayCount.values[idx];
@@ -430,31 +406,6 @@ void InspectorPanel::rebuildStackBlockLabels() {
 
 // ── Plays-over rows ───────────────────────────────────────────────────────────
 
-void InspectorPanel::rebuildPlaysOverRows() {
-    for (auto* row : playsOverRows)
-        removeChildComponent(&row->toggle);
-    playsOverRows.clear();
-    lastBuiltPlaysOverClipCount = 0;
-
-    if (!selectedBlock || !project || !selectedBlock->isOverlapping ||
-        selectedBlock->stackGroup < 0)
-        return;
-
-    for (auto* block : project->blocks) {
-        if (block->stackGroup != selectedBlock->stackGroup) continue;
-        if (block->isOverlapping || block == selectedBlock) continue;
-        for (auto* clip : block->clips) {
-            auto* row = playsOverRows.add(new PlaysOverRow());
-            row->clipId = clip->id;
-            row->toggle.setButtonText(clip->name + " (" + block->name + ")");
-            row->toggle.setColour(juce::ToggleButton::textColourId,
-                                  juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
-            row->toggle.addListener(this);
-            addAndMakeVisible(row->toggle);
-            ++lastBuiltPlaysOverClipCount;
-        }
-    }
-}
 
 // ── updateFromModel ───────────────────────────────────────────────────────────
 
@@ -515,22 +466,8 @@ void InspectorPanel::updateFromModel() {
         blockTempoField.setValue(bt, juce::dontSendNotification);
     }
 
-    // ── "Plays Over" section
-    const bool showPlaysOver = hasBlock && selectedBlock->isOverlapping;
-    playsOverTitle.setVisible(showPlaysOver);
-    const bool inStack = hasBlock && selectedBlock->stackGroup >= 0;
-    playsOverHint.setVisible(showPlaysOver && (!inStack || playsOverRows.isEmpty()));
-    for (auto* row : playsOverRows)
-        row->toggle.setVisible(showPlaysOver && inStack);
-    if (showPlaysOver && inStack) {
-        for (auto* row : playsOverRows) {
-            bool checked = selectedBlock->allowedParentClipIds.isEmpty() ||
-                           selectedBlock->allowedParentClipIds.contains(row->clipId);
-            row->toggle.setToggleState(checked, juce::dontSendNotification);
-        }
-    }
-
     // ── Stack settings section
+    const bool inStack = hasBlock && selectedBlock->stackGroup >= 0;
     stackSectionTitle  .setVisible(inStack);
     stackInfoLabel     .setVisible(inStack);
     playModeLabel      .setVisible(inStack);
@@ -699,41 +636,6 @@ void InspectorPanel::buttonClicked(juce::Button* btn) {
         return;
     }
 
-    for (auto* row : playsOverRows) {
-        if (btn == &row->toggle && selectedBlock && project) {
-            bool isChecked = row->toggle.getToggleState();
-            auto pre = project->toJSON();
-            if (isChecked) {
-                if (!selectedBlock->allowedParentClipIds.contains(row->clipId))
-                    selectedBlock->allowedParentClipIds.add(row->clipId);
-                bool allCovered = true;
-                for (auto* r : playsOverRows)
-                    if (!selectedBlock->allowedParentClipIds.contains(r->clipId))
-                        { allCovered = false; break; }
-                if (allCovered)
-                    selectedBlock->allowedParentClipIds.clear();
-            } else {
-                if (selectedBlock->allowedParentClipIds.isEmpty()) {
-                    for (auto* r : playsOverRows)
-                        if (r->clipId != row->clipId &&
-                            !selectedBlock->allowedParentClipIds.contains(r->clipId))
-                            selectedBlock->allowedParentClipIds.add(r->clipId);
-                } else {
-                    selectedBlock->allowedParentClipIds.removeString(row->clipId);
-                }
-            }
-            project->applyExternalMutation(pre);
-            updatingFromModel = true;
-            for (auto* r : playsOverRows) {
-                bool checked = selectedBlock->allowedParentClipIds.isEmpty() ||
-                               selectedBlock->allowedParentClipIds.contains(r->clipId);
-                r->toggle.setToggleState(checked, juce::dontSendNotification);
-            }
-            updatingFromModel = false;
-            return;
-        }
-    }
-
     if (!selectedClip || !project) return;
     auto pre = project->toJSON();
     if      (btn == &retainLeadIn)     selectedClip->retainLeadInTempo = retainLeadIn   .getToggleState();
@@ -770,7 +672,6 @@ void InspectorPanel::paint(juce::Graphics& g) {
     };
     drawDivider(clipTitle);
     drawDivider(blockTitle);
-    drawDivider(playsOverTitle);
     drawDivider(stackSectionTitle);
     drawDivider(projectTitle);
     drawDivider(linksTitle);
@@ -813,20 +714,6 @@ void InspectorPanel::resized() {
         playChanceSlider.setBounds(area.removeFromTop(slh));
         area.removeFromTop(gap);
     }
-    // ── Plays-over section
-    if (playsOverTitle.isVisible()) {
-        playsOverTitle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
-        if (playsOverHint.isVisible()) {
-            playsOverHint.setBounds(area.removeFromTop(rh * 2));
-        } else {
-            for (auto* row : playsOverRows)
-                if (row->toggle.isVisible()) {
-                    row->toggle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
-                }
-        }
-        area.removeFromTop(gap);
-    }
-
     // ── Stack settings section
     const bool inStack = (selectedBlock && selectedBlock->stackGroup >= 0);
     stackSectionY = -1;

@@ -191,18 +191,6 @@ private:
     juce::Label        defaultTempoLabel;
     DraggableNumberBox defaultTempoField { 20.0, 300.0, 1 };
 
-    // ── "Plays Over" section ─────────────────────────────────────────────────
-    juce::Label playsOverTitle;
-    juce::Label playsOverHint;
-    struct PlaysOverRow {
-        juce::ToggleButton toggle { "" };
-        juce::String       clipId;
-    };
-    juce::OwnedArray<PlaysOverRow> playsOverRows;
-    int lastBuiltPlaysOverClipCount = -1;
-
-    void rebuildPlaysOverRows();
-
     // ── Stack settings section (only when block->stackGroup >= 0) ────────────
     juce::Label    stackSectionTitle;   ///< "STACK SETTINGS" heading
     juce::Label    stackInfoLabel;      ///< "Group 1  ·  3 blocks"

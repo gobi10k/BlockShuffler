@@ -22,8 +22,6 @@ struct ResolvedEntry {
     float        gain;                // mixing gain (1.0 for solo clips, <1.0 for simultaneous layers)
     juce::String blockId;             // id of the Block that produced this entry
 
-    bool         isOverlay = false;  // true = overlapping block, layers on top of primary entry
-
     // Tempo stretching for lead-in / tail transitions.
     // ratio = clip.tempo / adjacentClip.tempo
     //   > 1.0  →  output is LONGER  (slowed down, pitch unchanged)

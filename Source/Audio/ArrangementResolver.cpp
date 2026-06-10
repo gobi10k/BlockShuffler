@@ -151,79 +151,14 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     bool    songEnded     = false;
     bool    firstEntryAdded = false;  // used to offset cursor so first clip's lead-in starts at t=0
 
-    // Standalone overlapping blocks (stackGroup == -1, isOverlapping == true) that
-    // appear before any primary entry in position order cannot be attached yet.
-    // We defer them and fire at the first primary entry added to the timeline.
-    std::vector<Block*> deferredStandaloneOverlays;
-
-    // Helper: resolve one overlapping block onto the timeline.
-    // Step 1: block->playChance determines if the overlay triggers at all.
-    // Step 2: pickClip() picks exactly one clip by weighted selection.
-    // This separates "does the overlay fire?" from "which clip plays?" —
-    // clip probability is a relative weight, not an independent trigger.
-    auto addOverlay = [&](Block* ob, int64_t overlayStart) {
-        if (ob->clips.isEmpty()) return;
-        if (rng.nextFloat() >= ob->playChance) return;
-        auto* oc = pickClip(*ob, rng);
-        if (!oc || !oc->audioBuffer) return;
-        auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
-        if (!trimmed) return;
-        result.entries.add({
-            trimmed,
-            0, (int64_t)trimmed->getNumSamples(), oc->startMark, oc->retainTailTempo,
-            oc->name, oc->id,
-            overlayStart, 1.0f, ob->id, true
-        });
-    };
-
     for (auto& slot : slots) {
         if (songEnded) break;
 
-        // Separate overlapping (layer-on-top) from normal blocks
-        std::vector<Block*> normal, overlapping;
-        for (auto* b : slot.blocks) {
-            if (b->isOverlapping) overlapping.push_back(b);
-            else                  normal.push_back(b);
-        }
-        if (normal.empty())
-        {
-            // No non-overlapping blocks in this slot.  If there are overlapping
-            // blocks, attach them to the most recent primary entry already
-            // in the arrangement (handles standalone isOverlapping blocks
-            // whose stackGroup was never set, i.e. stackGroup == -1).
-            if (!overlapping.empty())
-            {
-                if (!result.entries.isEmpty())
-                {
-                    // Find the last non-overlapping entry's timeline position.
-                    int64_t overlayStart = -1;
-                    for (int i = result.entries.size() - 1; i >= 0; --i)
-                    {
-                        const auto& e = result.entries.getReference(i);
-                        auto it = blockById.find(e.blockId.toStdString());
-                        bool isOver = (it != blockById.end() && it->second->isOverlapping);
-                        if (!isOver) { overlayStart = e.timelinePos; break; }
-                    }
-                    if (overlayStart >= 0)
-                    {
-                        for (auto* ob : overlapping)
-                            addOverlay(ob, overlayStart);
-                    }
-                }
-                else
-                {
-                    // No primary entries exist yet — this overlapping block comes before any
-                    // normal block in position order.  Defer it to the first primary entry.
-                    for (auto* ob : overlapping)
-                        deferredStandaloneOverlays.push_back(ob);
-                }
-            }
-            continue;
-        }
+        const auto& allBlocks = slot.blocks;
 
-        if (normal.size() == 1 && overlapping.empty()) {
+        if (allBlocks.size() == 1) {
             // ── Simple standalone block ───────────────────────────────────
-            auto* block = normal[0];
+            auto* block = allBlocks[0];
             if (rng.nextFloat() >= block->playChance) continue;  // block skipped this time
             if (block->clips.isEmpty()) continue;
             auto* clip = pickClip(*block, rng);
@@ -246,28 +181,20 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 tPos, 1.0f, block->id
             });
 
-            // Fire any overlapping blocks that were positioned before this entry in the
-            // arrangement order and had to be deferred until the first primary entry appeared.
-            if (!deferredStandaloneOverlays.empty()) {
-                for (auto* ob : deferredStandaloneOverlays)
-                    addOverlay(ob, tPos);
-                deferredStandaloneOverlays.clear();
-            }
-
             cursor += bodyLen;
             if (clip->isSongEnder) songEnded = true;
 
         } else {
             // ── Stack slot ────────────────────────────────────────────────
-            // Pick how many normal blocks to play
+            // Pick how many blocks to play
             int playCount = 1;
-            if (normal[0]->stackPlayCount.isValid())
-                playCount = normal[0]->stackPlayCount.pick(rng);
-            playCount = juce::jlimit(1, (int)normal.size(), playCount);
+            if (allBlocks[0]->stackPlayCount.isValid())
+                playCount = allBlocks[0]->stackPlayCount.pick(rng);
+            playCount = juce::jlimit(1, (int)allBlocks.size(), playCount);
 
-            // Sample playCount blocks from normal pool with weighted probability
+            // Sample playCount blocks from the pool with weighted probability
             std::vector<Block*> picked;
-            std::vector<Block*> pool = normal;
+            std::vector<Block*> pool = allBlocks;
             for (int k = 0; k < playCount && !pool.empty(); ++k) {
                 float totalWeight = 0.0f;
                 for (auto* b : pool) totalWeight += b->probability;
@@ -291,7 +218,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             }
 
             const bool isSimultaneous =
-                (normal[0]->stackPlayMode == StackPlayMode::Simultaneous);
+                (allBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous);
 
             if (isSimultaneous) {
                 // All picked blocks' bodies start at the same timeline position.
@@ -314,7 +241,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                                       ? 1.0f / (float)survivorCount
                                       : 1.0f;
 
-                juce::Array<Clip*> simultaneousClips;
                 int64_t maxBodyLen = 0;
                 int64_t bodyStart  = -1;  // latched on first valid clip
 
@@ -343,29 +269,10 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, stackGain, b->id
                     });
                     maxBodyLen = std::max(maxBodyLen, bodyLen);
-                    simultaneousClips.add(clip);
                     if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
 
                 if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid
-
-                // Fire any deferred standalone overlays at this first primary entry.
-                if (!deferredStandaloneOverlays.empty()) {
-                    for (auto* ob : deferredStandaloneOverlays)
-                        addOverlay(ob, bodyStart < 0 ? cursor : bodyStart);
-                    deferredStandaloneOverlays.clear();
-                }
-
-                // Overlapping blocks layer on top of this slot (timelinePos = bodyStart)
-                for (auto* ob : overlapping) {
-                    if (!ob->allowedParentClipIds.isEmpty()) {
-                        bool anyAllowed = false;
-                        for (auto* sc : simultaneousClips)
-                            if (ob->allowedParentClipIds.contains(sc->id)) { anyAllowed = true; break; }
-                        if (!anyAllowed) continue;
-                    }
-                    addOverlay(ob, bodyStart);
-                }
                 cursor += maxBodyLen;
 
             } else {
@@ -418,22 +325,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, 1.0f, b->id
                     });
 
-                    // Fire any deferred standalone overlays at this first primary entry.
-                    if (!deferredStandaloneOverlays.empty()) {
-                        for (auto* ob : deferredStandaloneOverlays)
-                            addOverlay(ob, bodyStart);
-                        deferredStandaloneOverlays.clear();
-                    }
-
-                    // Layer overlapping blocks on top of this picked block (bodies aligned).
-                    for (auto* ob : overlapping) {
-                        if (!ob->allowedParentClipIds.isEmpty() &&
-                            !ob->allowedParentClipIds.contains(clip->id))
-                        {
-                            continue;
-                        }
-                        addOverlay(ob, bodyStart);
-                    }
                     cursor += bodyLen;
                     if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
@@ -441,26 +332,16 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         }
     }
 
-    // ── Post-process: compute tempo-stretch ratios between adjacent primary entries ──
-    // "Primary" = non-overlapping blocks. Simultaneous entries sharing the same
-    // timelinePos are skipped (no stretch between entries in the same slot).
+    // ── Post-process: compute tempo-stretch ratios between adjacent entries ──
+    // Simultaneous entries sharing the same timelinePos are skipped (no stretch within a slot).
     {
-        // Collect primary (non-overlapping, non-simultaneous) entry indices in order
         std::vector<int> primary;
-        for (int i = 0; i < result.entries.size(); ++i) {
-            const auto& e = result.entries.getReference(i);
-            auto it = blockById.find(e.blockId.toStdString());
-            if (it != blockById.end() && !it->second->isOverlapping)
-                primary.push_back(i);
-        }
+        for (int i = 0; i < result.entries.size(); ++i)
+            primary.push_back(i);
 
         for (size_t k = 0; k + 1 < primary.size(); ++k) {
             auto& entA = result.entries.getReference(primary[k]);
             auto& entB = result.entries.getReference(primary[k + 1]);
-
-            // Skip overlay entries — they must never receive stretch ratios, or they
-            // will be silenced by the WSOLA pre-computation pass (which skips isOverlay).
-            if (entA.isOverlay || entB.isOverlay) continue;
 
             // Skip pairs sharing the same timeline position (simultaneous stack slot)
             if (entA.timelinePos == entB.timelinePos)
@@ -495,7 +376,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     for (int i = 0; i < result.entries.size(); ++i)
     {
         auto& entry = result.entries.getReference(i);
-        if (entry.isOverlay || !entry.audioBuffer) continue;  // overlay entries play at original tempo; no stretching
+        if (!entry.audioBuffer) continue;
         const auto& buf = *entry.audioBuffer;
         const int64_t leadInLen = entry.startMark;
         const int64_t tailLen   = juce::jmax((int64_t)0,
@@ -520,16 +401,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         }
     }
 
-    // Extend total duration to include the (stretched) tail of the last primary entry
+    // Extend total duration to include the (stretched) tail of the last entry
     if (!result.entries.isEmpty()) {
-        // Find last non-overlapping entry index
         int lastIdx = result.entries.size() - 1;
-        for (int i = result.entries.size() - 1; i >= 0; --i) {
-            const auto& e = result.entries.getReference(i);
-            auto it = blockById.find(e.blockId.toStdString());
-            bool isOver = (it != blockById.end() && it->second->isOverlapping);
-            if (!isOver) { lastIdx = i; break; }
-        }
         const ResolvedEntry& last = result.entries.getReference(lastIdx);
         int64_t tailLen = juce::jmax((int64_t)0,
                                      (int64_t)last.audioBuffer->getNumSamples()

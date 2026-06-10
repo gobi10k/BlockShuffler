@@ -23,14 +23,7 @@ juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
         bObj->setProperty("stackGroup",       block->stackGroup);
         bObj->setProperty("stackPlayMode",    block->stackPlayMode == StackPlayMode::Sequential
                                                   ? "sequential" : "simultaneous");
-        bObj->setProperty("isOverlapping",    block->isOverlapping);
-        bObj->setProperty("overlapProb",      (double)block->overlapProbability);
         bObj->setProperty("probability",      (double)block->probability);
-
-        juce::Array<juce::var> apciArr;
-        for (auto& s : block->allowedParentClipIds) apciArr.add(juce::var(s));
-        bObj->setProperty("allowedParentClipIds", juce::var(apciArr));
-
         bObj->setProperty("isDone",            block->isDone);
         bObj->setProperty("playChance",       (double)block->playChance);
         bObj->setProperty("tempo",            block->tempo);
@@ -116,14 +109,7 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
                                         .toString() == "simultaneous"
                                         ? StackPlayMode::Simultaneous
                                         : StackPlayMode::Sequential;
-            block->isOverlapping  = (bool)  bVar.getProperty("isOverlapping",  false);
-            block->overlapProbability = (float)(double)bVar.getProperty("overlapProb", 0.5);
             block->probability    = (float)(double)bVar.getProperty("probability", 1.0);
-
-            block->allowedParentClipIds.clear();
-            if (auto* apciArr = bVar.getProperty("allowedParentClipIds", juce::var()).getArray())
-                for (auto& v : *apciArr) block->allowedParentClipIds.add(v.toString());
-
             block->isDone         = (bool)  bVar.getProperty("isDone",         false);
             // FIX M7: clamp on load so out-of-range saved values don't cause silent skips
             block->playChance     = juce::jlimit(0.0f, 1.0f,

@@ -18,8 +18,6 @@ public:
           position(0),
           stackGroup(-1),
           stackPlayMode(StackPlayMode::Sequential),
-          isOverlapping(false),
-          overlapProbability(0.5f),
           probability(1.0f),
           isDone(false),
           playChance(1.0f),
@@ -39,13 +37,7 @@ public:
     WeightedValue<int> stackPlayCount;
     StackPlayMode stackPlayMode;
 
-    // Overlap
-    bool isOverlapping;
-    float overlapProbability;
     float probability;     // weight for random selection when in a stack
-    // If non-empty, this overlapping block only plays when the selected parent clip
-    // is in this list. Empty = play over any parent clip (default / backward-compatible).
-    juce::StringArray allowedParentClipIds;
 
     // Clips
     juce::OwnedArray<Clip> clips;

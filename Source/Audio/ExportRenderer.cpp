@@ -215,8 +215,6 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
                 bm->setProperty("stackGroup",       bVar.getProperty("stackGroup",    -1));
                 bm->setProperty("stackPlayCount",   bVar.getProperty("stackPlayCount",{}));
                 bm->setProperty("stackPlayMode",    bVar.getProperty("stackPlayMode", "sequential"));
-                bm->setProperty("isOverlapping",    bVar.getProperty("isOverlapping", false));
-                bm->setProperty("overlapProbability", bVar.getProperty("overlapProb", 0.0));
                 // isDone is cosmetic only — not written to export manifest
 
                 // Clips
