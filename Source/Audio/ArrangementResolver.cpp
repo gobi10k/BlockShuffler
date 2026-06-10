@@ -324,7 +324,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         clip->name, clip->id,
                         tPos, 1.0f, b->id
                     });
-
                     cursor += bodyLen;
                     if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
