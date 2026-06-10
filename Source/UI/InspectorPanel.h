@@ -210,8 +210,20 @@ private:
     int lastBuiltStackCountRows = -1;
 
     juce::Label stackBlocksTitle;                 ///< "Blocks in stack:"
-    juce::OwnedArray<juce::Label> stackBlockLabels; ///< one label per block in group
-    juce::OwnedArray<juce::Slider> stackBlockProbSliders; ///< one probability slider per block
+
+    // One row per block in the stack: [name] [====playChance slider====] [eff: XX%]
+    struct StackBlockProbRow {
+        juce::Label  nameLabel;
+        juce::Slider probSlider;
+        juce::Label  effectiveLabel;
+        StackBlockProbRow() {
+            probSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            probSlider.setRange(0.0, 100.0, 1.0);
+            probSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 36, 16);
+        }
+    };
+    juce::OwnedArray<StackBlockProbRow> stackBlockProbRows;
+    juce::var stackBlockDragPre;
     int lastBuiltStackGroup      = -2;            ///< detect group changes for block list
 
     // Track Y+H of the stack section for paint() tint
@@ -220,7 +232,7 @@ private:
 
     void rebuildStackCountRows();
     void rebuildStackBlockLabels();
-    void rebuildStackBlockProbRows();
+    void recalcStackEffectiveLabels();
 
     // ── Links section ────────────────────────────────────────────────────────
     juce::Label  linksTitle;
