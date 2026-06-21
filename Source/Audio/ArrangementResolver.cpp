@@ -8,6 +8,7 @@
 #include <numeric>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace BlockShuffler {
 
@@ -55,18 +56,18 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     // Pre-roll every link's swap decision.
     //
     // Cross-stack links (blocks in different stacks, or at least one standalone):
-    //   Apply the swap to localPos immediately.  The swapped block then has a
-    //   different position than its stack mates; the position-equality guard in
-    //   slot-building detects this and treats it as standalone for this pass.
+    //   Apply the swap to localPos immediately and record both block IDs in
+    //   swappedBlockIds.  In slot-building, any block in swappedBlockIds is
+    //   treated as standalone for this pass, leaving its original stack.
     //
     // Same-stack links (both blocks share the same stackGroup >= 0):
-    //   Swapping localPos has no effect (all stack mates already share one position
-    //   value, so swapping A ↔ A is a no-op).  Instead, the decision is carried
-    //   forward into the sequential-stack slot loop, where it overrides the random
-    //   weighted-sample order to produce a deterministic play order.
+    //   The decision is carried forward into the sequential-stack slot loop,
+    //   where it overrides the random weighted-sample order to produce a
+    //   deterministic play order.
     struct LinkDecision { BlockLink* link; bool triggered; };
     std::vector<LinkDecision> linkDecisions;
     linkDecisions.reserve(shuffledLinks.size());
+    std::unordered_set<std::string> swappedBlockIds;
 
     for (auto* lnk : shuffledLinks) {
         bool triggered = (rng.nextFloat() < lnk->swapProbability);
@@ -80,14 +81,17 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                           && itBa->second->stackGroup == itBb->second->stackGroup);
         if (sameStack) continue;  // order enforced in sequential slot loop
 
-        // Cross-stack: swap the two specific blocks in localPos.
-        // Stack mates of either block are NOT touched — they stay at the original
-        // slot position.  The position-equality guard in slot-building below will
-        // separate the swapped block from its former stack mates.
+        // Cross-stack: swap the two specific blocks in localPos and mark them
+        // as swapped.  Stack mates of either block are NOT touched.
+        // swappedBlockIds (checked in slot-building below) pulls each swapped
+        // block out of its former stack and gives it its own slot.
         auto itA = localPos.find(lnk->blockA.toStdString());
         auto itB = localPos.find(lnk->blockB.toStdString());
-        if (itA != localPos.end() && itB != localPos.end())
+        if (itA != localPos.end() && itB != localPos.end()) {
             std::swap(itA->second, itB->second);  // model untouched
+            swappedBlockIds.insert(lnk->blockA.toStdString());
+            swappedBlockIds.insert(lnk->blockB.toStdString());
+        }
     }
 
     // ── 3. Sort by resolved positions ────────────────────────────────────────
@@ -111,34 +115,26 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     // ── 4. Group into slots by stackGroup ────────────────────────────────────
     // A slot is one or more blocks sharing the same stackGroup.
     // Blocks NOT in a stack (stackGroup < 0) each occupy their own slot.
-    // Stacks (stackGroup >= 0) occupy a single slot at the position of the first
-    // block encountered in that stack.
+    // Blocks that were cross-stack-swapped (swappedBlockIds) also get their own
+    // slot so they don't get pooled with their former stack mates.
+    // All other stacked blocks are always grouped together regardless of their
+    // individual position values — stacked blocks intentionally have different
+    // positions because Project::moveBlock() assigns sequential indices to all
+    // blocks and stackBlocks() never equalises them.
     struct Slot { std::vector<Block*> blocks; };
     std::vector<Slot> slots;
     std::unordered_map<int, size_t> sgToSlot;
 
     for (auto* b : sorted) {
         int sg = b->stackGroup;
-        auto posIt = localPos.find(b->id.toStdString());
-        int bPos = (posIt != localPos.end()) ? posIt->second : b->position;
+        bool wasSwapped = swappedBlockIds.count(b->id.toStdString()) > 0;
 
-        if (sg < 0) {
+        if (sg < 0 || wasSwapped) {
             slots.push_back({{b}});
         } else {
             auto it = sgToSlot.find(sg);
             if (it != sgToSlot.end()) {
-                // Only group into this slot when the block's resolved position matches.
-                // A cross-stack-swapped block ends up at a different position than its
-                // former stack mates; it must stand alone rather than be pooled with them
-                // (pooling would silently drop it or its mate via stackPlayCount).
-                auto* firstBlock = slots[it->second].blocks[0];
-                auto fposIt = localPos.find(firstBlock->id.toStdString());
-                int slotPos = (fposIt != localPos.end()) ? fposIt->second : firstBlock->position;
-                if (slotPos == bPos) {
-                    slots[it->second].blocks.push_back(b);
-                } else {
-                    slots.push_back({{b}});
-                }
+                slots[it->second].blocks.push_back(b);
             } else {
                 sgToSlot[sg] = slots.size();
                 slots.push_back({{b}});
@@ -221,6 +217,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
             const bool isSimultaneous =
                 (allBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous);
+
+            [[maybe_unused]] const int entriesBefore = result.entries.size();
 
             if (isSimultaneous) {
                 // All picked blocks' bodies start at the same timeline position.
@@ -314,6 +312,11 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
             }
+
+            // REGRESSION GUARD: entries added for this stack slot must not exceed playCount.
+            // If this assertion fires, slot-building incorrectly split stacked blocks into
+            // standalone slots, causing each to play through the standalone playChance gate.
+            jassert(result.entries.size() - entriesBefore <= playCount);
         }
     }
 
