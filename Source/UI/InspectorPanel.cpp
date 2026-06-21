@@ -1,4 +1,5 @@
 #include "InspectorPanel.h"
+#include <climits>
 
 namespace BlockShuffler {
 
@@ -398,12 +399,13 @@ void InspectorPanel::rebuildStackBlockLabels() {
             if (updatingFromModel || !project) return;
             capturedBlock->playChance = juce::jlimit(0.0f, 1.0f,
                 (float)(row->probSlider.getValue() / 100.0));
-            recalcStackEffectiveLabels();
+            // Don't recalc effective probability on every pixel — wait until drag end
         };
         row->probSlider.onDragEnd = [this] {
             if (updatingFromModel || !project || stackBlockDragPre.isVoid()) return;
             project->applyExternalMutation(stackBlockDragPre);
             stackBlockDragPre = juce::var{};
+            recalcStackEffectiveLabels();  // recompute Monte Carlo after drag settles
         };
         addAndMakeVisible(row->probSlider);
 
@@ -418,39 +420,86 @@ void InspectorPanel::rebuildStackBlockLabels() {
     recalcStackEffectiveLabels();
 }
 
+std::map<juce::String, float> InspectorPanel::computeStackInclusionProbabilities(int stackGroup) const {
+    std::map<juce::String, float> result;
+    if (!project) return result;
+
+    juce::Array<Block*> stackBlocks;
+    for (auto* b : project->blocks)
+        if (b->stackGroup == stackGroup)
+            stackBlocks.add(b);
+    if (stackBlocks.isEmpty()) return result;
+
+    // If the minimum play count covers the whole stack, every block always plays
+    int minPlayCount = INT_MAX;
+    if (stackBlocks[0]->stackPlayCount.isValid())
+        for (int v : stackBlocks[0]->stackPlayCount.values)
+            minPlayCount = std::min(minPlayCount, v);
+    if (minPlayCount == INT_MAX) minPlayCount = 1;
+    if (minPlayCount >= stackBlocks.size()) {
+        for (auto* b : stackBlocks) result[b->id] = 1.0f;
+        return result;
+    }
+
+    // Monte Carlo: 2000 trials using the same without-replacement weighted sampling
+    // the resolver uses, so displayed values match actual playback probabilities.
+    std::map<juce::String, int> counts;
+    for (auto* b : stackBlocks) counts[b->id] = 0;
+
+    const int trials = 2000;
+    juce::Random rng;
+
+    for (int t = 0; t < trials; ++t) {
+        int pc = 1;
+        if (stackBlocks[0]->stackPlayCount.isValid())
+            pc = stackBlocks[0]->stackPlayCount.pick(rng);
+        pc = juce::jlimit(1, stackBlocks.size(), pc);
+
+        juce::Array<Block*> remaining = stackBlocks;
+        juce::Array<float>  weights;
+        for (auto* b : remaining) weights.add(b->playChance);
+
+        for (int pick = 0; pick < pc && !remaining.isEmpty(); ++pick) {
+            float total = 0.0f;
+            for (auto w : weights) total += w;
+
+            int chosen = remaining.size() - 1;  // fallback: last element
+            if (total <= 0.0f) {
+                chosen = rng.nextInt(remaining.size());
+            } else {
+                float roll = rng.nextFloat() * total;
+                float cum  = 0.0f;
+                for (int i = 0; i < remaining.size(); ++i) {
+                    cum += weights[i];
+                    if (roll <= cum) { chosen = i; break; }
+                }
+            }
+            counts[remaining[chosen]->id]++;
+            remaining.remove(chosen);
+            weights.remove(chosen);
+        }
+    }
+
+    for (auto* b : stackBlocks)
+        result[b->id] = (float)counts[b->id] / (float)trials;
+    return result;
+}
+
 void InspectorPanel::recalcStackEffectiveLabels() {
     if (!selectedBlock || selectedBlock->stackGroup < 0 || !project) return;
 
-    // Collect blocks in this stack
     juce::Array<Block*> stackBlocks;
     for (auto* b : project->blocks)
         if (b->stackGroup == selectedBlock->stackGroup)
             stackBlocks.add(b);
 
-    // Determine minimum possible play count to detect "all play" case
-    int minPlayCount = 1;
-    if (stackBlocks.size() > 0 && stackBlocks[0]->stackPlayCount.isValid()) {
-        minPlayCount = stackBlocks[0]->stackPlayCount.values[0];
-        for (int v : stackBlocks[0]->stackPlayCount.values)
-            minPlayCount = std::min(minPlayCount, v);
-    }
-    const bool allPlay = (minPlayCount >= stackBlocks.size());
-
-    // Sum of playChance weights
-    float total = 0.0f;
-    for (auto* b : stackBlocks) total += b->playChance;
+    auto probs = computeStackInclusionProbabilities(selectedBlock->stackGroup);
 
     for (int i = 0; i < stackBlocks.size() && i < stackBlockProbRows.size(); ++i) {
-        float eff;
-        if (allPlay) {
-            eff = 1.0f;
-        } else if (total <= 0.0f) {
-            eff = 1.0f / (float)stackBlocks.size();
-        } else {
-            eff = stackBlocks[i]->playChance / total;
-        }
+        auto it = probs.find(stackBlocks[i]->id);
+        float eff = (it != probs.end()) ? it->second : 0.0f;
         stackBlockProbRows[i]->effectiveLabel.setText(
-            "eff: " + juce::String(eff * 100.0f, 1) + "%",
+            "eff: " + juce::String(juce::roundToInt(eff * 100.0f)) + "%",
             juce::dontSendNotification);
     }
 }

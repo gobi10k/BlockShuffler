@@ -192,12 +192,14 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 playCount = allBlocks[0]->stackPlayCount.pick(rng);
             playCount = juce::jlimit(1, (int)allBlocks.size(), playCount);
 
-            // Sample playCount blocks from the pool with weighted probability
+            // Sample playCount blocks from the pool with weighted probability.
+            // playChance is the selection weight — the same field the inspector exposes.
+            // Without-replacement weighted sampling: each pick reduces the pool by one.
             std::vector<Block*> picked;
             std::vector<Block*> pool = allBlocks;
             for (int k = 0; k < playCount && !pool.empty(); ++k) {
                 float totalWeight = 0.0f;
-                for (auto* b : pool) totalWeight += b->probability;
+                for (auto* b : pool) totalWeight += b->playChance;
 
                 if (totalWeight <= 0.0f) {
                     int idx = rng.nextInt((int)pool.size());
@@ -207,7 +209,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     float roll = rng.nextFloat() * totalWeight;
                     float cum = 0.0f;
                     for (size_t i = 0; i < pool.size(); ++i) {
-                        cum += pool[i]->probability;
+                        cum += pool[i]->playChance;
                         if (roll <= cum || i == pool.size() - 1) {
                             picked.push_back(pool[i]);
                             pool.erase(pool.begin() + i);
@@ -223,29 +225,14 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             if (isSimultaneous) {
                 // All picked blocks' bodies start at the same timeline position.
                 // Lead-ins may extend before that position (each clip's own startMark back).
-                //
-                // Pre-roll every playChance gate first so we know the actual survivor
-                // count before computing the mix gain.  This prevents the surviving
-                // entries from being mixed too quietly when some picked blocks fail
-                // their playChance roll (e.g. 4 picked, 3 survive → gain = 1/3 not 1/4).
-                std::vector<bool> playChancePassed(picked.size(), false);
-                for (size_t pi = 0; pi < picked.size(); ++pi)
-                    playChancePassed[pi] = (rng.nextFloat() < picked[pi]->playChance);
-
-                int survivorCount = 0;
-                for (size_t pi = 0; pi < picked.size(); ++pi)
-                    if (playChancePassed[pi] && !picked[pi]->clips.isEmpty())
-                        ++survivorCount;
-
-                const float stackGain = (survivorCount > 0)
-                                      ? 1.0f / (float)survivorCount
-                                      : 1.0f;
+                // playChance is the selection weight, so every picked block plays.
+                // Gain is normalised by the number of simultaneous voices for equal mix.
+                const float stackGain = (playCount > 0) ? 1.0f / (float)playCount : 1.0f;
 
                 int64_t maxBodyLen = 0;
                 int64_t bodyStart  = -1;  // latched on first valid clip
 
                 for (size_t pi = 0; pi < picked.size(); ++pi) {
-                    if (!playChancePassed[pi]) continue;  // playChance gate pre-rolled above
                     auto* b = picked[pi];
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
@@ -302,7 +289,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
                 for (auto* b : picked) {
                     if (songEnded) break;
-                    if (rng.nextFloat() >= b->playChance) continue;  // block skipped this time
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;

@@ -4,6 +4,7 @@
 #include "../Model/Block.h"
 #include "../Model/Clip.h"
 #include "LookAndFeel_BlockShuffler.h"
+#include <map>
 
 namespace BlockShuffler {
 
@@ -233,6 +234,7 @@ private:
     void rebuildStackCountRows();
     void rebuildStackBlockLabels();
     void recalcStackEffectiveLabels();
+    std::map<juce::String, float> computeStackInclusionProbabilities(int stackGroup) const;
 
     // ── Links section ────────────────────────────────────────────────────────
     juce::Label  linksTitle;
