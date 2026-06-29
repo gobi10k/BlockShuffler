@@ -19,6 +19,33 @@ TransportBar::TransportBar() {
 #if TRANSPORT_HAS_BINARY
     logoImage = juce::ImageCache::getFromMemory(BinaryData::icon_png,
                                                 BinaryData::icon_pngSize);
+    // The PNG has a pure-black background (RGB, no alpha channel).
+    // Convert to ARGB and chroma-key it out so the logo blends seamlessly
+    // against the transport bar's bgDark colour without a visible dark box.
+    if (logoImage.isValid()) {
+        juce::Image argb(juce::Image::ARGB, logoImage.getWidth(), logoImage.getHeight(), true);
+        {
+            juce::Graphics g2(argb);
+            g2.drawImageAt(logoImage, 0, 0);
+        }
+        {
+            juce::Image::BitmapData px(argb, juce::Image::BitmapData::readWrite);
+            for (int y = 0; y < argb.getHeight(); ++y) {
+                uint8_t* row = px.getLinePointer(y);
+                for (int x = 0; x < argb.getWidth(); ++x) {
+                    // JUCE ARGB memory layout per pixel: B, G, R, A
+                    uint8_t* p = row + x * px.pixelStride;
+                    uint8_t maxC = juce::jmax(p[0], juce::jmax(p[1], p[2]));  // max(B,G,R)
+                    if (maxC < 20)
+                        p[3] = 0;                                              // fully transparent
+                    else if (maxC < 50)
+                        p[3] = (uint8_t)(((int)maxC - 20) * 255 / 30);        // soft edge
+                    // else leave alpha = 255 (opaque logo content)
+                }
+            }
+        }
+        logoImage = argb;
+    }
 #endif
     saveBtn  .onClick = [this] { if (onSave)   onSave();   };
     saveAsBtn.onClick = [this] { if (onSaveAs) onSaveAs(); };
@@ -74,18 +101,18 @@ void TransportBar::paint(juce::Graphics& g) {
     }
 
     // ── Company logo ──────────────────────────────────────────────────────────
-    if (brandingArea.getWidth() < 20 || brandingArea.getHeight() < 4) return;
+    if (brandingArea.getWidth() >= 20 && logoImage.isValid()) {
+        // Explicitly fill with bgDark so any semi-transparent edge pixels blend
+        // against the exact same colour as the rest of the transport bar.
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
+        g.fillRect(brandingArea);
 
-    if (logoImage.isValid()) {
-        // Scale to fill the full branding height, preserve aspect ratio, centre horizontally
-        const int maxH  = brandingArea.getHeight();
-        const int maxW  = brandingArea.getWidth();
-        float scale     = juce::jmin((float)maxH / (float)logoImage.getHeight(),
-                                     (float)maxW / (float)logoImage.getWidth());
-        int drawW       = juce::roundToInt((float)logoImage.getWidth()  * scale);
-        int drawH       = juce::roundToInt((float)logoImage.getHeight() * scale);
-        int drawX       = brandingArea.getCentreX() - drawW / 2;
-        int drawY       = brandingArea.getCentreY() - drawH / 2;
+        float scale = juce::jmin((float)brandingArea.getHeight() / (float)logoImage.getHeight(),
+                                 (float)brandingArea.getWidth()  / (float)logoImage.getWidth());
+        int drawW = juce::roundToInt((float)logoImage.getWidth()  * scale);
+        int drawH = juce::roundToInt((float)logoImage.getHeight() * scale);
+        int drawX = brandingArea.getCentreX() - drawW / 2;
+        int drawY = brandingArea.getCentreY() - drawH / 2;
         g.drawImage(logoImage, drawX, drawY, drawW, drawH, 0, 0,
                     logoImage.getWidth(), logoImage.getHeight());
     }
@@ -93,7 +120,7 @@ void TransportBar::paint(juce::Graphics& g) {
 
 void TransportBar::resized() {
     auto area = getLocalBounds().reduced(8, 6);
-    const int gap = 4;
+    const int gap  = 4;
     const int btnH = 28;
 
     // Left: transport controls
@@ -104,18 +131,27 @@ void TransportBar::resized() {
     stopBtn  .setBounds(area.removeFromLeft(60).withSizeKeepingCentre(60, btnH));
     area.removeFromLeft(gap * 4);
     exportBtn.setBounds(area.removeFromLeft(72).withSizeKeepingCentre(72, btnH));
-    area.removeFromLeft(gap * 2);
 
-    // Right: file operations
+    // Right: file buttons then logo just to their left
     openBtn  .setBounds(area.removeFromRight(60).withSizeKeepingCentre(60, btnH));
     area.removeFromRight(gap);
     saveBtn  .setBounds(area.removeFromRight(60).withSizeKeepingCentre(60, btnH));
     area.removeFromRight(gap);
     saveAsBtn.setBounds(area.removeFromRight(68).withSizeKeepingCentre(68, btnH));
-    area.removeFromRight(gap * 2);
+    area.removeFromRight(12);  // gap between Save As and logo
 
-    // Center: split — time display on left half, branding on right half
-    brandingArea    = area.removeFromRight(area.getWidth() / 2);
+    // Logo: scale to fill the full bar height, preserve aspect ratio
+    // Sit immediately left of the Save As button
+    const int logoH = area.getHeight();
+    int logoW = 0;
+    if (logoImage.isValid() && logoImage.getHeight() > 0)
+        logoW = juce::roundToInt((float)logoH * (float)logoImage.getWidth()
+                                              / (float)logoImage.getHeight());
+    logoW = juce::jlimit(0, 180, logoW);
+    brandingArea = (logoW > 0) ? area.removeFromRight(logoW) : juce::Rectangle<int>();
+
+    // Remaining centre strip = time display
+    area.removeFromLeft(gap * 2);
     timeDisplayArea = area;
 }
 
