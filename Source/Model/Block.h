@@ -36,6 +36,8 @@ public:
     int stackGroup;         // -1 = not stacked; same value = same stack
     WeightedValue<int> stackPlayCount;
     StackPlayMode stackPlayMode;
+    bool alwaysPlayBase = false;  // stack-level (shared via propagateStackSettings); simultaneous mode only:
+                                  // the stack's base block (first in project order) always plays
 
     float probability;     // weight for random selection when in a stack
 

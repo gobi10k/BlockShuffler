@@ -124,8 +124,9 @@ void Project::propagateStackSettings(int stackGroup, Block* sourceBlock) {
     if (source == nullptr || source->stackGroup != stackGroup) return;
     for (auto* b : blocks) {
         if (b->stackGroup == stackGroup && b != source) {
-            b->stackPlayCount = source->stackPlayCount;
-            b->stackPlayMode  = source->stackPlayMode;
+            b->stackPlayCount  = source->stackPlayCount;
+            b->stackPlayMode   = source->stackPlayMode;
+            b->alwaysPlayBase  = source->alwaysPlayBase;
         }
     }
 }
