@@ -14,7 +14,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 
 ### BROKEN / TODO (in priority order)
 1. ~~**Stack play count regression**~~ — **CLOSED 2026-07-05: does not reproduce.** Verified honored in current code (headless harness + in-app DBG + by ear). PROGRESS entry below has the proof. Keep the jassert guard at ArrangementResolver.cpp:319.
-2. **Simultaneous layering** — grep half PASSED earlier; runtime half PASSED 2026-07-05 session 2 (SIM play 3 → 10/10 identical timelinePos, cursor advances by LONGEST body; proof in entry below). Remaining: layering by ear only (user-run; Debug standalone built, repro steps in entry below). Step 2 closes only after the ear check.
+2. ~~**Simultaneous layering**~~ — **CLOSED 2026-07-05 session 2: MASTER_PROMPT Step 2 COMPLETE.** Grep half PASSED; runtime half PASSED (SIM play 3 → 10/10 identical timelinePos, cursor advances by LONGEST body; proof in entry below); layering confirmed BY EAR by the user. No code change was needed.
 3. **NEW FEATURE: "Always play base block"** (simultaneous only) — not yet built. Model + serialization + resolver + inspector toggle + BSF. MASTER_PROMPT Step 3.
 4. **Effective % = inclusion probability** — verify against client numbers (33 / 67 / 100). Share the picker function between resolver and display. MASTER_PROMPT Step 4.
 5. **Logo polish** — background must match transport bar colour exactly, larger, sit just left of Save As. Verify logo + app icon load via BinaryData (cross-platform), not runtime file paths. ACCEPTANCE_TESTS 12.3.
@@ -23,7 +23,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 8. ~~**Source/ is UNTRACKED in git**~~ — **CLOSED 2026-07-05 session 2.** Full tree committed on `UI_firstdraft` and tagged `baseline-step1-clean`. IMPORTANT: the old "repo" was accidentally rooted at `$HOME` (that's why Source/ looked untracked); a proper repo now lives at the project directory with the UI_firstdraft history imported and origin set (details in entry below). One commit per completed MASTER_PROMPT step from now on.
 
 ### NEXT UP
-User runs the Step 2 ear check (repro steps in the 2026-07-05 session-2 entry). After user confirms, mark Step 2 complete, then MASTER_PROMPT Steps 3–7 in order. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
+MASTER_PROMPT Step 3 ("Always play base block", simultaneous only): model + propagateStackSettings + serialization + resolver + inspector toggle + BSF model.json. Then Steps 4–7 in order. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
 
 ---
 
@@ -51,15 +51,14 @@ Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via
   - PASS: no Step 1 regression — same binary re-ran SEQ play-1 and SIM play-1: exactly 1 entry, 10/10 each.
 - What regressed or surprised me:
   - The $HOME-rooted repo (above). Also note: a second stale project copy still sits at `~/Source` etc. and dead copies in `~/Downloads` — candidates for manual deletion by the user, NOT by Claude.
-- Step 2 ear check (user-run; Step 2 is NOT complete until confirmed):
+- Step 2 ear check: **PASSED — user confirmed layering by ear same day. STEP 2 COMPLETE.** Steps used:
   1. `open "build-diag/BlockShuffler_artefacts/Debug/Standalone/BlockShuffler.app"` (or run the inner binary from a terminal to also see DBG).
   2. Add 3 blocks, one clearly distinguishable clip each (e.g. drums / bass / vocals).
   3. Drag block 2 onto block 1, then block 3 onto the stack → 3-block stack.
   4. Inspector: stack mode = Simultaneous, How Many to Play = 3.
   5. Press Play several times: all three clips must sound AT THE SAME TIME, starting together, each at ~1/3 gain; the next block (add one after the stack to check) must start only after the LONGEST of the three finishes.
 - NEXT SESSION should:
-  1. If user confirmed the ear test → mark Step 2 complete, commit the PROGRESS update as the Step 2 closing commit.
-  2. MASTER_PROMPT Step 3 ("Always play base block"), then 4–7 in order. Do not touch link logic, isDone, lead-in, or the Colour assertion (item 7) until their steps.
+  1. MASTER_PROMPT Step 3 ("Always play base block"), then 4–7 in order. Do not touch link logic, isDone, lead-in, or the Colour assertion (item 7) until their steps.
 
 ### 2026-07-05 — MASTER_PROMPT Step 1: stack play-count regression DOES NOT REPRODUCE
 - What I changed (files):
