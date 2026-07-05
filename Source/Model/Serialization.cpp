@@ -23,6 +23,7 @@ juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
         bObj->setProperty("stackGroup",       block->stackGroup);
         bObj->setProperty("stackPlayMode",    block->stackPlayMode == StackPlayMode::Sequential
                                                   ? "sequential" : "simultaneous");
+        bObj->setProperty("alwaysPlayBase",   block->alwaysPlayBase);
         bObj->setProperty("probability",      (double)block->probability);
         bObj->setProperty("isDone",            block->isDone);
         bObj->setProperty("playChance",       (double)block->playChance);
@@ -109,6 +110,8 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
                                         .toString() == "simultaneous"
                                         ? StackPlayMode::Simultaneous
                                         : StackPlayMode::Sequential;
+            // Missing key (pre-3B project) → false
+            block->alwaysPlayBase = (bool)  bVar.getProperty("alwaysPlayBase", false);
             block->probability    = (float)(double)bVar.getProperty("probability", 1.0);
             block->isDone         = (bool)  bVar.getProperty("isDone",         false);
             // FIX M7: clamp on load so out-of-range saved values don't cause silent skips

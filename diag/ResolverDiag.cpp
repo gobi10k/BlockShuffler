@@ -139,6 +139,40 @@ int main() {
         }
     }
 
+    // STEP3B DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // alwaysPlayBase serialization round-trip + missing-key default.
+    {
+        std::cout << "\n=== STEP3B: alwaysPlayBase serialization ===\n";
+        Project p3;
+        auto* a3 = p3.addBlock("A");
+        auto* b3 = p3.addBlock("B");
+        addClipTo(a3, "cA");
+        addClipTo(b3, "cB");
+        p3.stackBlocks(b3->id, a3->id);
+        a3->alwaysPlayBase = true;
+        p3.propagateStackSettings(a3->stackGroup, a3);
+
+        auto snap = p3.toJSON();
+        p3.resetAndLoad(snap);
+        for (auto* blk : p3.blocks)
+            std::cout << "after save->load: " << blk->name
+                      << " alwaysPlayBase=" << (blk->alwaysPlayBase ? "true" : "false") << "\n";
+
+        // Strip the key to simulate a pre-3B project file.
+        auto stripped = snap.clone();
+        if (auto* blocksArr = stripped.getProperty("blocks", juce::var()).getArray())
+            for (auto& bv : *blocksArr)
+                if (auto* dobj = bv.getDynamicObject())
+                    dobj->removeProperty("alwaysPlayBase");
+        std::cout << "stripped JSON has key: "
+                  << (juce::JSON::toString(stripped).contains("alwaysPlayBase") ? "YES (bad)" : "no")
+                  << "\n";
+        p3.resetAndLoad(stripped);
+        for (auto* blk : p3.blocks)
+            std::cout << "after missing-key load: " << blk->name
+                      << " alwaysPlayBase=" << (blk->alwaysPlayBase ? "true" : "false") << "\n";
+    }
+
     std::cout << "DONE\n";
     return 0;
 }
