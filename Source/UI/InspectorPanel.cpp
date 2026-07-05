@@ -136,6 +136,21 @@ InspectorPanel::InspectorPanel()
     };
     addAndMakeVisible(playModeCombo);
 
+    // "Always play base block" — simultaneous stacks only. Stack-level setting,
+    // shared across the group via propagateStackSettings (like stackPlayCount).
+    alwaysPlayBaseToggle.setColour(juce::ToggleButton::textColourId,
+                                   juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+    alwaysPlayBaseToggle.setColour(juce::ToggleButton::tickColourId,
+                                   juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+    alwaysPlayBaseToggle.onClick = [this] {
+        if (updatingFromModel || !selectedBlock || selectedBlock->stackGroup < 0 || !project)
+            return;
+        auto pre = project->toJSON();  // local pre-snapshot immediately before mutation
+        selectedBlock->alwaysPlayBase = alwaysPlayBaseToggle.getToggleState();
+        project->propagateStackSettings(selectedBlock->stackGroup, selectedBlock);
+        project->applyExternalMutation(pre);  // recordMutation (suppressUndo-aware) + change message
+    };
+    addAndMakeVisible(alwaysPlayBaseToggle);
 
     // ── Project section (no block selected) ──────────────────────────────────
     setupLabel(this, projectTitle,     "PROJECT",              11.0f, true);
@@ -166,6 +181,7 @@ InspectorPanel::InspectorPanel()
     blockDoneToggle.setTooltip("Mark this block as done (visual flag only — does not affect playback or export)");
     playChanceSlider.setTooltip("Chance (%) this block is included in the arrangement.");
     playModeCombo  .setTooltip("Sequential: play chosen blocks one after another. Simultaneous: layer them.");
+    alwaysPlayBaseToggle.setTooltip("The stack's base block (first in the stack) always plays; the remaining picks come from the other blocks.");
 
     updateFromModel();
 }
@@ -205,13 +221,18 @@ void InspectorPanel::refreshValues() {
                 rebuildStackCountRows();
                 resized();
             }
-            // Rebuild block list if the stack group or membership changed
+            // Rebuild block list if the stack group, membership, or play mode
+            // changed (mode flips move the "(base)" suffix and the
+            // alwaysPlayBase toggle in/out of the layout)
             int curGroup = selectedBlock->stackGroup;
             int memberCount = 0;
             for (auto* b : project->blocks)
                 if (b->stackGroup == curGroup) ++memberCount;
+            const bool simNow =
+                (selectedBlock->stackPlayMode == StackPlayMode::Simultaneous);
             if (curGroup != lastBuiltStackGroup ||
-                memberCount != (int)stackBlockProbRows.size()) {
+                memberCount != (int)stackBlockProbRows.size() ||
+                simNow != lastBuiltSimMode) {
                 rebuildStackBlockLabels();
                 resized();
             } else {
@@ -365,6 +386,12 @@ void InspectorPanel::rebuildStackBlockLabels() {
     lastBuiltStackGroup = selectedBlock ? selectedBlock->stackGroup : -2;
 
     if (!selectedBlock || selectedBlock->stackGroup < 0 || !project) return;
+    lastBuiltSimMode = (selectedBlock->stackPlayMode == StackPlayMode::Simultaneous);
+
+    // Base block = FIRST block of the stack group in project->blocks order
+    // (same definition the resolver uses). Labelled only in Simultaneous mode,
+    // where the "Always play base block" toggle applies.
+    bool baseLabelled = false;
 
     for (auto* b : project->blocks) {
         if (b->stackGroup != selectedBlock->stackGroup) continue;
@@ -374,6 +401,10 @@ void InspectorPanel::rebuildStackBlockLabels() {
 
         // Name label
         juce::String text = juce::String(juce::CharPointer_UTF8("\xe2\x80\xa2 ")) + b->name;
+        if (lastBuiltSimMode && !baseLabelled) {
+            text += " (base)";
+            baseLabelled = true;
+        }
         if (isThis) text += "  \xe2\x86\x90";
         row->nameLabel.setText(text, juce::dontSendNotification);
         row->nameLabel.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
@@ -575,6 +606,9 @@ void InspectorPanel::updateFromModel() {
     stackInfoLabel     .setVisible(inStack);
     playModeLabel      .setVisible(inStack);
     playModeCombo      .setVisible(inStack);
+    // Visible ONLY for simultaneous stacks
+    alwaysPlayBaseToggle.setVisible(inStack &&
+        selectedBlock->stackPlayMode == StackPlayMode::Simultaneous);
     stackPlayCountLabel.setVisible(inStack);
     addStackCountBtn   .setVisible(inStack);
     stackBlocksTitle   .setVisible(inStack);
@@ -593,6 +627,10 @@ void InspectorPanel::updateFromModel() {
         playModeCombo.setSelectedId(
             selectedBlock->stackPlayMode == StackPlayMode::Simultaneous ? 2 : 1,
             juce::dontSendNotification);
+
+        // Always-play-base toggle (simultaneous only; stack-level, propagated)
+        alwaysPlayBaseToggle.setToggleState(selectedBlock->alwaysPlayBase,
+                                            juce::dontSendNotification);
 
         // Count rows
         auto& spc = selectedBlock->stackPlayCount;
@@ -844,6 +882,12 @@ void InspectorPanel::resized() {
 
         playModeLabel.setBounds(area.removeFromTop(rh));
         playModeCombo.setBounds(area.removeFromTop(slh)); area.removeFromTop(gap);
+
+        // Toggle row only exists in Simultaneous mode
+        if (selectedBlock->stackPlayMode == StackPlayMode::Simultaneous) {
+            alwaysPlayBaseToggle.setBounds(area.removeFromTop(rh));
+            area.removeFromTop(2);
+        }
 
         stackPlayCountLabel.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
 

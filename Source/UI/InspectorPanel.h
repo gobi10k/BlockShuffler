@@ -197,6 +197,7 @@ private:
     juce::Label    stackInfoLabel;      ///< "Group 1  ·  3 blocks"
     juce::Label    playModeLabel;       ///< "Play Mode:"
     juce::ComboBox playModeCombo;       ///< Sequential / Simultaneous
+    juce::ToggleButton alwaysPlayBaseToggle { "Always play base block" };  ///< simultaneous mode only
     juce::Label    stackPlayCountLabel; ///< "How Many to Play:"
 
     // One row per count entry: [-] [Play X] [+] [x]
@@ -226,6 +227,7 @@ private:
     juce::OwnedArray<StackBlockProbRow> stackBlockProbRows;
     juce::var stackBlockDragPre;
     int lastBuiltStackGroup      = -2;            ///< detect group changes for block list
+    bool lastBuiltSimMode        = false;         ///< detect mode flips (rebuilds "(base)" suffix + toggle layout)
 
     // Track Y+H of the stack section for paint() tint
     int stackSectionY = -1;
