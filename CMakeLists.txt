@@ -164,6 +164,7 @@ target_sources(ResolverDiag PRIVATE
     Source/Model/Serialization.cpp
     Source/Audio/ArrangementResolver.cpp
     Source/Audio/TempoStretcher.cpp
+    Source/Audio/ExportRenderer.cpp
     Source/UI/LookAndFeel_BlockShuffler.cpp
 )
 target_include_directories(ResolverDiag PRIVATE Source)

@@ -7,6 +7,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "Model/Project.h"
 #include "Audio/ArrangementResolver.h"
+#include "Audio/ExportRenderer.h"
 
 using namespace BlockShuffler;
 
@@ -242,6 +243,43 @@ int main() {
 
         configure(StackPlayMode::Sequential, false, 2);
         run20("REGRESSION SEQ baseOFF playCount=2 (sequential timeline)", 2, false);
+    }
+
+    // STEP3E DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // BSF export: model.json must carry alwaysPlayBase per block.
+    {
+        std::cout << "\n=== STEP3E: BSF model.json alwaysPlayBase ===\n";
+        Project p5;
+        auto* a5 = p5.addBlock("A");
+        auto* b5 = p5.addBlock("B");
+        addClipTo(a5, "cA");
+        addClipTo(b5, "cB");
+        p5.stackBlocks(b5->id, a5->id);
+        a5->stackPlayMode  = StackPlayMode::Simultaneous;
+        a5->alwaysPlayBase = true;
+        p5.propagateStackSettings(a5->stackGroup, a5);
+
+        juce::Random rng5(99);
+        ArrangementResolver r5;
+        auto arr = r5.resolve(p5, rng5);
+        arr.sampleRate = 48000.0;
+
+        auto bsf = juce::File::getCurrentWorkingDirectory()
+                       .getChildFile("resolverdiag_step3e.bsf");
+        bsf.deleteFile();
+        ExportRenderer ex;
+        bool ok = ex.renderToBsf(arr, bsf, 16, nullptr, p5.toJSON());
+        std::cout << "renderToBsf ok=" << (ok ? 1 : 0) << "\n";
+
+        juce::ZipFile zip(bsf);
+        for (int i = 0; i < zip.getNumEntries(); ++i) {
+            if (zip.getEntry(i)->filename == "model.json") {
+                std::unique_ptr<juce::InputStream> is(zip.createStreamForEntry(i));
+                std::cout << (is ? is->readEntireStreamAsString() : juce::String("(no stream)"))
+                          << "\n";
+            }
+        }
+        bsf.deleteFile();
     }
 
     std::cout << "DONE\n";

@@ -215,6 +215,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
                 bm->setProperty("stackGroup",       bVar.getProperty("stackGroup",    -1));
                 bm->setProperty("stackPlayCount",   bVar.getProperty("stackPlayCount",{}));
                 bm->setProperty("stackPlayMode",    bVar.getProperty("stackPlayMode", "sequential"));
+                bm->setProperty("alwaysPlayBase",   bVar.getProperty("alwaysPlayBase", false));
                 // isDone is cosmetic only — not written to export manifest
 
                 // Clips
