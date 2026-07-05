@@ -14,7 +14,8 @@ public:
 
     // Metadata
     juce::String name;
-    double sampleRate = 48000.0;
+    double sampleRate        = 48000.0;
+    double defaultClipTempo  = 120.0;
 
     // Content
     juce::OwnedArray<Block>     blocks;

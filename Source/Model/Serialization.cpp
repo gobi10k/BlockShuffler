@@ -5,11 +5,12 @@
 namespace BlockShuffler {
 namespace Serialization {
 
-juce::var projectToJSON(const Project& project) {
+juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
     auto* root = new juce::DynamicObject();
     root->setProperty("version", 1);
     root->setProperty("name", project.name);
     root->setProperty("sampleRate", project.sampleRate);
+    root->setProperty("defaultClipTempo", project.defaultClipTempo);
 
     // Blocks
     juce::Array<juce::var> blocksArray;
@@ -22,15 +23,9 @@ juce::var projectToJSON(const Project& project) {
         bObj->setProperty("stackGroup",       block->stackGroup);
         bObj->setProperty("stackPlayMode",    block->stackPlayMode == StackPlayMode::Sequential
                                                   ? "sequential" : "simultaneous");
-        bObj->setProperty("isOverlapping",    block->isOverlapping);
-        bObj->setProperty("overlapProb",      (double)block->overlapProbability);
         bObj->setProperty("probability",      (double)block->probability);
-
-        juce::Array<juce::var> apciArr;
-        for (auto& s : block->allowedParentClipIds) apciArr.add(juce::var(s));
-        bObj->setProperty("allowedParentClipIds", juce::var(apciArr));
-
-        bObj->setProperty("isDone",           block->isDone);
+        bObj->setProperty("isDone",            block->isDone);
+        bObj->setProperty("playChance",       (double)block->playChance);
         bObj->setProperty("tempo",            block->tempo);
 
         // stackPlayCount
@@ -49,8 +44,16 @@ juce::var projectToJSON(const Project& project) {
             cObj->setProperty("id",                 clip->id);
             cObj->setProperty("name",               clip->name);
             cObj->setProperty("color",              clip->color.toString());
-            cObj->setProperty("audioFile",          clip->audioFile.getFullPathName());
-            cObj->setProperty("nativeSampleRate",   clip->nativeSampleRate);
+            // Store relative path (with forward slashes) when saving to disk so projects
+            // are portable across platforms and moveable directories.
+            // Absolute path is used for undo/redo snapshots (baseDir is invalid there).
+            juce::String audioPathStr;
+            if (baseDir.isDirectory() && clip->audioFile != juce::File{})
+                audioPathStr = clip->audioFile.getRelativePathFrom(baseDir).replaceCharacter('\\', '/');
+            else
+                audioPathStr = clip->audioFile.getFullPathName();
+            cObj->setProperty("audioFile", audioPathStr);
+            // nativeSampleRate is not persisted — it is recovered by loadFromFile on project open.
             // Store large int as string to avoid double precision loss
             cObj->setProperty("startMark",          juce::String(clip->startMark));
             cObj->setProperty("endMark",            juce::String(clip->endMark));
@@ -85,11 +88,12 @@ juce::var projectToJSON(const Project& project) {
     return juce::var(root);
 }
 
-bool projectFromJSON(const juce::var& json, Project& project) {
+bool projectFromJSON(const juce::var& json, Project& project, const juce::File& baseDir) {
     if (!json.isObject()) return false;
 
-    project.name       = json.getProperty("name",       "Untitled").toString();
-    project.sampleRate = (double)json.getProperty("sampleRate", 48000.0);
+    project.name             = json.getProperty("name",            "Untitled").toString();
+    project.sampleRate       = (double)json.getProperty("sampleRate",       48000.0);
+    project.defaultClipTempo = (double)json.getProperty("defaultClipTempo", 120.0);
 
     // Blocks
     if (auto* blocksArr = json.getProperty("blocks", juce::var()).getArray()) {
@@ -105,15 +109,11 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                                         .toString() == "simultaneous"
                                         ? StackPlayMode::Simultaneous
                                         : StackPlayMode::Sequential;
-            block->isOverlapping  = (bool)  bVar.getProperty("isOverlapping",  false);
-            block->overlapProbability = (float)(double)bVar.getProperty("overlapProb", 0.5);
             block->probability    = (float)(double)bVar.getProperty("probability", 1.0);
-
-            block->allowedParentClipIds.clear();
-            if (auto* apciArr = bVar.getProperty("allowedParentClipIds", juce::var()).getArray())
-                for (auto& v : *apciArr) block->allowedParentClipIds.add(v.toString());
-
             block->isDone         = (bool)  bVar.getProperty("isDone",         false);
+            // FIX M7: clamp on load so out-of-range saved values don't cause silent skips
+            block->playChance     = juce::jlimit(0.0f, 1.0f,
+                                        (float)(double)bVar.getProperty("playChance", 1.0));
             block->tempo          = (double)bVar.getProperty("tempo",          120.0);
 
             // stackPlayCount
@@ -135,7 +135,21 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                     clip->name             = cVar.getProperty("name", "Clip").toString();
                     clip->color            = juce::Colour::fromString(
                                                 cVar.getProperty("color", "FFFFFFFF").toString());
-                    clip->audioFile        = juce::File(cVar.getProperty("audioFile", "").toString());
+                    // Resolve audio path: relative paths are resolved against baseDir (project dir).
+                    // Absolute paths (from undo/redo snapshots or old project files) are used as-is.
+                    {
+                        const juce::String pathStr = cVar.getProperty("audioFile", "").toString();
+                        if (pathStr.isEmpty()) {
+                            clip->audioFile = juce::File{};
+                        } else if (pathStr.startsWithChar('/') ||
+                                   (pathStr.length() >= 2 && pathStr[1] == ':')) {
+                            clip->audioFile = juce::File(pathStr);  // already absolute
+                        } else if (baseDir.isDirectory()) {
+                            clip->audioFile = baseDir.getChildFile(pathStr);  // relative → absolute
+                        } else {
+                            clip->audioFile = juce::File(pathStr);  // fallback for in-memory snapshots
+                        }
+                    }
                     clip->probability      = (float)(double)cVar.getProperty("probability",     1.0);
                     clip->tempo            = (double)cVar.getProperty("tempo",            120.0);
                     clip->retainLeadInTempo= (bool)cVar.getProperty("retainLeadInTempo",  false);
@@ -147,6 +161,9 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                     if (clip->audioFile.existsAsFile()) {
                         clip->loadFromFile(clip->audioFile, project.formatManager,
                                            project.sampleRate);
+                        // FIX M6: warn when a file exists but can't be decoded
+                        if (!clip->audioBuffer)
+                            project.missingFilesOnLoad.add(clip->audioFile.getFullPathName());
                     } else if (clip->audioFile != juce::File{}) {
                         project.missingFilesOnLoad.add(clip->audioFile.getFullPathName());
                     }

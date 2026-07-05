@@ -11,7 +11,10 @@ namespace BlockShuffler {
  * Thread safety:
  *   play() / stop() / rewind() are called on the UI thread.
  *   getNextAudioBlock() is called on the audio thread.
- *   Uses atomic pointer swap for the arrangement to avoid locks on audio thread.
+ *   Uses CriticalSection with tryEnter on the audio thread — on lock contention
+ *   the audio block is silenced rather than blocking the audio callback.
+ *   Arrangement swaps are infrequent relative to the audio callback rate, so
+ *   contention is rare in practice.
  */
 class PlaybackEngine {
 public:

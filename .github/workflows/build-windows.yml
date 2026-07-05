@@ -2,9 +2,10 @@ name: Build Windows
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, final_draft, blockshuffler-ui-polish-wt6M4, UI_noLogo, fix-playback-ui-bugs-LD89P, claude/fix-playback-ui-bugs-LD89P, fix-audit-issues-2BRgG, claude/fix-audit-issues-2BRgG ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, fix-audit-issues-2BRgG, claude/fix-audit-issues-2BRgG  ]
+  workflow_dispatch:
 
 jobs:
   build:

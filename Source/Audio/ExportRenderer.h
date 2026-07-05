@@ -44,8 +44,6 @@ public:
 
 private:
     static bool writeClipFlac(const Clip& clip, const juce::File& dest, int bitDepth, double sampleRate);
-    static void mixEntry(juce::AudioBuffer<float>& dest,
-                         const ResolvedEntry& entry);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ExportRenderer)
 };

@@ -4,14 +4,35 @@
 #include "../Model/Block.h"
 #include "../Model/Clip.h"
 #include "LookAndFeel_BlockShuffler.h"
+#include <map>
 
 namespace BlockShuffler {
 
-// A number box that supports text input and click-drag to change value
+// A number box that supports text input (single click) and click-drag to change value.
+// Single click opens an inline TextEditor in-place — no popup window.
 class DraggableNumberBox : public juce::Component {
 public:
     DraggableNumberBox(double rMin = 0.0, double rMax = 1000.0, int decimals = 1)
-        : rMin(rMin), rMax(rMax), decimals(decimals) {}
+        : rMin(rMin), rMax(rMax), decimals(decimals)
+    {
+        addChildComponent(inlineEditor);
+        inlineEditor.setInputRestrictions(8, "0123456789.");
+        inlineEditor.setJustification(juce::Justification::centred);
+        inlineEditor.setSelectAllWhenFocused(true);
+        inlineEditor.setFont(LookAndFeel_BlockShuffler::monoFont(13.0f));
+        inlineEditor.setColour(juce::TextEditor::backgroundColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::bgLight));
+        inlineEditor.setColour(juce::TextEditor::textColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+        inlineEditor.setColour(juce::TextEditor::outlineColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+        inlineEditor.setColour(juce::TextEditor::focusedOutlineColourId,
+                               juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+
+        inlineEditor.onReturnKey  = [this]() { commitEdit(); };
+        inlineEditor.onEscapeKey  = [this]() { cancelEdit(); };
+        inlineEditor.onFocusLost  = [this]() { commitEdit(); };
+    }
 
     void setValue(double v, juce::NotificationType notify = juce::dontSendNotification) {
         v = juce::jlimit(rMin, rMax, v);
@@ -36,23 +57,33 @@ private:
     bool startDragging = false;
     int dragStartY = 0;
     double dragStartValue = 0.0;
+    bool editing = false;
+    juce::TextEditor inlineEditor;
 
     void paint(juce::Graphics& g) override {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight));
         g.fillRoundedRectangle(getLocalBounds().toFloat(), 4.0f);
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
-        g.setFont(juce::Font(juce::FontOptions(14.0f)));
-        g.drawFittedText(juce::String(value, decimals), getLocalBounds().reduced(4),
-                         juce::Justification::centred, 1);
+        if (!editing) {
+            g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+            g.setFont(LookAndFeel_BlockShuffler::monoFont(13.0f));
+            g.drawFittedText(juce::String(value, decimals), getLocalBounds().withTrimmedRight(6),
+                             juce::Justification::centredRight, 1);
+        }
+    }
+
+    void resized() override {
+        inlineEditor.setBounds(getLocalBounds());
     }
 
     void mouseDown(const juce::MouseEvent& e) override {
+        if (editing) return;
         startDragging = false;
         dragStartY = e.getPosition().y;
         dragStartValue = value;
     }
 
     void mouseDrag(const juce::MouseEvent& e) override {
+        if (editing) return;
         int delta = std::abs(e.getPosition().y - dragStartY);
         if (!startDragging && delta > 4)
             startDragging = true;
@@ -66,85 +97,37 @@ private:
     }
 
     void mouseUp(const juce::MouseEvent&) override {
+        if (editing) return;
         if (!startDragging)
-            showTextEntryDialog();
+            openInlineEditor();
         startDragging = false;
     }
 
-    void mouseDoubleClick(const juce::MouseEvent&) override {
-        showTextEntryDialog();
+    void openInlineEditor() {
+        if (editing) return;
+        editing = true;
+        inlineEditor.setText(juce::String(value, decimals), false);
+        inlineEditor.setVisible(true);
+        inlineEditor.grabKeyboardFocus();
+        inlineEditor.selectAll();
+        repaint();
     }
 
-    void showTextEntryDialog() {
-        class EditorDialog : public juce::Component {
-        public:
-            juce::DialogWindow* parentWindow = nullptr;
-            
-            EditorDialog(double initialVal, double minVal, double maxVal, int dec,
-                        std::function<void(double)> onOk, std::function<void()> onCancel)
-                : minVal(minVal), maxVal(maxVal), decimals(dec), onOk(onOk), onCancel(onCancel)
-            {
-                addAndMakeVisible(textEditor);
-                textEditor.setText(juce::String(initialVal, decimals), false);
-                textEditor.setSelectAllWhenFocused(true);
-                textEditor.setInputRestrictions(8, "0123456789.");
-                
-                addAndMakeVisible(okButton);
-                okButton.setButtonText("OK");
-                okButton.onClick = [this, minVal, maxVal, onOk] {
-                    double newVal = textEditor.getText().getDoubleValue();
-                    newVal = juce::jlimit(minVal, maxVal, newVal);
-                    if (onOk) onOk(newVal);
-                    if (parentWindow) parentWindow->closeButtonPressed();
-                };
-                
-                addAndMakeVisible(cancelButton);
-                cancelButton.setButtonText("Cancel");
-                cancelButton.onClick = [this, onCancel] {
-                    if (onCancel) onCancel();
-                    if (parentWindow) parentWindow->closeButtonPressed();
-                };
-                
-                setSize(200, 80);
-                textEditor.grabKeyboardFocus();
-            }
-            
-            bool keyPressed(const juce::KeyPress& key) override {
-                if (key == juce::KeyPress::returnKey) {
-                    okButton.triggerClick();
-                    return true;
-                }
-                return false;
-            }
-            
-            void resized() override {
-                textEditor.setBounds(10, 10, 180, 24);
-                okButton.setBounds(40, 45, 50, 24);
-                cancelButton.setBounds(100, 45, 60, 24);
-            }
-            
-        private:
-            juce::TextEditor textEditor;
-            juce::TextButton okButton, cancelButton;
-            double minVal, maxVal;
-            int decimals;
-            std::function<void(double)> onOk;
-            std::function<void()> onCancel;
-        };
-        
-        auto* dialog = new EditorDialog(value, rMin, rMax, decimals,
-            [this](double v) { setValue(v, juce::sendNotification); },
-            []() {});
-        
-        juce::DialogWindow::LaunchOptions o;
-        o.content.setOwned(dialog);
-        o.dialogTitle = "Edit Value";
-        o.dialogBackgroundColour = juce::Colour(LookAndFeel_BlockShuffler::bgMedium);
-        o.escapeKeyTriggersCloseButton = true;
-        o.useNativeTitleBar = true;
-        o.resizable = false;
-        auto* win = o.launchAsync();
-        dialog->parentWindow = win;
+    void commitEdit() {
+        if (!editing) return;
+        double newVal = inlineEditor.getText().getDoubleValue();
+        newVal = juce::jlimit(rMin, rMax, newVal);
+        editing = false;
+        inlineEditor.setVisible(false);
+        repaint();
+        setValue(newVal, juce::sendNotification);
+    }
+
+    void cancelEdit() {
+        if (!editing) return;
+        editing = false;
+        inlineEditor.setVisible(false);
+        repaint();
     }
 };
 
@@ -197,21 +180,17 @@ private:
 
     // ── Block section ────────────────────────────────────────────────────────
     juce::Label        blockTitle;
+    juce::Label        blockTempoLabel;
+    DraggableNumberBox blockTempoField  { 20.0, 300.0, 1 };
     juce::ToggleButton blockDoneToggle  { "Mark Block as Done" };
-    juce::Label        overlapLabel;
-    juce::Slider       overlapSlider;
+    juce::Label        playChanceLabel;
+    juce::Slider       playChanceSlider;
+    juce::var          playChanceSliderDragPre;
 
-    // ── "Plays Over" section ─────────────────────────────────────────────────
-    juce::Label playsOverTitle;
-    juce::Label playsOverHint;
-    struct PlaysOverRow {
-        juce::ToggleButton toggle { "" };
-        juce::String       clipId;
-    };
-    juce::OwnedArray<PlaysOverRow> playsOverRows;
-    int lastBuiltPlaysOverClipCount = -1;
-
-    void rebuildPlaysOverRows();
+    // ── Project section (shown when no block selected) ───────────────────────
+    juce::Label        projectTitle;
+    juce::Label        defaultTempoLabel;
+    DraggableNumberBox defaultTempoField { 20.0, 300.0, 1 };
 
     // ── Stack settings section (only when block->stackGroup >= 0) ────────────
     juce::Label    stackSectionTitle;   ///< "STACK SETTINGS" heading
@@ -232,8 +211,20 @@ private:
     int lastBuiltStackCountRows = -1;
 
     juce::Label stackBlocksTitle;                 ///< "Blocks in stack:"
-    juce::OwnedArray<juce::Label> stackBlockLabels; ///< one label per block in group
-    juce::OwnedArray<juce::Slider> stackBlockProbSliders; ///< one probability slider per block
+
+    // One row per block in the stack: [name] [====playChance slider====] [eff: XX%]
+    struct StackBlockProbRow {
+        juce::Label  nameLabel;
+        juce::Slider probSlider;
+        juce::Label  effectiveLabel;
+        StackBlockProbRow() {
+            probSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+            probSlider.setRange(0.0, 100.0, 1.0);
+            probSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 36, 16);
+        }
+    };
+    juce::OwnedArray<StackBlockProbRow> stackBlockProbRows;
+    juce::var stackBlockDragPre;
     int lastBuiltStackGroup      = -2;            ///< detect group changes for block list
 
     // Track Y+H of the stack section for paint() tint
@@ -242,7 +233,8 @@ private:
 
     void rebuildStackCountRows();
     void rebuildStackBlockLabels();
-    void rebuildStackBlockProbRows();
+    void recalcStackEffectiveLabels();
+    std::map<juce::String, float> computeStackInclusionProbabilities(int stackGroup) const;
 
     // ── Links section ────────────────────────────────────────────────────────
     juce::Label  linksTitle;
@@ -263,7 +255,6 @@ private:
     bool updatingFromModel = false;
 
     juce::var probSliderDragPre;
-    juce::var overlapSliderDragPre;
 
     void updateFromModel();
     void rebuildLinkRows();

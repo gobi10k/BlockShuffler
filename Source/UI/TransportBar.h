@@ -17,6 +17,7 @@ public:
     std::function<void()> onRewind;
     std::function<void()> onExport;
     std::function<void()> onSave;
+    std::function<void()> onSaveAs;
     std::function<void()> onOpen;
 
     void setIsPlaying(bool playing);
@@ -28,14 +29,18 @@ private:
     juce::TextButton stopBtn   { "Stop" };
     juce::TextButton exportBtn { "Export" };
     juce::TextButton saveBtn   { "Save" };
+    juce::TextButton saveAsBtn { "Save As" };
     juce::TextButton openBtn   { "Open" };
 
     bool   isPlaying   = false;
     double currentSecs = 0.0;
     double totalSecs   = 0.0;
 
-    // Rect calculated in resized(), used in paint() to avoid overlapping buttons
+    juce::Image logoImage;  // loaded once in constructor from BinaryData
+
+    // Rects calculated in resized(), used in paint()
     juce::Rectangle<int> timeDisplayArea;
+    juce::Rectangle<int> brandingArea;
 
     static juce::String formatTime(double seconds);
 

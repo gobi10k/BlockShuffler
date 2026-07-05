@@ -1,9 +1,14 @@
+// INVARIANT: isDone is cosmetic only. This file must NEVER reference isDone.
+// isDone is for the UI to dim or badge blocks/clips; it has no effect on which
+// blocks or clips are selected during arrangement resolution or playback.
+// grep -c "isDone" Source/Audio/ArrangementResolver.cpp  must return 0.
 #include "ArrangementResolver.h"
 #include "TempoStretcher.h"
 #include <algorithm>
 #include <numeric>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace BlockShuffler {
 
@@ -25,19 +30,20 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     ResolvedArrangement result;
     result.sampleRate = project.sampleRate;
 
-    // ── 1. Collect blocks + build mutable position map ───────────────────────
-    std::vector<Block*> sorted;
-    sorted.reserve((size_t)project.blocks.size());
-    for (auto* b : project.blocks) sorted.push_back(b);
-
-    std::unordered_map<std::string, int> posMap;
+    // ── 1. Collect blocks + build lookup map ────────────────────────────────
     std::unordered_map<std::string, const Block*> blockById;
     for (auto* b : project.blocks)
         blockById[b->id.toStdString()] = b;
 
-    for (auto* b : sorted) posMap[b->id.toStdString()] = b->position;
+    // ── 2. Shuffle links and apply bidirectional position swaps ─────────────
+    // Work on a local position map — never touch block->position directly.
+    // The resolver must not mutate the project model; direct writes would cause
+    // positions to drift across successive resolve() calls.
+    std::unordered_map<std::string, int> localPos;
+    localPos.reserve((size_t)project.blocks.size());
+    for (auto* b : project.blocks)
+        localPos[b->id.toStdString()] = b->position;
 
-    // ── 2. Shuffle links and apply swaps ─────────────────────────────────────
     std::vector<BlockLink*> shuffledLinks;
     shuffledLinks.reserve((size_t)project.links.size());
     for (auto* lnk : project.links) shuffledLinks.push_back(lnk);
@@ -46,29 +52,84 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         int j = rng.nextInt(i + 1);
         std::swap(shuffledLinks[(size_t)i], shuffledLinks[(size_t)j]);
     }
+
+    // Pre-roll every link's swap decision.
+    //
+    // Cross-stack links (blocks in different stacks, or at least one standalone):
+    //   Apply the swap to localPos immediately and record both block IDs in
+    //   swappedBlockIds.  In slot-building, any block in swappedBlockIds is
+    //   treated as standalone for this pass, leaving its original stack.
+    //
+    // Same-stack links (both blocks share the same stackGroup >= 0):
+    //   The decision is carried forward into the sequential-stack slot loop,
+    //   where it overrides the random weighted-sample order to produce a
+    //   deterministic play order.
+    struct LinkDecision { BlockLink* link; bool triggered; };
+    std::vector<LinkDecision> linkDecisions;
+    linkDecisions.reserve(shuffledLinks.size());
+    std::unordered_set<std::string> swappedBlockIds;
+
     for (auto* lnk : shuffledLinks) {
-        if (rng.nextFloat() < lnk->swapProbability)
-            std::swap(posMap[lnk->blockA.toStdString()],
-                      posMap[lnk->blockB.toStdString()]);
+        bool triggered = (rng.nextFloat() < lnk->swapProbability);
+        linkDecisions.push_back({lnk, triggered});
+        if (!triggered) continue;
+
+        auto itBa = blockById.find(lnk->blockA.toStdString());
+        auto itBb = blockById.find(lnk->blockB.toStdString());
+        bool sameStack = (itBa != blockById.end() && itBb != blockById.end()
+                          && itBa->second->stackGroup >= 0
+                          && itBa->second->stackGroup == itBb->second->stackGroup);
+        if (sameStack) continue;  // order enforced in sequential slot loop
+
+        // Cross-stack: swap the two specific blocks in localPos and mark them
+        // as swapped.  Stack mates of either block are NOT touched.
+        // swappedBlockIds (checked in slot-building below) pulls each swapped
+        // block out of its former stack and gives it its own slot.
+        auto itA = localPos.find(lnk->blockA.toStdString());
+        auto itB = localPos.find(lnk->blockB.toStdString());
+        if (itA != localPos.end() && itB != localPos.end()) {
+            std::swap(itA->second, itB->second);  // model untouched
+            swappedBlockIds.insert(lnk->blockA.toStdString());
+            swappedBlockIds.insert(lnk->blockB.toStdString());
+        }
     }
 
     // ── 3. Sort by resolved positions ────────────────────────────────────────
-    std::sort(sorted.begin(), sorted.end(), [&posMap](Block* a, Block* b) {
-        return posMap[a->id.toStdString()] < posMap[b->id.toStdString()];
-    });
+    // Rebuild order from the local (possibly-swapped) position map.
+    std::vector<std::pair<int, Block*>> order;
+    order.reserve((size_t)project.blocks.size());
+    for (auto* b : project.blocks) {
+        auto it = localPos.find(b->id.toStdString());
+        order.push_back({ it != localPos.end() ? it->second : b->position, b });
+    }
+    std::sort(order.begin(), order.end(),
+              [](const std::pair<int,Block*>& a, const std::pair<int,Block*>& b) {
+                  return a.first < b.first;
+              });
+
+    std::vector<Block*> sorted;
+    sorted.reserve(order.size());
+    for (auto& [pos, blk] : order)
+        sorted.push_back(blk);
 
     // ── 4. Group into slots by stackGroup ────────────────────────────────────
     // A slot is one or more blocks sharing the same stackGroup.
     // Blocks NOT in a stack (stackGroup < 0) each occupy their own slot.
-    // Stacks (stackGroup >= 0) occupy a single slot at the position of the first
-    // block encountered in that stack.
+    // Blocks that were cross-stack-swapped (swappedBlockIds) also get their own
+    // slot so they don't get pooled with their former stack mates.
+    // All other stacked blocks are always grouped together regardless of their
+    // individual position values — stacked blocks intentionally have different
+    // positions because Project::moveBlock() assigns sequential indices to all
+    // blocks and stackBlocks() never equalises them.
     struct Slot { std::vector<Block*> blocks; };
     std::vector<Slot> slots;
     std::unordered_map<int, size_t> sgToSlot;
 
     for (auto* b : sorted) {
         int sg = b->stackGroup;
-        if (sg < 0) {
+        bool wasSwapped = swappedBlockIds.count(b->id.toStdString()) > 0;
+
+        if (sg < 0 || wasSwapped) {
             slots.push_back({{b}});
         } else {
             auto it = sgToSlot.find(sg);
@@ -82,102 +143,59 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     }
 
     // ── 5. Walk slots and build timeline ─────────────────────────────────────
-    int64_t cursor   = 0;
-    bool    songEnded = false;
+    int64_t cursor        = 0;
+    bool    songEnded     = false;
+    bool    firstEntryAdded = false;  // used to offset cursor so first clip's lead-in starts at t=0
 
     for (auto& slot : slots) {
         if (songEnded) break;
 
-        // Separate overlapping (layer-on-top) from normal blocks
-        std::vector<Block*> normal, overlapping;
-        for (auto* b : slot.blocks) {
-            if (b->isOverlapping) overlapping.push_back(b);
-            else                  normal.push_back(b);
-        }
-        // Remove done normal blocks
-        normal.erase(std::remove_if(normal.begin(), normal.end(),
-            [](Block* b){ return b->isDone; }), normal.end());
+        const auto& allBlocks = slot.blocks;
 
-            if (normal.empty())
-        {
-            // No non-overlapping blocks in this slot.  If there are overlapping
-            // blocks, attach them to the most recent primary entry already
-            // in the arrangement (handles standalone isOverlapping blocks
-            // whose stackGroup was never set, i.e. stackGroup == -1).
-            if (!overlapping.empty() && !result.entries.isEmpty())
-            {
-                // Find the last non-overlapping entry's timeline position.
-                int64_t overlayStart = -1;
-                for (int i = result.entries.size() - 1; i >= 0; --i)
-                {
-                    const auto& e = result.entries.getReference(i);
-                    auto it = blockById.find(e.blockId.toStdString());
-                    bool isOver = (it != blockById.end() && it->second->isOverlapping);
-                    if (!isOver) { overlayStart = e.timelinePos; break; }
-                }
-                if (overlayStart >= 0)
-                {
-                    for (auto* ob : overlapping)
-                    {
-                        if (ob->isDone || ob->clips.isEmpty()) continue;
-                        float roll = rng.nextFloat();
-                        if (roll < ob->overlapProbability)
-                        {
-                            auto* oc = pickClip(*ob, rng);
-                            if (oc) {
-                                auto trimmed = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
-                                if (trimmed) {
-                                    result.entries.add({
-                                        trimmed,
-                                        0, (int64_t)trimmed->getNumSamples(), oc->startMark, oc->retainTailTempo,
-                                        oc->name, oc->id,
-                                        overlayStart, 1.0f, ob->id, true
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-
-        if (normal.size() == 1 && overlapping.empty()) {
+        if (allBlocks.size() == 1) {
             // ── Simple standalone block ───────────────────────────────────
-            auto* block = normal[0];
+            auto* block = allBlocks[0];
+            if (rng.nextFloat() >= block->playChance) continue;  // block skipped this time
             if (block->clips.isEmpty()) continue;
             auto* clip = pickClip(*block, rng);
             if (!clip) continue;
 
-            // Trim buffer to [startMark, endMark) region
-            auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
+            // Trim buffer to [0, endMark) — preserves lead-in before startMark
+            auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
             if (!trimmed) continue;
-            int64_t trimmedLen = trimmed->getNumSamples();
+
+            // Offset cursor so the first clip's lead-in starts at timeline position 0.
+            // timelinePos = body start; lead-in at [timelinePos - startMark, timelinePos).
+            if (!firstEntryAdded) { cursor = clip->startMark; firstEntryAdded = true; }
+            int64_t tPos    = cursor;  // body start
+            int64_t bodyLen = clip->endMark - clip->startMark;
 
             result.entries.add({
                 trimmed,
-                0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                 clip->name, clip->id,
-                cursor, 1.0f, block->id
+                tPos, 1.0f, block->id
             });
 
-            cursor += trimmedLen;
+            cursor += bodyLen;
             if (clip->isSongEnder) songEnded = true;
 
         } else {
             // ── Stack slot ────────────────────────────────────────────────
-            // Pick how many normal blocks to play
+            // Pick how many blocks to play
             int playCount = 1;
-            if (normal[0]->stackPlayCount.isValid())
-                playCount = normal[0]->stackPlayCount.pick(rng);
-            playCount = juce::jlimit(1, (int)normal.size(), playCount);
+            if (allBlocks[0]->stackPlayCount.isValid())
+                playCount = allBlocks[0]->stackPlayCount.pick(rng);
+            playCount = juce::jlimit(1, (int)allBlocks.size(), playCount);
 
-            // Sample playCount blocks from normal pool with weighted probability
+            // Sample playCount blocks from the pool with weighted probability.
+            // playChance is the selection weight — the same field the inspector exposes.
+            // Without-replacement weighted sampling: each pick reduces the pool by one.
             std::vector<Block*> picked;
-            std::vector<Block*> pool = normal;
+            std::vector<Block*> pool = allBlocks;
             for (int k = 0; k < playCount && !pool.empty(); ++k) {
                 float totalWeight = 0.0f;
-                for (auto* b : pool) totalWeight += b->probability;
+                for (auto* b : pool) totalWeight += b->playChance;
 
                 if (totalWeight <= 0.0f) {
                     int idx = rng.nextInt((int)pool.size());
@@ -187,7 +205,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     float roll = rng.nextFloat() * totalWeight;
                     float cum = 0.0f;
                     for (size_t i = 0; i < pool.size(); ++i) {
-                        cum += pool[i]->probability;
+                        cum += pool[i]->playChance;
                         if (roll <= cum || i == pool.size() - 1) {
                             picked.push_back(pool[i]);
                             pool.erase(pool.begin() + i);
@@ -198,135 +216,127 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             }
 
             const bool isSimultaneous =
-                (normal[0]->stackPlayMode == StackPlayMode::Simultaneous);
+                (allBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous);
+
+            // STEP1 DIAG (remove in MASTER_PROMPT Step 7)
+            DBG("STACK grp=" + juce::String(allBlocks[0]->stackGroup)
+                + " mode=" + juce::String(isSimultaneous ? "Sim" : "Seq")
+                + " playCount=" + juce::String(playCount)
+                + " groupSize=" + juce::String((int)allBlocks.size()));
+            DBG("picked=" + juce::String((int)picked.size()));
+
+            [[maybe_unused]] const int entriesBefore = result.entries.size();
 
             if (isSimultaneous) {
-                // All picked blocks start at the same timeline position (trimmed buffers)
-                const int64_t slotStart = cursor;
-                const float stackGain = 1.0f / (float)juce::jmax(1, (int)picked.size());
+                // All picked blocks' bodies start at the same timeline position.
+                // Lead-ins may extend before that position (each clip's own startMark back).
+                // playChance is the selection weight, so every picked block plays.
+                // Gain is normalised by the number of simultaneous voices for equal mix.
+                const float stackGain = (playCount > 0) ? 1.0f / (float)playCount : 1.0f;
 
-                // Collect picked clips so overlapping-block targeting can check them
-                juce::Array<Clip*> simultaneousClips;
-                int64_t maxTrimmedLen = 0;
-                for (auto* b : picked) {
+                int64_t maxBodyLen = 0;
+                int64_t bodyStart  = -1;  // latched on first valid clip
+
+                for (size_t pi = 0; pi < picked.size(); ++pi) {
+                    auto* b = picked[pi];
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
-                    auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
+
+                    auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
                     if (!trimmed) continue;
-                    int64_t trimmedLen = trimmed->getNumSamples();
+
+                    // Initialise cursor on first ever entry so lead-in starts at t=0.
+                    // timelinePos = body start; lead-in at [timelinePos - startMark, timelinePos).
+                    if (!firstEntryAdded) { cursor = clip->startMark; firstEntryAdded = true; }
+                    if (bodyStart < 0) bodyStart = cursor;  // all bodies share this start
+
+                    int64_t tPos    = bodyStart;  // body start
+                    int64_t bodyLen = clip->endMark - clip->startMark;
+
                     result.entries.add({
                         trimmed,
-                        0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                        clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                         clip->name, clip->id,
-                        slotStart, stackGain, b->id
+                        tPos, stackGain, b->id
                     });
-                    maxTrimmedLen = std::max(maxTrimmedLen, trimmedLen);
-                    simultaneousClips.add(clip);
-                    if (clip->isSongEnder) songEnded = true;
+                    maxBodyLen = std::max(maxBodyLen, bodyLen);
+                    if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
 
-                // Overlapping blocks layer on top of this slot
-                for (auto* ob : overlapping) {
-                    if (ob->isDone || ob->clips.isEmpty()) continue;
-                    // Clip targeting: allow only if at least one simultaneous clip is in the allowed list
-                    if (!ob->allowedParentClipIds.isEmpty()) {
-                        bool anyAllowed = false;
-                        for (auto* sc : simultaneousClips)
-                            if (ob->allowedParentClipIds.contains(sc->id)) { anyAllowed = true; break; }
-                        if (!anyAllowed) {
-                            continue;
-                        }
-                    }
-                    if (rng.nextFloat() < ob->overlapProbability) {
-                        auto* clip = pickClip(*ob, rng);
-                        if (clip) {
-                            auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
-                            if (trimmed) {
-                                result.entries.add({
-                                    trimmed,
-                                    0, (int64_t)trimmed->getNumSamples(), clip->startMark, clip->retainTailTempo,
-                                    clip->name, clip->id,
-                                    slotStart, 1.0f, ob->id, true
-                                });
-                            }
-                        }
-                    }
-                }
-                cursor += maxTrimmedLen;
+                if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid
+                cursor += maxBodyLen;
 
             } else {
-                // Sequential: each picked block occupies its own time slot (trimmed buffers).
+                // Sequential: each picked block occupies its own time slot.
+
+                // ── Same-stack link ordering ───────────────────────────────────
+                // For any link whose both endpoints are in this picked list, enforce
+                // a deterministic play order instead of the random weighted-sample
+                // order:  triggered → blockB before blockA,  not-triggered → blockA
+                // before blockB.  This guarantees a 100% swap probability always
+                // produces the same sequence every play.  Cross-stack links have at
+                // most one endpoint in picked, so they are silently skipped here.
+                for (const auto& ld : linkDecisions) {
+                    Block* la = nullptr;
+                    Block* lb = nullptr;
+                    for (auto* p : picked) {
+                        if (p->id == ld.link->blockA) la = p;
+                        if (p->id == ld.link->blockB) lb = p;
+                    }
+                    if (!la || !lb) continue;
+                    auto itA = std::find(picked.begin(), picked.end(), la);
+                    auto itB = std::find(picked.begin(), picked.end(), lb);
+                    bool aIsFirst = (itA < itB);
+                    if ( ld.triggered && aIsFirst)  std::swap(*itA, *itB);
+                    if (!ld.triggered && !aIsFirst) std::swap(*itA, *itB);
+                }
+
                 for (auto* b : picked) {
                     if (songEnded) break;
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
 
-                    // Trim buffer to [startMark, endMark)
-                    auto trimmed = trimBuffer(*clip->audioBuffer, clip->startMark, clip->endMark);
+                    // Trim buffer to [0, endMark) — preserves lead-in
+                    auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
                     if (!trimmed) continue;
-                    int64_t trimmedLen = trimmed->getNumSamples();
+
+                    // Initialise cursor on first ever entry so lead-in starts at t=0.
+                    // timelinePos = body start; lead-in at [timelinePos - startMark, timelinePos).
+                    if (!firstEntryAdded) { cursor = clip->startMark; firstEntryAdded = true; }
+                    int64_t tPos      = cursor;  // body start
+                    int64_t bodyLen   = clip->endMark - clip->startMark;
+                    int64_t bodyStart = cursor;
 
                     result.entries.add({
                         trimmed,
-                        0, trimmedLen, clip->startMark, clip->retainTailTempo,
+                        clip->startMark, clip->endMark, clip->startMark, clip->retainTailTempo,
                         clip->name, clip->id,
-                        cursor, 1.0f, b->id
+                        tPos, 1.0f, b->id
                     });
-
-                    // Layer overlapping blocks on top of this picked block
-                    for (auto* ob : overlapping) {
-                        if (ob->isDone || ob->clips.isEmpty()) continue;
-                        // Clip targeting: skip if this overlay isn't allowed over the selected parent clip
-                        if (!ob->allowedParentClipIds.isEmpty() &&
-                            !ob->allowedParentClipIds.contains(clip->id))
-                        {
-                            continue;
-                        }
-                        float roll = rng.nextFloat();
-                        if (roll < ob->overlapProbability) {
-                            auto* oc = pickClip(*ob, rng);
-                            if (oc) {
-                                auto trimmedOverlay = trimBuffer(*oc->audioBuffer, oc->startMark, oc->endMark);
-                                if (trimmedOverlay) {
-                                    result.entries.add({
-                                        trimmedOverlay,
-                                        0, (int64_t)trimmedOverlay->getNumSamples(), oc->startMark, oc->retainTailTempo,
-                                        oc->name, oc->id,
-                                        cursor, 1.0f, ob->id, true
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    cursor += trimmedLen;
-                    if (clip->isSongEnder) songEnded = true;
+                    cursor += bodyLen;
+                    if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
                 }
             }
+
+            // REGRESSION GUARD: entries added for this stack slot must not exceed playCount.
+            // If this assertion fires, slot-building incorrectly split stacked blocks into
+            // standalone slots, causing each to play through the standalone playChance gate.
+            jassert(result.entries.size() - entriesBefore <= playCount);
         }
     }
 
-    // ── Post-process: compute tempo-stretch ratios between adjacent primary entries ──
-    // "Primary" = non-overlapping blocks. Simultaneous entries sharing the same
-    // timelinePos are skipped (no stretch between entries in the same slot).
+    // ── Post-process: compute tempo-stretch ratios between adjacent entries ──
+    // Simultaneous entries sharing the same timelinePos are skipped (no stretch within a slot).
     {
-        // Collect primary (non-overlapping, non-simultaneous) entry indices in order
         std::vector<int> primary;
-        for (int i = 0; i < result.entries.size(); ++i) {
-            const auto& e = result.entries.getReference(i);
-            auto it = blockById.find(e.blockId.toStdString());
-            if (it != blockById.end() && !it->second->isOverlapping)
-                primary.push_back(i);
-        }
+        for (int i = 0; i < result.entries.size(); ++i)
+            primary.push_back(i);
 
         for (size_t k = 0; k + 1 < primary.size(); ++k) {
             auto& entA = result.entries.getReference(primary[k]);
             auto& entB = result.entries.getReference(primary[k + 1]);
-
-            // Skip overlay entries — they must never receive stretch ratios, or they
-            // will be silenced by the WSOLA pre-computation pass (which skips isOverlay).
-            if (entA.isOverlay || entB.isOverlay) continue;
 
             // Skip pairs sharing the same timeline position (simultaneous stack slot)
             if (entA.timelinePos == entB.timelinePos)
@@ -337,9 +347,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             // For now we look them up via the pointers, which is acceptable on the UI thread
             // inside resolve().
 
-            // Actually, we can get tempos from the project during resolve()
-            auto* bA = blockById.find(entA.blockId.toStdString())->second;
-            auto* bB = blockById.find(entB.blockId.toStdString())->second;
+            // FIX C4: guard every blockById lookup before dereferencing
+            auto itA = blockById.find(entA.blockId.toStdString());
+            if (itA == blockById.end()) continue;
+            auto itB = blockById.find(entB.blockId.toStdString());
+            if (itB == blockById.end()) continue;
+            auto* bA = itA->second;
+            auto* bB = itB->second;
             const Clip* cA = bA->getClipById(entA.clipId);
             const Clip* cB = bB->getClipById(entB.clipId);
 
@@ -357,7 +371,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     for (int i = 0; i < result.entries.size(); ++i)
     {
         auto& entry = result.entries.getReference(i);
-        if (entry.isOverlay || !entry.audioBuffer) continue;  // overlay entries play at original tempo; no stretching
+        if (!entry.audioBuffer) continue;
         const auto& buf = *entry.audioBuffer;
         const int64_t leadInLen = entry.startMark;
         const int64_t tailLen   = juce::jmax((int64_t)0,
@@ -382,16 +396,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         }
     }
 
-    // Extend total duration to include the (stretched) tail of the last primary entry
+    // Extend total duration to include the (stretched) tail of the last entry
     if (!result.entries.isEmpty()) {
-        // Find last non-overlapping entry index
         int lastIdx = result.entries.size() - 1;
-        for (int i = result.entries.size() - 1; i >= 0; --i) {
-            const auto& e = result.entries.getReference(i);
-            auto it = blockById.find(e.blockId.toStdString());
-            bool isOver = (it != blockById.end() && it->second->isOverlapping);
-            if (!isOver) { lastIdx = i; break; }
-        }
         const ResolvedEntry& last = result.entries.getReference(lastIdx);
         int64_t tailLen = juce::jmax((int64_t)0,
                                      (int64_t)last.audioBuffer->getNumSamples()
@@ -411,10 +418,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 Clip* ArrangementResolver::pickClip(const Block& block, juce::Random& rng) {
     if (block.clips.isEmpty()) return nullptr;
 
-    // Filter out done clips
     juce::Array<Clip*> available;
     for (auto* c : block.clips)
-        if (!c->isDone) available.add(c);
+        available.add(c);
     if (available.isEmpty()) return nullptr;
     if (available.size() == 1) return available[0];
 

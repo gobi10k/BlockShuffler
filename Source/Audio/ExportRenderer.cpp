@@ -1,7 +1,9 @@
 #include "ExportRenderer.h"
+#include "EntryMixer.h"
 #include "TempoStretcher.h"
 #include "../Model/Clip.h"
 #include <unordered_map>
+#include <limits>
 
 namespace BlockShuffler {
 
@@ -15,17 +17,21 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
     const int64_t totalSamples = arrangement.totalDurationSamples;
     if (totalSamples <= 0) return false;
 
-    const int numChannels = 2;
-    const int numSamples  = (int)juce::jmin(totalSamples, (int64_t)std::numeric_limits<int>::max());
+    // FIX H4: guard against int overflow for very long arrangements
+    if (totalSamples > (int64_t)std::numeric_limits<int>::max()) return false;
+
+    const int     numChannels = 2;
+    const int64_t numSamples  = totalSamples;  // int64_t; cast to int only at point of use
 
     // Allocate output buffer
-    juce::AudioBuffer<float> output(numChannels, numSamples);
+    juce::AudioBuffer<float> output(numChannels, (int)numSamples);
     output.clear();
 
-    // Mix every entry
+    // FIX H1: use shared mixEntryToBuffer so export and playback are identical.
+    // Export always runs at project sample rate (pToH = hToP = 1.0, currentHead = 0).
     const int numEntries = arrangement.entries.size();
     for (int i = 0; i < numEntries; ++i) {
-        mixEntry(output, arrangement.entries.getReference(i));
+        mixEntryToBuffer(arrangement.entries.getReference(i), output, (int)numSamples, 0LL, 1.0, 1.0, i);
         if (progress) progress((float)(i + 1) / (float)numEntries);
     }
 
@@ -43,125 +49,9 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
                                0));
     if (!writer) return false;
 
-
-    return writer->writeFromAudioSampleBuffer(output, 0, numSamples);
+    return writer->writeFromAudioSampleBuffer(output, 0, (int)numSamples);
 }
 
-void ExportRenderer::mixEntry(juce::AudioBuffer<float>& dest,
-                               const ResolvedEntry& entry)
-{
-    if (!entry.audioBuffer) return;
-    const auto& src  = *entry.audioBuffer;
-    const int srcCh  = src.getNumChannels();
-    const int srcLen = src.getNumSamples();
-    const int dstCh  = dest.getNumChannels();
-    const int dstLen = dest.getNumSamples();
-    if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
-
-    const int64_t startMark = entry.startMark;
-    const int64_t endMark   = entry.endMark;
-    const int64_t bodyLen    = endMark - startMark;
-    const int64_t leadInLen  = startMark;
-    const int64_t tailLen    = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
-    // New timeline model: timelinePos = lead-in start; body starts at timelinePos + startMark.
-    const int64_t leadInStart = entry.timelinePos;
-    const int64_t bodyStart   = leadInStart + leadInLen;   // = timelinePos + startMark
-    const int64_t bodyEnd     = leadInStart + endMark;     // = timelinePos + endMark
-
-    // General 1:1 additive mixer with gain ramp, from any source buffer.
-    auto mixBufRange = [&](const juce::AudioBuffer<float>& s,
-                            int64_t tlStart, int64_t tlEnd,
-                            int64_t srcOff0,
-                            float gainStart, float gainEnd)
-    {
-        const int sCh  = s.getNumChannels();
-        const int sLen = s.getNumSamples();
-        const int mCh  = juce::jmin(sCh, dstCh);
-        if (sCh == 0 || sLen == 0) return;
-
-        int64_t ovStart = juce::jmax(tlStart, (int64_t)0);
-        int64_t ovEnd   = juce::jmin(tlEnd,   (int64_t)dstLen);
-        if (ovStart >= ovEnd) return;
-
-        int   destOff = (int)ovStart;
-        int64_t srcOff = srcOff0 + (ovStart - tlStart);
-        int   count   = (int)(ovEnd - ovStart);
-        if (srcOff < 0 || srcOff >= (int64_t)sLen) return;
-        count = juce::jmin(count, sLen - (int)srcOff);
-        if (count <= 0) return;
-
-        int64_t regLen = tlEnd - tlStart;
-        float gs = gainStart, ge = gainEnd;
-        if (regLen > 1) {
-            float t0 = (float)(ovStart - tlStart) / (float)regLen;
-            float t1 = (float)(ovEnd   - tlStart) / (float)regLen;
-            gs = gainStart + t0 * (gainEnd - gainStart);
-            ge = gainStart + t1 * (gainEnd - gainStart);
-        }
-        gs *= entry.gain;
-        ge *= entry.gain;
-
-        for (int ch = 0; ch < mCh; ++ch)
-            dest.addFromWithRamp(ch, destOff, s.getReadPointer(ch) + srcOff, count, gs, ge);
-        if (sCh == 1 && dstCh >= 2)
-            dest.addFromWithRamp(1, destOff, s.getReadPointer(0) + srcOff, count, gs, ge);
-    };
-
-    // ── Lead-in ────────────────────────────────────────────────────────────────
-    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
-    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
-    if (leadInLen > 0)
-    {
-        if (entry.stretchedLeadIn)
-        {
-            int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBufRange(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0, 0.0f, 1.0f);
-        }
-        else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
-        {
-            // No stretching — source samples [0, leadInLen) map 1:1 to [leadInStart, bodyStart)
-            mixBufRange(src, leadInStart, bodyStart, 0, 0.0f, 1.0f);
-        }
-        else
-        {
-            // Resampled lead-in: source [0, leadInLen) → timeline [leadInStart, leadInStart+leadInTL)
-            int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            int64_t tlEnd    = leadInStart + leadInTL;
-            int64_t ovStart  = juce::jmax(leadInStart, (int64_t)0);
-            int64_t ovEnd    = juce::jmin(tlEnd, (int64_t)dstLen);
-            if (ovStart < ovEnd) {
-                int destOff   = (int)ovStart;
-                int destCount = (int)(ovEnd - ovStart);
-                double srcAdv     = (double)leadInLen / (double)leadInTL;
-                int srcSliceOff   = (int)((double)(ovStart - leadInStart) * srcAdv);
-                int srcSliceCnt   = juce::jmin((int)((double)destCount * srcAdv + 1.5), (int)leadInLen - srcSliceOff);
-                float t0 = (leadInTL > 1) ? (float)(ovStart - leadInStart) / (float)(leadInTL - 1) : 0.0f;
-                float t1 = (leadInTL > 1) ? (float)(ovEnd   - leadInStart) / (float)(leadInTL - 1) : 1.0f;
-                TempoStretcher::resampleAdd(src, srcSliceOff, srcSliceCnt, dest, destOff, destCount, t0 * entry.gain, t1 * entry.gain);
-            }
-        }
-    }
-
-    // ── Body ──────────────────────────────────────────────────────────────────
-    if (bodyLen > 0)
-        mixBufRange(src, bodyStart, bodyEnd, startMark, 1.0f, 1.0f);
-
-    // ── Tail ──────────────────────────────────────────────────────────────────
-    if (tailLen > 0)
-    {
-        // retainTailTempo=true → always use original clip audio at 1:1.
-        if (entry.retainTailTempo || !entry.stretchedTail)
-        {
-            mixBufRange(src, bodyEnd, bodyEnd + tailLen, endMark, 1.0f, 0.0f);
-        }
-        else
-        {
-            // Pre-stretched buffer (retainTailTempo=false, tempos differ)
-            int64_t sl = (int64_t)entry.stretchedTail->getNumSamples();
-            mixBufRange(*entry.stretchedTail, bodyEnd, bodyEnd + sl, 0, 1.0f, 0.0f);
-        }
-    }
-}
 
 bool ExportRenderer::writeClipFlac(const Clip& clip, const juce::File& dest, int bitDepth, double sampleRate) {
     if (!clip.audioBuffer) return false;
@@ -325,9 +215,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
                 bm->setProperty("stackGroup",       bVar.getProperty("stackGroup",    -1));
                 bm->setProperty("stackPlayCount",   bVar.getProperty("stackPlayCount",{}));
                 bm->setProperty("stackPlayMode",    bVar.getProperty("stackPlayMode", "sequential"));
-                bm->setProperty("isOverlapping",    bVar.getProperty("isOverlapping", false));
-                bm->setProperty("overlapProbability", bVar.getProperty("overlapProb", 0.0));
-                bm->setProperty("isDone",           bVar.getProperty("isDone",        false));
+                // isDone is cosmetic only — not written to export manifest
 
                 // Clips
                 juce::Array<juce::var> modelClips;
@@ -343,7 +231,7 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
                         cm->setProperty("retainLeadInTempo", cVar.getProperty("retainLeadInTempo",false));
                         cm->setProperty("retainTailTempo",   cVar.getProperty("retainTailTempo",  false));
                         cm->setProperty("isSongEnder",       cVar.getProperty("isSongEnder",      false));
-                        cm->setProperty("isDone",            cVar.getProperty("isDone",           false));
+                        // isDone is cosmetic only — not written to export manifest
                         cm->setProperty("startMark",         cVar.getProperty("startMark",        "0"));
                         cm->setProperty("endMark",           cVar.getProperty("endMark",          "0"));
 

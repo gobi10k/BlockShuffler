@@ -39,6 +39,9 @@ public:
     // Called by editor timer to refresh transport display
     void updateTimeDisplay();
 
+    /** Load a project from a .bsp file. Public so Main.cpp can route Finder/command-line opens here. */
+    void loadProject(const juce::File& file);
+
 private:
     PlaybackEngine&    engine;
     ArrangementResolver resolver;
@@ -50,7 +53,8 @@ private:
     juce::File                currentProjectFile;
 
     Block*       selectedBlock   = nullptr;
-    juce::String selectedBlockId;  // survive undo-rebuild
+    juce::String selectedBlockId;   // survive undo-rebuild
+    Block*       lastPlayingBlock = nullptr;  // tracks which block the waveform is following during playback
 
     ResolvedArrangement currentArrangement;  // kept so updateTimeDisplay can find playing block
 
@@ -62,8 +66,8 @@ private:
     TransportBar     transportBar;
 
     static constexpr int inspectorWidth   = 210;
-    static constexpr int transportHeight  = 48;
-    static constexpr int blockStripHeight = 160;
+    static constexpr int transportHeight  = 56;
+    static constexpr int blockStripHeight = 360;
 
     void onPlayPressed();
     void onStopPressed();
@@ -71,9 +75,11 @@ private:
     void saveProject();
     void saveProjectAs();
     void openProject();
-    void loadProject(const juce::File& file);
     void exportProject();
     void applyBlockSelection(Block* block);  // updates all views consistently
+    void playBlock(const juce::String& blockId);
+    void playClip(const juce::String& clipId);
+    void updateWindowTitle(const juce::String& projectName);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

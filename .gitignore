@@ -1,4 +1,29 @@
-build/
-build/
-build/
+# OS junk
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Build output
 Builds/
+build*/
+build-diag/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+
+# JUCE / compiler artifacts
+*.a
+*.o
+*.obj
+*.dll
+*.exe
+*.app
+*.vst3
+*.component
+xcuserdata/
+*.xcworkspace/xcshareddata/
+
+# Session junk
+terminal_output.txt
+.claude/

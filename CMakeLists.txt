@@ -13,6 +13,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+juce_add_binary_data(BlockShufflerResources
+    SOURCES
+        Resources/icon.svg
+        Resources/icon.png
+        Resources/fonts/Inter-Regular.ttf
+        Resources/fonts/Inter-Bold.ttf
+        Resources/fonts/JetBrainsMono-Regular.ttf
+)
+
 juce_add_plugin(BlockShuffler
     COMPANY_NAME "gobi10k"
     IS_SYNTH FALSE
@@ -22,6 +31,8 @@ juce_add_plugin(BlockShuffler
     PLUGIN_CODE BkSh
     FORMATS Standalone VST3
     PRODUCT_NAME "BlockShuffler"
+    ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon_512.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
 )
 
 target_sources(BlockShuffler PRIVATE
@@ -47,6 +58,7 @@ target_sources(BlockShuffler PRIVATE
     # Audio
     Source/Audio/ArrangementResolver.h
     Source/Audio/ArrangementResolver.cpp
+    Source/Audio/EntryMixer.h
     Source/Audio/PlaybackEngine.h
     Source/Audio/PlaybackEngine.cpp
     Source/Audio/TempoStretcher.h
@@ -80,6 +92,10 @@ target_sources(BlockShuffler PRIVATE
     Source/Utils/UuidGenerator.h
 )
 
+if(WIN32)
+    target_sources(BlockShuffler PRIVATE Resources/BlockShuffler.rc)
+endif()
+
 target_compile_definitions(BlockShuffler PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
@@ -87,6 +103,18 @@ target_compile_definitions(BlockShuffler PUBLIC
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
 )
+
+# Copy app.icns into the bundle and set CFBundleIconFile (macOS only)
+if(APPLE)
+    add_custom_command(TARGET BlockShuffler_Standalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/Resources/app.icns"
+                "$<TARGET_BUNDLE_DIR:BlockShuffler_Standalone>/Contents/Resources/app.icns"
+        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_icon.sh"
+                "$<TARGET_BUNDLE_DIR:BlockShuffler_Standalone>/Contents/Info.plist"
+        COMMENT "Installing app.icns into bundle"
+    )
+endif()
 
 # Re-sign the Standalone app with ad-hoc signature after build (macOS only)
 if(APPLE)
@@ -97,8 +125,13 @@ if(APPLE)
     )
 endif()
 
+if(UNIX AND NOT APPLE)
+    find_package(ALSA REQUIRED)
+endif()
+
 target_link_libraries(BlockShuffler
     PRIVATE
+        BlockShufflerResources
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats
@@ -114,4 +147,40 @@ target_link_libraries(BlockShuffler
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
+)
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(BlockShuffler PRIVATE ALSA::ALSA)
+endif()
+
+# ── STEP1 DIAG (temporary — remove in MASTER_PROMPT Step 7) ──────────────────
+juce_add_console_app(ResolverDiag PRODUCT_NAME "ResolverDiag")
+target_sources(ResolverDiag PRIVATE
+    diag/ResolverDiag.cpp
+    Source/Model/Project.cpp
+    Source/Model/Block.cpp
+    Source/Model/Clip.cpp
+    Source/Model/BlockLink.cpp
+    Source/Model/Serialization.cpp
+    Source/Audio/ArrangementResolver.cpp
+    Source/Audio/TempoStretcher.cpp
+    Source/UI/LookAndFeel_BlockShuffler.cpp
+)
+target_include_directories(ResolverDiag PRIVATE Source)
+target_compile_definitions(ResolverDiag PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+)
+target_link_libraries(ResolverDiag
+    PRIVATE
+        BlockShufflerResources
+        juce::juce_core
+        juce::juce_events
+        juce::juce_data_structures
+        juce::juce_audio_basics
+        juce::juce_audio_formats
+        juce::juce_graphics
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
 )

@@ -1,5 +1,6 @@
 #include "Project.h"
 #include "Serialization.h"
+#include "../UI/LookAndFeel_BlockShuffler.h"
 
 namespace BlockShuffler {
 
@@ -75,13 +76,9 @@ Block* Project::addBlock(const juce::String& blockName) {
     else
         block->name = blockName;
 
-    // Assign a color from the built-in palette, cycling through it
-    static const juce::Colour blockPalette[] = {
-        juce::Colour(0xFFCC4444), juce::Colour(0xFFCC8844), juce::Colour(0xFFCCAA44),
-        juce::Colour(0xFF44CC44), juce::Colour(0xFF44CCCC), juce::Colour(0xFF4488CC),
-        juce::Colour(0xFF8844CC), juce::Colour(0xFFCC44AA)
-    };
-    block->color = blockPalette[blocks.size() % 8];
+    // Assign a color from the brand accent palette, cycling through it
+    auto palette = LookAndFeel_BlockShuffler::getBlockPalette();
+    block->color = palette[blocks.size() % palette.size()];
 
     block->position = blocks.isEmpty() ? 0 : blocks.getLast()->position + 1;
     auto* ptr = block.get();
@@ -234,7 +231,8 @@ bool Project::fromJSON(const juce::var& json) {
 }
 
 bool Project::saveToFile(const juce::File& file) {
-    auto json = toJSON();
+    // Pass project directory so audio paths are stored relative to the project file.
+    auto json = Serialization::projectToJSON(*this, file.getParentDirectory());
     auto jsonString = juce::JSON::toString(json);
     return file.replaceWithText(jsonString);
 }
@@ -244,7 +242,8 @@ bool Project::loadFromFile(const juce::File& file) {
     auto jsonString = file.loadFileAsString();
     auto json = juce::JSON::parse(jsonString);
     if (json.isVoid()) return false;
-    return fromJSON(json);
+    // Pass project directory so relative audio paths resolve correctly on any platform.
+    return Serialization::projectFromJSON(json, *this, file.getParentDirectory());
 }
 
 } // namespace BlockShuffler
