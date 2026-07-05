@@ -188,12 +188,34 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 playCount = allBlocks[0]->stackPlayCount.pick(rng);
             playCount = juce::jlimit(1, (int)allBlocks.size(), playCount);
 
+            const bool isSimultaneous =
+                (allBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous);
+
             // Sample playCount blocks from the pool with weighted probability.
             // playChance is the selection weight — the same field the inspector exposes.
             // Without-replacement weighted sampling: each pick reduces the pool by one.
             std::vector<Block*> picked;
             std::vector<Block*> pool = allBlocks;
-            for (int k = 0; k < playCount && !pool.empty(); ++k) {
+
+            // "Always play base block" (simultaneous stacks only): the base — the
+            // FIRST block of this stack group in project->blocks order — is
+            // pre-picked; the remaining (playCount - 1) are weighted-sampled from
+            // the rest. With playCount == 1 only the base plays.
+            if (isSimultaneous && allBlocks[0]->alwaysPlayBase) {
+                Block* baseBlock = nullptr;
+                for (auto* pb : project.blocks) {
+                    if (std::find(allBlocks.begin(), allBlocks.end(), pb) != allBlocks.end()) {
+                        baseBlock = pb;
+                        break;
+                    }
+                }
+                if (baseBlock != nullptr) {
+                    picked.push_back(baseBlock);
+                    pool.erase(std::find(pool.begin(), pool.end(), baseBlock));
+                }
+            }
+
+            for (int k = (int)picked.size(); k < playCount && !pool.empty(); ++k) {
                 float totalWeight = 0.0f;
                 for (auto* b : pool) totalWeight += b->playChance;
 
@@ -214,9 +236,6 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     }
                 }
             }
-
-            const bool isSimultaneous =
-                (allBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous);
 
             // STEP1 DIAG (remove in MASTER_PROMPT Step 7)
             DBG("STACK grp=" + juce::String(allBlocks[0]->stackGroup)

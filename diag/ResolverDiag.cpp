@@ -173,6 +173,77 @@ int main() {
                       << " alwaysPlayBase=" << (blk->alwaysPlayBase ? "true" : "false") << "\n";
     }
 
+    // STEP3C DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // "Always play base block" resolver logic. Base = first block of the stack
+    // group in project->blocks order (here: A).
+    {
+        std::cout << "\n=== STEP3C: alwaysPlayBase resolver, 20 resolves per scenario ===\n";
+        Project p4;
+        auto* A4 = p4.addBlock("A");   // base
+        auto* B4 = p4.addBlock("B");
+        auto* C4 = p4.addBlock("C");
+        addClipTo(A4, "cA", 1000);
+        addClipTo(B4, "cB", 1200);
+        addClipTo(C4, "cC", 1500);
+        p4.stackBlocks(B4->id, A4->id);
+        p4.stackBlocks(C4->id, A4->id);
+
+        juce::Random rng4(4242);
+        ArrangementResolver r4;
+        const juce::String baseId = A4->id;
+
+        auto run20 = [&](const char* label, int expectEntries, bool simMode) {
+            std::cout << "--- " << label << " ---\n";
+            int okEntries = 0, basePresent = 0, okPos = 0;
+            for (int i = 0; i < 20; ++i) {
+                auto arr = r4.resolve(p4, rng4);
+                bool hasBase = false, identical = true, ascending = true;
+                for (int e = 0; e < arr.entries.size(); ++e) {
+                    if (arr.entries[e].blockId == baseId) hasBase = true;
+                    if (arr.entries[e].timelinePos != arr.entries[0].timelinePos) identical = false;
+                    if (e > 0 && arr.entries[e].timelinePos <= arr.entries[e - 1].timelinePos) ascending = false;
+                }
+                if (arr.entries.size() == expectEntries) ++okEntries;
+                if (hasBase) ++basePresent;
+                if (simMode ? identical : ascending) ++okPos;
+                std::cout << "resolve#" << i << " n=" << arr.entries.size() << " [";
+                for (const auto& e : arr.entries) {
+                    auto* blk = p4.getBlockById(e.blockId);
+                    std::cout << (blk ? blk->name : juce::String("?")) << "@" << e.timelinePos << " ";
+                }
+                std::cout << "]\n";
+            }
+            std::cout << "SUMMARY " << label << ": entries==" << expectEntries << ": "
+                      << okEntries << "/20, basePresent: " << basePresent << "/20, "
+                      << (simMode ? "identicalPos: " : "ascendingPos: ") << okPos << "/20\n";
+        };
+
+        auto configure = [&](StackPlayMode mode, bool base, int count) {
+            A4->stackPlayMode = mode;
+            A4->alwaysPlayBase = base;
+            A4->stackPlayCount.values.set(0, count);
+            p4.propagateStackSettings(A4->stackGroup, A4);
+        };
+
+        configure(StackPlayMode::Simultaneous, true, 2);
+        run20("SIM baseON playCount=2", 2, true);
+
+        configure(StackPlayMode::Simultaneous, true, 1);
+        run20("SIM baseON playCount=1 (base only)", 1, true);
+
+        configure(StackPlayMode::Simultaneous, true, 3);
+        run20("SIM baseON playCount=3", 3, true);
+
+        configure(StackPlayMode::Simultaneous, false, 1);
+        run20("REGRESSION SIM baseOFF playCount=1 (block should vary)", 1, true);
+
+        configure(StackPlayMode::Sequential, false, 1);
+        run20("REGRESSION SEQ baseOFF playCount=1", 1, false);
+
+        configure(StackPlayMode::Sequential, false, 2);
+        run20("REGRESSION SEQ baseOFF playCount=2 (sequential timeline)", 2, false);
+    }
+
     std::cout << "DONE\n";
     return 0;
 }
