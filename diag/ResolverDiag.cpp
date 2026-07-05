@@ -16,12 +16,12 @@ static std::shared_ptr<juce::AudioBuffer<float>> makeBuf(int len = 1000) {
     return b;
 }
 
-static void addClipTo(Block* blk, const juce::String& nm) {
+static void addClipTo(Block* blk, const juce::String& nm, int bodyLen = 1000) {
     auto c = std::make_unique<Clip>();
     c->name = nm;
-    c->audioBuffer = makeBuf();
+    c->audioBuffer = makeBuf(bodyLen);
     c->startMark = 0;
-    c->endMark = 1000;
+    c->endMark = bodyLen;
     c->probability = 1.0f;
     blk->addClip(std::move(c));
 }
@@ -100,6 +100,44 @@ int main() {
         }
     dumpModel(p, "after JSON round-trip (resetAndLoad)");
     runResolves(p, r, rng, "after JSON round-trip, playCount=1 SIM");
+
+    // STEP2 DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // Simultaneous layering + cursor advance: 3-block SIM stack, playCount=3,
+    // DISTINCT body lengths (1000/2500/1800) so "cursor += longest body" is
+    // observable, plus a trailing unstacked block D exposing the cursor.
+    // Expect: A/B/C all at the SAME timelinePos, D at that pos + 2500.
+    {
+        std::cout << "\n=== STEP2: SIM playCount=3, bodies 1000/2500/1800, trailing D ===\n";
+        Project p2;
+        auto* a2 = p2.addBlock("A");
+        auto* b2 = p2.addBlock("B");
+        auto* c2 = p2.addBlock("C");
+        auto* d2 = p2.addBlock("D");   // unstacked follower — reveals cursor advance
+        addClipTo(a2, "cA", 1000);
+        addClipTo(b2, "cB", 2500);     // longest body
+        addClipTo(c2, "cC", 1800);
+        addClipTo(d2, "cD", 700);
+        p2.stackBlocks(b2->id, a2->id);
+        p2.stackBlocks(c2->id, a2->id);
+        a2->stackPlayMode = StackPlayMode::Simultaneous;
+        a2->stackPlayCount.values.set(0, 3);
+        p2.propagateStackSettings(a2->stackGroup, a2);
+        dumpModel(p2, "STEP2 SIM playCount=3");
+
+        juce::Random rng2(777);
+        ArrangementResolver r2;
+        for (int i = 0; i < 10; ++i) {
+            auto arr = r2.resolve(p2, rng2);
+            std::cout << "resolve#" << i << " entries=" << arr.entries.size() << " [";
+            for (const auto& e : arr.entries) {
+                auto* blk = p2.getBlockById(e.blockId);
+                std::cout << (blk ? blk->name : juce::String("?"))
+                          << "@" << e.timelinePos
+                          << "(body=" << (e.endMark - e.startMark) << ") ";
+            }
+            std::cout << "]\n";
+        }
+    }
 
     std::cout << "DONE\n";
     return 0;
