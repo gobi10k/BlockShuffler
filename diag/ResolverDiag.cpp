@@ -4,6 +4,7 @@
 // (Project::addBlock / stackBlocks / propagateStackSettings) and calls the
 // same ArrangementResolver::resolve() the transport Play button calls.
 #include <iostream>
+#include <map>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "Model/Project.h"
 #include "Audio/ArrangementResolver.h"
@@ -280,6 +281,45 @@ int main() {
             }
         }
         bsf.deleteFile();
+    }
+
+    // STEP4A DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // All-zero weights → shared picker's UNIFORM fallback: SEQ playCount=1,
+    // 20 resolves → exactly 1 entry every time, and the block VARIES.
+    {
+        std::cout << "\n=== STEP4A: all-zero weights, SEQ playCount=1, uniform fallback ===\n";
+        Project p6;
+        auto* a6 = p6.addBlock("A");
+        auto* b6 = p6.addBlock("B");
+        auto* c6 = p6.addBlock("C");
+        addClipTo(a6, "cA");
+        addClipTo(b6, "cB");
+        addClipTo(c6, "cC");
+        p6.stackBlocks(b6->id, a6->id);
+        p6.stackBlocks(c6->id, a6->id);
+        a6->playChance = 0.0f;
+        b6->playChance = 0.0f;
+        c6->playChance = 0.0f;
+        // playChance is per-block (not propagated); stack settings stay default SEQ pc=1.
+
+        juce::Random rng6(2026);
+        ArrangementResolver r6;
+        int okEntries = 0;
+        std::map<juce::String, int> byBlock;
+        for (int i = 0; i < 20; ++i) {
+            auto arr = r6.resolve(p6, rng6);
+            if (arr.entries.size() == 1) ++okEntries;
+            std::cout << "resolve#" << i << " n=" << arr.entries.size() << " [";
+            for (const auto& e : arr.entries) {
+                auto* blk = p6.getBlockById(e.blockId);
+                byBlock[blk ? blk->name : juce::String("?")]++;
+                std::cout << (blk ? blk->name : juce::String("?")) << " ";
+            }
+            std::cout << "]\n";
+        }
+        std::cout << "SUMMARY STEP4A: entries==1: " << okEntries << "/20, distribution:";
+        for (const auto& kv : byBlock) std::cout << " " << kv.first << "=" << kv.second;
+        std::cout << " (block must vary)\n";
     }
 
     std::cout << "DONE\n";

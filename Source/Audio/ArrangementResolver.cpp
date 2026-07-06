@@ -3,6 +3,7 @@
 // blocks or clips are selected during arrangement resolution or playback.
 // grep -c "isDone" Source/Audio/ArrangementResolver.cpp  must return 0.
 #include "ArrangementResolver.h"
+#include "StackPicker.h"
 #include "TempoStretcher.h"
 #include <algorithm>
 #include <numeric>
@@ -182,60 +183,15 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
         } else {
             // ── Stack slot ────────────────────────────────────────────────
-            // Pick how many blocks to play
-            int playCount = 1;
-            if (allBlocks[0]->stackPlayCount.isValid())
-                playCount = allBlocks[0]->stackPlayCount.pick(rng);
-            playCount = juce::jlimit(1, (int)allBlocks.size(), playCount);
+            // Selection (playCount draw + clamp, base-block branch, weighted
+            // sample without replacement) lives in the shared StackPicker so
+            // the inspector's effective-% display uses the identical routine.
+            auto stackPick = StackPicker::pick(allBlocks, project.blocks, rng);
+            const int playCount = stackPick.playCount;
+            std::vector<Block*>& picked = stackPick.picked;
 
             const bool isSimultaneous =
                 (allBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous);
-
-            // Sample playCount blocks from the pool with weighted probability.
-            // playChance is the selection weight — the same field the inspector exposes.
-            // Without-replacement weighted sampling: each pick reduces the pool by one.
-            std::vector<Block*> picked;
-            std::vector<Block*> pool = allBlocks;
-
-            // "Always play base block" (simultaneous stacks only): the base — the
-            // FIRST block of this stack group in project->blocks order — is
-            // pre-picked; the remaining (playCount - 1) are weighted-sampled from
-            // the rest. With playCount == 1 only the base plays.
-            if (isSimultaneous && allBlocks[0]->alwaysPlayBase) {
-                Block* baseBlock = nullptr;
-                for (auto* pb : project.blocks) {
-                    if (std::find(allBlocks.begin(), allBlocks.end(), pb) != allBlocks.end()) {
-                        baseBlock = pb;
-                        break;
-                    }
-                }
-                if (baseBlock != nullptr) {
-                    picked.push_back(baseBlock);
-                    pool.erase(std::find(pool.begin(), pool.end(), baseBlock));
-                }
-            }
-
-            for (int k = (int)picked.size(); k < playCount && !pool.empty(); ++k) {
-                float totalWeight = 0.0f;
-                for (auto* b : pool) totalWeight += b->playChance;
-
-                if (totalWeight <= 0.0f) {
-                    int idx = rng.nextInt((int)pool.size());
-                    picked.push_back(pool[(size_t)idx]);
-                    pool.erase(pool.begin() + idx);
-                } else {
-                    float roll = rng.nextFloat() * totalWeight;
-                    float cum = 0.0f;
-                    for (size_t i = 0; i < pool.size(); ++i) {
-                        cum += pool[i]->playChance;
-                        if (roll <= cum || i == pool.size() - 1) {
-                            picked.push_back(pool[i]);
-                            pool.erase(pool.begin() + i);
-                            break;
-                        }
-                    }
-                }
-            }
 
             // STEP1 DIAG (remove in MASTER_PROMPT Step 7)
             DBG("STACK grp=" + juce::String(allBlocks[0]->stackGroup)
