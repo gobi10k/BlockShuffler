@@ -864,6 +864,120 @@ int main() {
             tmpDir.deleteRecursively();
         }
 
+        { // T16 (2.6): CLIP-weight distribution within one block — 80/10/10 over
+          // 200 picks via the resolver's own pickClip (public static; no hook needed).
+            Project p;
+            auto* blk = p.addBlock("A");
+            addClipTo(blk, "heavy", 1000);
+            addClipTo(blk, "mid",   1000);
+            addClipTo(blk, "low",   1000);
+            blk->clips[0]->probability = 0.8f;
+            blk->clips[1]->probability = 0.1f;
+            blk->clips[2]->probability = 0.1f;
+
+            juce::Random r(616);
+            std::map<juce::String, int> byClip;
+            for (int i = 0; i < 200; ++i) {
+                auto* c = ArrangementResolver::pickClip(*blk, r);
+                byClip[c ? c->name : juce::String("?")]++;
+            }
+            float pctH = byClip["heavy"] / 2.0f, pctM = byClip["mid"] / 2.0f, pctL = byClip["low"] / 2.0f;
+            verdict("T16 clip weights 80/10/10 over 200 picks",
+                    std::abs(pctH - 80.0f) <= 10.0f
+                    && std::abs(pctM - 10.0f) <= 8.0f
+                    && std::abs(pctL - 10.0f) <= 8.0f,
+                    "heavy=" + juce::String(pctH, 1) + "% mid=" + juce::String(pctM, 1)
+                    + "% low=" + juce::String(pctL, 1) + "%");
+        }
+        { // T17 (2.7): single clip at 0% weight -> uniform fallback -> plays every time
+            Project p;
+            auto* blk = p.addBlock("A");
+            addClipTo(blk, "only", 1000);
+            blk->clips[0]->probability = 0.0f;
+            const juce::String clipId = blk->clips[0]->id;
+
+            juce::Random r(617); ArrangementResolver res;
+            int ok = 0;
+            for (int i = 0; i < 20; ++i) {
+                auto arr = res.resolve(p, r);
+                ok += (arr.entries.size() == 1 && arr.entries[0].clipId == clipId);
+            }
+            verdict("T17 single clip @0%: plays every time", ok == 20, juce::String(ok) + "/20");
+        }
+        { // T18 (5.3): SEQ pc=3 -> all three back-to-back gapless, THEN follower D
+          // plays (song continues; nothing swallowed after the stack).
+            Project p; buildStack3(p, StackPlayMode::Sequential, 3, false, 1, 1, 1);
+            auto* D = p.addBlock("D"); addClipTo(D, "cD", 700);
+            juce::Random r(618); ArrangementResolver res;
+            int ok = 0; std::set<juce::String> firstBlocks;
+            for (int i = 0; i < 10; ++i) {
+                auto arr = res.resolve(p, r);
+                bool good = (arr.entries.size() == 4);
+                if (good) {
+                    std::set<juce::String> stackSeen;
+                    for (int e = 0; e < 3; ++e) {
+                        auto* b = p.getBlockById(arr.entries[e].blockId);
+                        if (b) stackSeen.insert(b->name);
+                        if (e > 0) {
+                            const auto& prev = arr.entries.getReference(e - 1);
+                            if (arr.entries[e].timelinePos
+                                    != prev.timelinePos + (prev.endMark - prev.startMark))
+                                good = false;  // gap or overlap inside the stack run
+                        }
+                    }
+                    if (stackSeen != std::set<juce::String>({"A", "B", "C"})) good = false;
+                    auto* last = p.getBlockById(arr.entries[3].blockId);
+                    if (!last || last->name != "D") good = false;
+                    const auto& e2 = arr.entries.getReference(2);
+                    if (arr.entries[3].timelinePos
+                            != e2.timelinePos + (e2.endMark - e2.startMark)) good = false;
+                    auto* firstB = p.getBlockById(arr.entries[0].blockId);
+                    firstBlocks.insert(firstB ? firstB->name : juce::String("?"));
+                }
+                ok += good;
+            }
+            verdict("T18 SEQ pc=3 gapless + song continues (D last)",
+                    ok == 10 && firstBlocks.size() > 1,
+                    juce::String(ok) + "/10, distinct stack orders (first block): "
+                    + juce::String((int)firstBlocks.size()));
+        }
+        { // T19 (8.2): song-ender on a clip of a block INSIDE a stack (SEQ pc=2 of 3).
+          // Picked -> that block is the FINAL entry (no D after); not picked -> 2
+          // stack entries + D, song continues. Both branches must be observed.
+            Project p; buildStack3(p, StackPlayMode::Sequential, 2, false, 1, 1, 1);
+            Block* B = nullptr;
+            for (auto* b : p.blocks) if (b->name == "B") B = b;
+            B->clips[0]->isSongEnder = true;
+            auto* D = p.addBlock("D"); addClipTo(D, "cD", 700);
+
+            juce::Random r(619); ArrangementResolver res;
+            int okResolves = 0, endedBranch = 0, continuedBranch = 0;
+            for (int i = 0; i < 20; ++i) {
+                auto arr = res.resolve(p, r);
+                int bIdx = -1;
+                bool dPresent = false;
+                for (int e = 0; e < arr.entries.size(); ++e) {
+                    auto* blk = p.getBlockById(arr.entries[e].blockId);
+                    if (blk == B) bIdx = e;
+                    if (blk == D) dPresent = true;
+                }
+                bool good;
+                if (bIdx >= 0) {  // ender picked: B must be last, nothing after (no D)
+                    good = (bIdx == arr.entries.size() - 1) && !dPresent;
+                    if (good) ++endedBranch;
+                } else {          // ender not picked: 2 stack entries + D, D last
+                    good = (arr.entries.size() == 3) && dPresent
+                           && p.getBlockById(arr.entries[2].blockId) == D;
+                    if (good) ++continuedBranch;
+                }
+                okResolves += good;
+            }
+            verdict("T19 song-ender inside stack: truncates when picked, continues when not",
+                    okResolves == 20 && endedBranch > 0 && continuedBranch > 0,
+                    juce::String(okResolves) + "/20, ended: " + juce::String(endedBranch)
+                    + ", continued: " + juce::String(continuedBranch));
+        }
+
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
                   << "\n";
     }
