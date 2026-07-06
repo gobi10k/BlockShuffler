@@ -463,8 +463,7 @@ std::map<juce::String, float> InspectorPanel::computeStackInclusionProbabilities
         if (b->stackGroup == stackGroup)
             groupBlocks.push_back(b);
 
-    juce::Random rng;
-    return StackPicker::inclusionProbabilities(groupBlocks, project->blocks, rng);
+    return StackPicker::inclusionProbabilities(groupBlocks, project->blocks);
 }
 
 // Fingerprint of everything the inclusion % depends on: group id, play mode,

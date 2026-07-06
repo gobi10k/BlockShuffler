@@ -102,6 +102,11 @@ inline Result pick(const std::vector<Block*>& groupBlocks,
  *  the display can never diverge from what playback actually selects.
  *  Returns blockId → probability in [0, 1].
  *
+ *  DETERMINISTIC: the RNG is seeded from a hash of the stack state (mode,
+ *  alwaysPlayBase, stackPlayCount values+weights, member ids + weights), so
+ *  identical state always produces identical numbers — across recomputes,
+ *  Plays, and save/reopen.
+ *
  *  Shortcuts:
  *    - minimum possible playCount >= groupSize → everyone always plays:
  *      all 100%, no simulation;
@@ -112,8 +117,8 @@ inline Result pick(const std::vector<Block*>& groupBlocks,
 inline std::map<juce::String, float> inclusionProbabilities(
         const std::vector<Block*>& groupBlocks,
         const juce::OwnedArray<Block>& projectBlocks,
-        juce::Random& rng,
-        int trials = 2000)
+        int trials = 20000)   // 50000 measured 130ms (Debug, 6-block stack) — over the
+                              // 50ms recompute budget, so dropped per Step 4 amendment
 {
     std::map<juce::String, float> result;
     if (groupBlocks.empty()) return result;
@@ -128,6 +133,18 @@ inline std::map<juce::String, float> inclusionProbabilities(
         for (auto* b : groupBlocks) result[b->id] = 1.0f;
         return result;
     }
+
+    // Seed from the stack state so the same state always yields the same numbers.
+    juce::String state;
+    state << (groupBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous ? "SIM" : "SEQ")
+          << '|' << (groupBlocks[0]->alwaysPlayBase ? 1 : 0) << '|';
+    for (int v : groupBlocks[0]->stackPlayCount.values)    state << v << ',';
+    state << '|';
+    for (float w : groupBlocks[0]->stackPlayCount.weights) state << juce::String(w, 6) << ',';
+    state << '|';
+    for (auto* b : groupBlocks)
+        state << b->id << ':' << juce::String(b->playChance, 6) << ';';
+    juce::Random rng(state.hashCode64());
 
     std::map<juce::String, int> counts;
     for (auto* b : groupBlocks) counts[b->id] = 0;

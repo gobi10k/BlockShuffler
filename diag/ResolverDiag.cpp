@@ -340,17 +340,16 @@ int main() {
         p7.stackBlocks(B7->id, A7->id);
         p7.stackBlocks(C7->id, A7->id);
 
-        juce::Random rng7(31337);
-
         auto report = [&](const char* label) {
             std::vector<Block*> group;
             for (auto* b : p7.blocks)
                 if (b->stackGroup == A7->stackGroup) group.push_back(b);
-            auto probs = StackPicker::inclusionProbabilities(group, p7.blocks, rng7);
+            auto probs = StackPicker::inclusionProbabilities(group, p7.blocks);
             std::cout << "STEP4B " << label << ":";
             for (auto* b : group)
                 std::cout << " " << b->name << "="
-                          << juce::String(probs[b->id] * 100.0f, 1) << "%";
+                          << juce::String(probs[b->id] * 100.0f, 2) << "%"
+                          << " (display " << juce::roundToInt(probs[b->id] * 100.0f) << ")";
             std::cout << "\n";
         };
 
@@ -382,6 +381,42 @@ int main() {
 
         configure(StackPlayMode::Sequential, false, 1, 0.0f, 0.0f, 0.0f);
         report("all-zero weights, pc=1 (uniform fallback, expect ~33 each)");
+    }
+
+    // STEP4AMEND DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // Timing: one 50000-trial recompute for a 6-block stack, plus a
+    // determinism check (two calls on identical state → identical maps).
+    {
+        std::cout << "\n=== STEP4AMEND: 6-block stack timing + determinism ===\n";
+        Project p8;
+        std::vector<Block*> blocks8;
+        for (int i = 0; i < 6; ++i) {
+            auto* b = p8.addBlock(juce::String::charToString((juce::juce_wchar)('A' + i)));
+            addClipTo(b, "c" + b->name);
+            blocks8.push_back(b);
+        }
+        for (int i = 1; i < 6; ++i)
+            p8.stackBlocks(blocks8[(size_t)i]->id, blocks8[0]->id);
+        blocks8[0]->stackPlayCount.values.set(0, 2);
+        p8.propagateStackSettings(blocks8[0]->stackGroup, blocks8[0]);
+
+        std::vector<Block*> group8;
+        for (auto* b : p8.blocks)
+            if (b->stackGroup == blocks8[0]->stackGroup) group8.push_back(b);
+
+        const double t0 = juce::Time::getMillisecondCounterHiRes();
+        auto probsA = StackPicker::inclusionProbabilities(group8, p8.blocks);
+        const double t1 = juce::Time::getMillisecondCounterHiRes();
+        auto probsB = StackPicker::inclusionProbabilities(group8, p8.blocks);
+
+        std::cout << "STEP4AMEND recompute time (6 blocks, pc=2, default trials): "
+                  << juce::String(t1 - t0, 2) << " ms\n";
+        std::cout << "STEP4AMEND determinism (two calls, same state): "
+                  << (probsA == probsB ? "IDENTICAL" : "DIFFER (BAD)") << "\n";
+        std::cout << "STEP4AMEND values:";
+        for (auto* b : group8)
+            std::cout << " " << b->name << "=" << juce::String(probsA[b->id] * 100.0f, 2) << "%";
+        std::cout << "\n";
     }
 
     std::cout << "DONE\n";
