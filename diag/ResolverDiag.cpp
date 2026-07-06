@@ -747,6 +747,123 @@ int main() {
                 .getChildFile("resolverdiag_step6").deleteRecursively();
         }
 
+        // ── Round 1 acceptance gaps (2026-07-06, verification only) ──────────
+        { // T13 (4.5): link swap rates — 0% never, 50% ≈ half, 100% covered by T9
+            Project p;
+            auto* X = p.addBlock("X"); auto* Y = p.addBlock("Y"); auto* Z = p.addBlock("Z");
+            addClipTo(X, "cX", 1000); addClipTo(Y, "cY", 1000); addClipTo(Z, "cZ", 1000);
+            auto* lnk = p.addLink(X->id, Z->id, 0.0f);
+            ArrangementResolver res;
+
+            juce::Random r0(6131);
+            int okN0 = 0, swaps0 = 0;
+            for (int i = 0; i < 50; ++i) {
+                auto arr = res.resolve(p, r0);
+                if (arr.entries.size() == 3) ++okN0;
+                auto* first = p.getBlockById(arr.entries[0].blockId);
+                if (first && first->name == "Z") ++swaps0;
+            }
+
+            lnk->swapProbability = 0.5f;
+            juce::Random r5(6132);
+            int okN5 = 0, swaps5 = 0;
+            for (int i = 0; i < 200; ++i) {
+                auto arr = res.resolve(p, r5);
+                if (arr.entries.size() == 3) ++okN5;
+                auto* first = p.getBlockById(arr.entries[0].blockId);
+                if (first && first->name == "Z") ++swaps5;
+            }
+
+            verdict("T13 link rates: 0% never, 50% = 50±10%",
+                    okN0 == 50 && swaps0 == 0 && okN5 == 200
+                    && swaps5 >= 80 && swaps5 <= 120,
+                    "0%: swaps " + juce::String(swaps0) + "/50 (entries==3: " + juce::String(okN0)
+                    + "/50); 50%: swaps " + juce::String(swaps5) + "/200 (entries==3: "
+                    + juce::String(okN5) + "/200); 100% determinism: T9");
+        }
+        { // T14 (4.6): link endpoint INSIDE a stack — only the two linked blocks
+          // swap; the pulled-out block leaves its stack for that pass, the rest
+          // of the stack stays put, nothing is dropped, model positions untouched.
+          // Setup: stack {S1,S2,S3} (SEQ, pc=3), follower W, link W<->S2 @100%.
+          // Expected slot order per resolve: [{S1,S3} both, in random order], W, S2.
+            Project p;
+            auto* S1 = p.addBlock("S1"); auto* S2 = p.addBlock("S2"); auto* S3 = p.addBlock("S3");
+            auto* W  = p.addBlock("W");
+            addClipTo(S1, "c1", 1000); addClipTo(S2, "c2", 1100);
+            addClipTo(S3, "c3", 1200); addClipTo(W,  "cW", 700);
+            p.stackBlocks(S2->id, S1->id);
+            p.stackBlocks(S3->id, S1->id);
+            S1->stackPlayCount.values.set(0, 3);
+            p.propagateStackSettings(S1->stackGroup, S1);
+            p.addLink(W->id, S2->id, 1.0f);
+
+            juce::String posBefore, posAfter;
+            for (auto* b : p.blocks) posBefore << b->name << "=" << juce::String(b->position) << ";";
+
+            juce::Random r(614); ArrangementResolver res;
+            int ok = 0; juce::String sample;
+            for (int i = 0; i < 20; ++i) {
+                auto arr = res.resolve(p, r);
+                bool good = (arr.entries.size() == 4);
+                std::map<juce::String, int> idx;
+                if (good) {
+                    for (int e = 0; e < 4; ++e) {
+                        auto* b = p.getBlockById(arr.entries[e].blockId);
+                        if (!b || idx.count(b->name)) { good = false; break; }
+                        idx[b->name] = e;
+                        if (e > 0 && arr.entries[e].timelinePos <= arr.entries[e - 1].timelinePos)
+                            good = false;
+                    }
+                }
+                if (good)
+                    good = idx.count("S1") && idx.count("S2") && idx.count("S3") && idx.count("W")
+                           && idx["W"] == 2 && idx["S2"] == 3
+                           && idx["S1"] < 2 && idx["S3"] < 2;
+                ok += good;
+                if (i == 0) {
+                    for (const auto& e : arr.entries) {
+                        auto* b = p.getBlockById(e.blockId);
+                        sample << (b ? b->name : juce::String("?")) << " ";
+                    }
+                }
+            }
+            for (auto* b : p.blocks) posAfter << b->name << "=" << juce::String(b->position) << ";";
+            verdict("T14 link into stack: {S1,S3},W,S2 + positions unmutated",
+                    ok == 20 && posBefore == posAfter,
+                    juce::String(ok) + "/20, sample [" + sample + "], pos before[" + posBefore
+                    + "] after[" + posAfter + "]");
+        }
+        { // T15 (4.7): undo-of-link structural — create-link and change-% both
+          // revert to string-identical JSON via resetAndLoad (the undo path).
+            auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("resolverdiag_r1");
+            tmpDir.createDirectory();
+            Project p;
+            auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+            addClipWithFile(A, "t15A", 1000, tmpDir);
+            addClipWithFile(B, "t15B", 1000, tmpDir);
+
+            auto snap1 = p.toJSON();
+            auto str1  = juce::JSON::toString(snap1);
+            p.addLink(A->id, B->id, 0.5f);
+            p.resetAndLoad(snap1);
+            bool okCreate = (juce::JSON::toString(p.toJSON()) == str1) && p.links.isEmpty();
+
+            { auto* a2 = p.blocks.getFirst(); p.addLink(a2->id, p.blocks[1]->id, 0.5f); }
+            auto snap2 = p.toJSON();
+            auto str2  = juce::JSON::toString(snap2);
+            p.links[0]->swapProbability = 0.9f;
+            p.resetAndLoad(snap2);
+            bool okProb = (juce::JSON::toString(p.toJSON()) == str2)
+                          && p.links.size() == 1
+                          && std::abs(p.links[0]->swapProbability - 0.5f) < 1e-6f;
+
+            verdict("T15 undo-of-link: create + % change both revert", okCreate && okProb,
+                    juce::String("create: ") + (okCreate ? "ok" : "BAD")
+                    + ", probChange: " + (okProb ? "ok" : "BAD"));
+            tmpDir.deleteRecursively();
+        }
+
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
                   << "\n";
     }
