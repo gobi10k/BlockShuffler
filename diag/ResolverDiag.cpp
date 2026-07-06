@@ -9,6 +9,7 @@
 #include "Model/Project.h"
 #include "Audio/ArrangementResolver.h"
 #include "Audio/ExportRenderer.h"
+#include "Audio/StackPicker.h"
 
 using namespace BlockShuffler;
 
@@ -320,6 +321,67 @@ int main() {
         std::cout << "SUMMARY STEP4A: entries==1: " << okEntries << "/20, distribution:";
         for (const auto& kv : byBlock) std::cout << " " << kv.first << "=" << kv.second;
         std::cout << " (block must vary)\n";
+    }
+
+    // STEP4B DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // Inclusion-probability numbers via the EXACT shared function the inspector
+    // calls (StackPicker::inclusionProbabilities → StackPicker::pick).
+    // Expected: 3 equal pc=1 → 33±2%; pc=2 → 67±2%; pc=3 → 100% flat;
+    // base ON SIM pc=2 → base 100%, others 50±3%; weights 80/10/10 pc=1 → ~80/10/10.
+    {
+        std::cout << "\n=== STEP4B: inclusion probabilities (shared MC, 2000 trials) ===\n";
+        Project p7;
+        auto* A7 = p7.addBlock("A");   // base (first in project order)
+        auto* B7 = p7.addBlock("B");
+        auto* C7 = p7.addBlock("C");
+        addClipTo(A7, "cA");
+        addClipTo(B7, "cB");
+        addClipTo(C7, "cC");
+        p7.stackBlocks(B7->id, A7->id);
+        p7.stackBlocks(C7->id, A7->id);
+
+        juce::Random rng7(31337);
+
+        auto report = [&](const char* label) {
+            std::vector<Block*> group;
+            for (auto* b : p7.blocks)
+                if (b->stackGroup == A7->stackGroup) group.push_back(b);
+            auto probs = StackPicker::inclusionProbabilities(group, p7.blocks, rng7);
+            std::cout << "STEP4B " << label << ":";
+            for (auto* b : group)
+                std::cout << " " << b->name << "="
+                          << juce::String(probs[b->id] * 100.0f, 1) << "%";
+            std::cout << "\n";
+        };
+
+        auto configure = [&](StackPlayMode mode, bool base, int count,
+                             float wA, float wB, float wC) {
+            A7->stackPlayMode = mode;
+            A7->alwaysPlayBase = base;
+            A7->stackPlayCount.values.set(0, count);
+            p7.propagateStackSettings(A7->stackGroup, A7);
+            A7->playChance = wA;
+            B7->playChance = wB;
+            C7->playChance = wC;
+        };
+
+        configure(StackPlayMode::Sequential, false, 1, 1.0f, 1.0f, 1.0f);
+        report("3 equal, pc=1 (expect 33±2 each)");
+
+        configure(StackPlayMode::Sequential, false, 2, 1.0f, 1.0f, 1.0f);
+        report("3 equal, pc=2 (expect 67±2 each)");
+
+        configure(StackPlayMode::Sequential, false, 3, 1.0f, 1.0f, 1.0f);
+        report("pc=3 of 3 (expect 100 flat, shortcut, no simulation)");
+
+        configure(StackPlayMode::Simultaneous, true, 2, 1.0f, 1.0f, 1.0f);
+        report("SIM baseON, pc=2 of 3 equal (expect base 100, others 50±3)");
+
+        configure(StackPlayMode::Sequential, false, 1, 0.8f, 0.1f, 0.1f);
+        report("weights 80/10/10, pc=1 (expect ~80/10/10)");
+
+        configure(StackPlayMode::Sequential, false, 1, 0.0f, 0.0f, 0.0f);
+        report("all-zero weights, pc=1 (uniform fallback, expect ~33 each)");
     }
 
     std::cout << "DONE\n";

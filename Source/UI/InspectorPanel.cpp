@@ -1,4 +1,5 @@
 #include "InspectorPanel.h"
+#include "../Audio/StackPicker.h"
 #include <climits>
 
 namespace BlockShuffler {
@@ -452,68 +453,18 @@ void InspectorPanel::rebuildStackBlockLabels() {
 }
 
 std::map<juce::String, float> InspectorPanel::computeStackInclusionProbabilities(int stackGroup) const {
-    std::map<juce::String, float> result;
-    if (!project) return result;
+    // Thin wrapper over the shared StackPicker Monte Carlo — the identical
+    // pick() the resolver uses, so displayed % matches playback (alwaysPlayBase
+    // and all-zero-weight uniform fallback included).
+    if (!project) return {};
 
-    juce::Array<Block*> stackBlocks;
+    std::vector<Block*> groupBlocks;
     for (auto* b : project->blocks)
         if (b->stackGroup == stackGroup)
-            stackBlocks.add(b);
-    if (stackBlocks.isEmpty()) return result;
+            groupBlocks.push_back(b);
 
-    // If the minimum play count covers the whole stack, every block always plays
-    int minPlayCount = INT_MAX;
-    if (stackBlocks[0]->stackPlayCount.isValid())
-        for (int v : stackBlocks[0]->stackPlayCount.values)
-            minPlayCount = std::min(minPlayCount, v);
-    if (minPlayCount == INT_MAX) minPlayCount = 1;
-    if (minPlayCount >= stackBlocks.size()) {
-        for (auto* b : stackBlocks) result[b->id] = 1.0f;
-        return result;
-    }
-
-    // Monte Carlo: 2000 trials using the same without-replacement weighted sampling
-    // the resolver uses, so displayed values match actual playback probabilities.
-    std::map<juce::String, int> counts;
-    for (auto* b : stackBlocks) counts[b->id] = 0;
-
-    const int trials = 2000;
     juce::Random rng;
-
-    for (int t = 0; t < trials; ++t) {
-        int pc = 1;
-        if (stackBlocks[0]->stackPlayCount.isValid())
-            pc = stackBlocks[0]->stackPlayCount.pick(rng);
-        pc = juce::jlimit(1, stackBlocks.size(), pc);
-
-        juce::Array<Block*> remaining = stackBlocks;
-        juce::Array<float>  weights;
-        for (auto* b : remaining) weights.add(b->playChance);
-
-        for (int pick = 0; pick < pc && !remaining.isEmpty(); ++pick) {
-            float total = 0.0f;
-            for (auto w : weights) total += w;
-
-            int chosen = remaining.size() - 1;  // fallback: last element
-            if (total <= 0.0f) {
-                chosen = rng.nextInt(remaining.size());
-            } else {
-                float roll = rng.nextFloat() * total;
-                float cum  = 0.0f;
-                for (int i = 0; i < remaining.size(); ++i) {
-                    cum += weights[i];
-                    if (roll <= cum) { chosen = i; break; }
-                }
-            }
-            counts[remaining[chosen]->id]++;
-            remaining.remove(chosen);
-            weights.remove(chosen);
-        }
-    }
-
-    for (auto* b : stackBlocks)
-        result[b->id] = (float)counts[b->id] / (float)trials;
-    return result;
+    return StackPicker::inclusionProbabilities(groupBlocks, project->blocks, rng);
 }
 
 void InspectorPanel::recalcStackEffectiveLabels() {

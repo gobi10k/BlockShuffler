@@ -11,7 +11,9 @@
 //   "Always play base block" (simultaneous only) → base pre-picked, remaining
 //   (playCount − 1) sampled from the rest; playCount == 1 → base only.
 #include <vector>
+#include <map>
 #include <algorithm>
+#include <climits>
 #include <juce_core/juce_core.h>
 #include "../Model/Block.h"
 
@@ -93,6 +95,52 @@ inline Result pick(const std::vector<Block*>& groupBlocks,
     }
 
     return out;
+}
+
+/** Per-block INCLUSION probability for a stack group (the inspector's
+ *  "effective %"), estimated by Monte Carlo driving the same pick() above —
+ *  the display can never diverge from what playback actually selects.
+ *  Returns blockId → probability in [0, 1].
+ *
+ *  Shortcuts:
+ *    - minimum possible playCount >= groupSize → everyone always plays:
+ *      all 100%, no simulation;
+ *    - alwaysPlayBase ON (simultaneous) → pick() pre-picks the base every
+ *      trial (base counts trials/trials = exactly 100%) and samples the
+ *      remaining (playCount − 1) from the rest;
+ *    - all-zero weights → pick()'s uniform fallback applies. */
+inline std::map<juce::String, float> inclusionProbabilities(
+        const std::vector<Block*>& groupBlocks,
+        const juce::OwnedArray<Block>& projectBlocks,
+        juce::Random& rng,
+        int trials = 2000)
+{
+    std::map<juce::String, float> result;
+    if (groupBlocks.empty()) return result;
+
+    // If the minimum play count covers the whole stack, every block always plays.
+    int minPlayCount = INT_MAX;
+    if (groupBlocks[0]->stackPlayCount.isValid())
+        for (int v : groupBlocks[0]->stackPlayCount.values)
+            minPlayCount = std::min(minPlayCount, v);
+    if (minPlayCount == INT_MAX) minPlayCount = 1;
+    if (minPlayCount >= (int)groupBlocks.size()) {
+        for (auto* b : groupBlocks) result[b->id] = 1.0f;
+        return result;
+    }
+
+    std::map<juce::String, int> counts;
+    for (auto* b : groupBlocks) counts[b->id] = 0;
+
+    for (int t = 0; t < trials; ++t) {
+        auto trial = pick(groupBlocks, projectBlocks, rng);
+        for (auto* b : trial.picked)
+            counts[b->id]++;
+    }
+
+    for (auto* b : groupBlocks)
+        result[b->id] = (float)counts[b->id] / (float)trials;
+    return result;
 }
 
 } // namespace StackPicker
