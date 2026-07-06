@@ -1,7 +1,16 @@
-// INVARIANT: isDone is cosmetic only. This file must NEVER reference isDone.
-// isDone is for the UI to dim or badge blocks/clips; it has no effect on which
-// blocks or clips are selected during arrangement resolution or playback.
-// grep -c "isDone" Source/Audio/ArrangementResolver.cpp  must return 0.
+// ═══ RESOLVER INVARIANTS (permanent — MASTER_PROMPT Step 5) ═══════════════════
+// 1. isDone is COSMETIC ONLY. This file must never reference isDone functionally
+//    (the UI dims/badges done blocks and clips; selection and playback ignore it).
+//    grep "isDone" over Source/Audio/ must hit nothing but this comment block.
+// 2. playCount is HONORED, via the shared StackPicker::pick(): one draw from
+//    stackPlayCount clamped to [1, groupSize]; weighted sample WITHOUT
+//    replacement; entries created only from the picked subset. Guarded per stack
+//    slot by the jassert + violation DBG below (entries added <= playCount).
+// 3. Links are BIDIRECTIONAL swaps applied to a LOCAL position map — the model's
+//    block->position values are never mutated by resolve().
+// 4. The sequential timeline is GAPLESS: entry N+1's body starts exactly at
+//    entry N's body end (timelinePos + bodyLen); lead-ins/tails overlap it.
+// ══════════════════════════════════════════════════════════════════════════════
 #include "ArrangementResolver.h"
 #include "StackPicker.h"
 #include "TempoStretcher.h"
@@ -295,9 +304,14 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 }
             }
 
-            // REGRESSION GUARD: entries added for this stack slot must not exceed playCount.
-            // If this assertion fires, slot-building incorrectly split stacked blocks into
-            // standalone slots, causing each to play through the standalone playChance gate.
+            // REGRESSION GUARD (permanent — MASTER_PROMPT Step 5): entries added for
+            // this stack slot must not exceed playCount. If this fires, slot-building
+            // incorrectly split stacked blocks into standalone slots, causing each to
+            // play through the standalone playChance gate.
+            if (result.entries.size() - entriesBefore > playCount)
+                DBG("GUARD VIOLATION: stack grp=" + juce::String(allBlocks[0]->stackGroup)
+                    + " added " + juce::String(result.entries.size() - entriesBefore)
+                    + " entries > playCount=" + juce::String(playCount));
             jassert(result.entries.size() - entriesBefore <= playCount);
         }
     }
