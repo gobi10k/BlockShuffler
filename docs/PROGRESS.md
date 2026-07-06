@@ -45,17 +45,17 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 | 1.2 delete block | PV | 5.10 base 100% + rest | T7 + 4D user-confirmed |
 | 1.3 rename | PV | 5.11 stack drag ops | PV |
 | 1.4 set colour | PV | 5.12 one control per stack | PV + 3D/3F (1610703) |
-| 1.5 drag reorder | PV | 6.1 clip Done still plays | Step 5 grep (0 functional) — no in-app run |
+| 1.5 drag reorder | PV | 6.1 clip Done still plays | Step 5 grep + PENDING-MANUAL (script 1) |
 | 1.6 drag to stack | PV | 6.2 block Done still plays | T10 (exact) + M7 |
-| 2.1 Finder→waveform | PV | 6.3 badge placement | **GAP** (visual) |
-| 2.2 Finder→block tile | PV | 6.4 export all-Done | Step 5 grep (structural) — no run |
+| 2.1 Finder→waveform | PV | 6.3 badge placement | PENDING-MANUAL (script 2) |
+| 2.2 Finder→block tile | PV | 6.4 export all-Done | Step 5 grep + PENDING-MANUAL (script 3) |
 | 2.3 browse button | PV | 6.5 grep isDone Audio | Step 5 (c507dc1) |
 | 2.4 clip rename/colour/remove | PV | 7.1 Play applies randomization | T1–T9 (same resolve()) + PV |
 | 2.5 independent weights | PV | 7.2 playing indicator | PV |
 | 2.6 clip weights 80/15/5 dist. | T16 (81.5/12.0/6.5 over 200) | 7.3 waveform follows | PV |
 | 2.7 single clip 0% → 100% | T17 (20/20) | 7.4 selection independent | PV + 4C (647b084) |
 | 2.8 markers snap/Shift | PV | 7.5 Play Block/Clip | PV |
-| 3.1 entry-0 lead-in full gain | PV + M4 | 7.6 rapid play/stop 20× | **GAP** |
+| 3.1 entry-0 lead-in full gain | PV + M4 | 7.6 rapid play/stop 20× | PENDING-MANUAL (script 4, 9) |
 | 3.2 zero-gap bodies | T2 + M1 | 8.1 song ender truncates | PV |
 | 3.3 tail/lead-in crossfade | PV + M4 | 8.2 ender inside stack | T19 (both branches) |
 | 3.4 stretch to adjacent tempo | PV | 9.1 tempo = grid only | PV |
@@ -63,21 +63,43 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 | 4.1 link create + label | PV | 9.3 block tempo + override | PV |
 | 4.2 labels never overlap | PV | 9.4 project default tempo | PV |
 | 4.3 100% deterministic swap | T9 | 10.1 WAV/FLAC/BSF chooser | PV |
-| 4.4 3,2,1 + nothing dropped | T9 (10/10, positions unmutated) | 10.2 export == playback (Audacity) | PV (EntryMixer shared) — no re-run |
+| 4.4 3,2,1 + nothing dropped | T9 (10/10, positions unmutated) | 10.2 export == playback (Audacity) | PV + PENDING-MANUAL (script 5) |
 | 4.5 0% / 50% swap rates | T13 (0/50; 103/200) | 10.3 BSF valid zip + int64 strings | H:STEP3E (d424800) + PV |
-| 4.6 link into stack: that block | T14 (20/20, positions unmutated) | 10.4 stretched-join export | **GAP** |
+| 4.6 link into stack: that block | T14 (20/20, positions unmutated) | 10.4 stretched-join export | PENDING-MANUAL (script 6) |
 | 4.7 remove link + undo | PV + T15 (undo of create + % change) | 11.1 Save/SaveAs/Open | PV |
 | 5.1 SEQ pc=1 exactly one | T1 + H:Step1 + M(3F) | 11.2 reopen: all intact | T11 + M5 |
-| 5.2 SEQ pc=2 | T2 | 11.3 Finder double-click open | **GAP** |
+| 5.2 SEQ pc=2 | T2 | 11.3 Finder double-click open | **BLOCKED** — no CFBundleDocumentTypes (A1 finding, fix to scope) |
 | 5.3 SEQ pc=3 + continues | T18 (10/10 gapless, D plays) | 11.4 undo cleared on load | PV |
 | 5.4 SIM pc=1 | T3 | 11.5 undo exact/no desync | T12 + M6 + PV |
 | 5.5 SIM pc=2 layered | T4 + M2 | 11.6 missing-file warning | PV |
-| 5.6 SIM pc=3 + longest | T5 + M2/M3 | 12.1 stress (50 blocks, rapid undo) | **GAP** |
+| 5.6 SIM pc=3 + longest | T5 + M2/M3 | 12.1 stress (50 blocks, rapid undo) | PENDING-MANUAL (script 8) |
 | 5.7 block weights bias | T8 | 12.2 Windows parity | **GAP** (TODO 6) |
 | 5.8 base toggle ON/OFF | T6 + H:STEP3C + M(3F ear) | 12.3 logo polish | **GAP** (TODO 5) |
-**NOT-YET-COVERED (7, updated 2026-07-06 round 1):** 6.3 (badge placement, visual), 7.6 (rapid play/stop 20×), 10.4 (stretched-join export), 11.3 (Finder double-click open), 12.1 (stress), 12.2 (Windows parity), 12.3 (logo) — plus partials: 6.1/6.4 (structural grep only; no in-app/export run), 10.2 (no Audacity re-run). Round 1 (T13–T19) closed 2.6, 2.7, 4.5, 4.6, 4.7-partial, 5.3, 8.2. Remaining items are manual/UI/export/platform — not harness-addressable.
+**STATUS (updated 2026-07-06 session 5):** harness-coverable items all green (T1–T19). PENDING-MANUAL: 6.1, 6.3, 6.4, 7.6, 10.2, 10.4, 12.1 (session script in the 2026-07-06 session-5 entry). BLOCKED: 11.3 (missing .bsp CFBundleDocumentTypes — A1 finding, fix to be scoped). Remaining build tasks: 12.2 Windows parity, 12.3 logo. Partials 6.1/6.4 upgrade to full once the manual run passes.
 
 ## SESSION LOG
+
+### 2026-07-06 (session 5) — Manual round prep: A1 FINDING (.bsp association missing), builds, test projects, session script
+- **A1 FINDING (reported, NOT fixed): Finder double-click (11.3) is BLOCKED by a build-config gap.** The Release app's Info.plist has NO `CFBundleDocumentTypes` (checked with plutil; only bundle-id/name/icon keys present) and CMakeLists.txt configures no document types — macOS will not route `.bsp` files to the app. The APP-SIDE handler EXISTS (Main.cpp:106–112 opens a `.bsp` from the command line), so the separate fix to scope is: (1) add the `.bsp` document-type declaration to the bundle plist (JUCE CMake `DOCUMENT_EXTENSIONS`/plist merge), and (2) verify/add `anotherInstanceStarted()` handling for the macOS open-document event (cold-start AND already-running cases) — the command-line path alone may not cover Finder on macOS.
+- A2 semantics cross-check (4.6): verbatim item — "Link to a block inside a stack swaps THAT block only (never a random stack member)". T14-encoded behavior: the SPECIFIC linked block swaps (never random — verified 20/20), implemented by pulling the linked member OUT of its stack for that pass (swappedBlockIds), with the stack's playCount clamping to the remaining members. Verdict: the wording SUPPORTS the "that block only" core (what T14 proves) but is SILENT on the side effects (member leaves the stack for the pass; remaining stack plays clamped count). Not contradicted, but if the client imagined the swapped block still counting toward the stack, that's an unconfirmed reading — flag for client sign-off if it ever comes up. No changes made.
+- B builds (product code unchanged since the 7C clean builds):
+  - Debug:   `build-diag/BlockShuffler_artefacts/Debug/Standalone/BlockShuffler.app`
+  - Release: `build-release/BlockShuffler_artefacts/Release/Standalone/BlockShuffler.app`
+- C test material (commit 1ac12a6, diag-only): `ResolverDiag --gen-manual ~/Desktop/BlockShuffler_ManualRound` generated and verified (load ok, 0 missing files):
+  - `~/Desktop/BlockShuffler_ManualRound/TestProject.bsp` — Intro(440Hz, tempo 120, tail 0.5s) → Verse(220Hz, tempo 160, lead-in 0.4s) → Chorus stack {880Hz, noise} SIM play 2 of 2; link Intro↔Verse at 0%. DETERMINISTIC by construction (export re-resolves — MainComponent.cpp:690 — so the project must resolve identically every time for 10.2/10.4 comparisons). Resolves to exactly 6.10s: boundaries at 2.00s (stretched join) and 4.10s.
+  - `~/Desktop/BlockShuffler_ManualRound/StressProject.bsp` — 50 blocks, 5 stacked pairs, tones round-robin.
+- D MANUAL SESSION SCRIPT — run top to bottom, Debug app FIRST (run the binary from Terminal to see assert logs: `"build-diag/BlockShuffler_artefacts/Debug/Standalone/BlockShuffler.app/Contents/MacOS/BlockShuffler"`). KNOWN dev-noise: `juce_Colour.cpp:340` assertion lines during playback are the deferred TODO 7 — ignore THAT line only; any OTHER assertion is a finding.
+  1. **6.1 clip-done cosmetic** — Open TestProject.bsp. Select Verse; right-click its clip → Mark as Done. EXPECT: clip visually dims/badges; Play 3× — the 220Hz section still sounds every time. FAILURE: no visual change, or Verse silent (a gap between the 440 and chorus sections).
+  2. **6.3 DONE badge vs name** — Right-click block Verse → Mark as Done (try a second block with a different colour too). EXPECT: DONE badge visible AND the block name fully readable. FAILURE LOOKS LIKE: badge drawn over the name text (name truncated/obscured), badge missing, or unreadable contrast on some block colour.
+  3. **6.4 all-done export** — Mark ALL four blocks Done → Export → WAV. EXPECT: normal file chooser, export completes, file plays (~6.10s), no warning. FAILURE: any warning/refusal/empty or truncated file.
+  4. **7.6 rapid play/stop ×20 (Debug)** — Click Play↔Stop as fast as possible 20×, end on Stop. EXPECT: every press lands, audio always stops, playhead resets, terminal shows no NEW assertions (Colour spam excepted), no stuck tone. FAILURE: crash, drone after Stop, UI freeze, non-Colour assertion line.
+  5. **10.2 export vs playback (Audacity)** — Play TestProject once, listen: 440 tone → 220 tone → layered 880+noise; smooth overlapped join before the 220 section. Export WAV and FLAC. In Audacity compare BOTH files: (a) total length ≈ 6.10s and WAV/FLAC identical length; (b) join positions: tone change at 2.00s and 4.10s (use spectrogram view — the 440→220 and 220→chorus transitions are unmistakable); (c) zoom each boundary: crossfaded overlap region just BEFORE 2.00s (440's stretched tail under 220's lead-in), NO click/gap/dropout at either boundary; (d) optional null test: import WAV + FLAC, invert one, mix → silence. FAILURE: length far off 6.10s, hard cut instead of overlap at 2.00s, click/gap, or a missing chorus layer (only one of 880/noise audible).
+  6. **10.4 stretched join by ear** — A/B the 2.00s join: in-app playback vs exported WAV. EXPECT: identical character — the tail/lead-in are time-stretched but PITCH-CONSTANT (440 stays 440, 220 stays 220). FAILURE: export join differs from playback join, or pitch shifts (chipmunk/slowdown = resampling instead of WSOLA).
+  7. **11.3 Finder double-click — BLOCKED (A1)**: skip. If tried anyway: macOS will not offer BlockShuffler for .bsp — that is the known plist gap, not a new finding.
+  8. **12.1 stress (Debug)** — Open StressProject.bsp. EXPECT: all 50 blocks visible immediately. (a) Make 15 quick edits (weight drags, renames, reorders), then Cmd+Z ×15 rapidly — each reverts, no blank waveform/strip. (b) One minute of continuous drag chaos: reorder, drag into/out of the 5 stacks, Shift+drag a stack. (c) Play ~30s, then rapid play/stop ×5. FAILURE: crash, non-Colour assertion, block vanishing, strip corruption, stuck audio, unrecovered UI.
+  9. **Release smoke** — Open the Release app (path above): open both projects, repeat 7.6 (rapid play/stop ×20), one WAV export, brief listen. EXPECT: identical behavior, no console requirement. FAILURE: anything that differs from Debug behavior.
+- E: acceptance map rows flipped to PENDING-MANUAL (script step numbers), 11.3 → BLOCKED.
+- NEXT SESSION should: record the manual-session results item by item; scope the 11.3 fix (plist + anotherInstanceStarted) for user go-ahead; then logo (12.3), Windows parity (12.2), Colour assert (TODO 7).
 
 ### 2026-07-06 (session 4) — Acceptance gaps round 1: T13–T19 added, ALL PASS (verification only, zero product code)
 - What I changed (files): `diag/ResolverDiag.cpp` only (T13–T19); `docs/PROGRESS.md` (acceptance map flips + this entry). No product code touched.
