@@ -467,6 +467,31 @@ std::map<juce::String, float> InspectorPanel::computeStackInclusionProbabilities
     return StackPicker::inclusionProbabilities(groupBlocks, project->blocks, rng);
 }
 
+// Fingerprint of everything the inclusion % depends on: group id, play mode,
+// alwaysPlayBase, stackPlayCount values+weights, and member ids + weights in
+// project order. If two calls see the same fingerprint, the Monte Carlo result
+// is served from cache instead of being re-rolled.
+juce::String InspectorPanel::stackStateFingerprint(int stackGroup) const {
+    juce::String fp;
+    fp << stackGroup << '|';
+    bool wroteGroupSettings = false;
+    for (auto* b : project->blocks) {
+        if (b->stackGroup != stackGroup) continue;
+        if (!wroteGroupSettings) {
+            // Stack-level settings are propagated across the group — read once.
+            fp << (b->stackPlayMode == StackPlayMode::Simultaneous ? "SIM" : "SEQ")
+               << '|' << (b->alwaysPlayBase ? 1 : 0) << '|';
+            for (int v : b->stackPlayCount.values)   fp << v << ',';
+            fp << '|';
+            for (float w : b->stackPlayCount.weights) fp << juce::String(w, 6) << ',';
+            fp << '|';
+            wroteGroupSettings = true;
+        }
+        fp << b->id << ':' << juce::String(b->playChance, 6) << ';';
+    }
+    return fp;
+}
+
 void InspectorPanel::recalcStackEffectiveLabels() {
     if (!selectedBlock || selectedBlock->stackGroup < 0 || !project) return;
 
@@ -475,7 +500,18 @@ void InspectorPanel::recalcStackEffectiveLabels() {
         if (b->stackGroup == selectedBlock->stackGroup)
             stackBlocks.add(b);
 
-    auto probs = computeStackInclusionProbabilities(selectedBlock->stackGroup);
+    // 4C recompute gate: re-roll the Monte Carlo only when the stack state
+    // changed (weight drag end / play count / base toggle / membership /
+    // project load). Pressing Play or the playing-block follow leave the
+    // model untouched → cache hit → display stays put.
+    const int  group = selectedBlock->stackGroup;
+    const auto fp    = stackStateFingerprint(group);
+    auto& cached = inclusionProbsCache[group];
+    if (cached.fingerprint != fp) {
+        cached.probs       = computeStackInclusionProbabilities(group);
+        cached.fingerprint = fp;
+    }
+    const auto& probs = cached.probs;
 
     for (int i = 0; i < stackBlocks.size() && i < stackBlockProbRows.size(); ++i) {
         auto it = probs.find(stackBlocks[i]->id);

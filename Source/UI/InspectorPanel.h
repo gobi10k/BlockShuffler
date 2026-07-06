@@ -238,6 +238,18 @@ private:
     void recalcStackEffectiveLabels();
     std::map<juce::String, float> computeStackInclusionProbabilities(int stackGroup) const;
 
+    /** Effective-% recompute gate (MASTER_PROMPT 4C): the Monte Carlo runs only
+     *  when the stack state it depends on changes — weight drag end, play-count
+     *  change, base toggle, stack membership change, project load (and undo of
+     *  those). Play / playing-block follow don't touch the model, so they hit
+     *  the cache and the displayed % cannot change when playback starts. */
+    juce::String stackStateFingerprint(int stackGroup) const;
+    struct InclusionCacheEntry {
+        juce::String fingerprint;
+        std::map<juce::String, float> probs;
+    };
+    std::map<int, InclusionCacheEntry> inclusionProbsCache;  // keyed by stackGroup
+
     // ── Links section ────────────────────────────────────────────────────────
     juce::Label  linksTitle;
     struct LinkRow {
