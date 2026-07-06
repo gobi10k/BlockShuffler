@@ -15,7 +15,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 ### BROKEN / TODO (in priority order)
 1. ~~**Stack play count regression**~~ — **CLOSED 2026-07-05: does not reproduce.** Verified honored in current code (headless harness + in-app DBG + by ear). PROGRESS entry below has the proof. Keep the jassert guard at ArrangementResolver.cpp:319.
 2. ~~**Simultaneous layering**~~ — **CLOSED 2026-07-05 session 2: MASTER_PROMPT Step 2 COMPLETE.** Grep half PASSED; runtime half PASSED (SIM play 3 → 10/10 identical timelinePos, cursor advances by LONGEST body; proof in entry below); layering confirmed BY EAR by the user. No code change was needed.
-3. **NEW FEATURE: "Always play base block"** (simultaneous only) — not yet built. Model + serialization + resolver + inspector toggle + BSF. MASTER_PROMPT Step 3.
+3. **NEW FEATURE: "Always play base block"** (simultaneous only) — **BUILT 2026-07-05 session 3 (Steps 3A–3E all committed with proof), awaiting user 3F hand-off tests.** Step 3 closes only after user confirms: ear test (base ON, play 2 of 3), toggle undo/redo, save→reopen persistence, pre-3B project loads with toggle off. Repro steps in entry below.
 4. **Effective % = inclusion probability** — verify against client numbers (33 / 67 / 100). Share the picker function between resolver and display. MASTER_PROMPT Step 4.
 5. **Logo polish** — background must match transport bar colour exactly, larger, sit just left of Save As. Verify logo + app icon load via BinaryData (cross-platform), not runtime file paths. ACCEPTANCE_TESTS 12.3.
 6. **Windows parity pass** — ACCEPTANCE_TESTS 12.2.
@@ -23,7 +23,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 8. ~~**Source/ is UNTRACKED in git**~~ — **CLOSED 2026-07-05 session 2.** Full tree committed on `UI_firstdraft` and tagged `baseline-step1-clean`. IMPORTANT: the old "repo" was accidentally rooted at `$HOME` (that's why Source/ looked untracked); a proper repo now lives at the project directory with the UI_firstdraft history imported and origin set (details in entry below). One commit per completed MASTER_PROMPT step from now on.
 
 ### NEXT UP
-MASTER_PROMPT Step 3 ("Always play base block", simultaneous only): model + propagateStackSettings + serialization + resolver + inspector toggle + BSF model.json. Then Steps 4–7 in order. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
+User runs the Step 3F hand-off tests (repro steps in the 2026-07-05 session-3 entry). After confirmation: mark Step 3 complete, then MASTER_PROMPT Step 4 (effective % = inclusion probability; note computeStackInclusionProbabilities does NOT yet know about alwaysPlayBase — that is Step 4 work, deliberately not touched in Step 3). Then Steps 5–7. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
 
 ---
 
@@ -33,6 +33,33 @@ Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via
 ---
 
 ## SESSION LOG
+
+### 2026-07-05 (session 3) — MASTER_PROMPT Step 3 built (3A–3E committed), awaiting 3F user confirmation
+- Step 0 backup: remote `UI_firstdraft` held a stale 2026-04-29 orphan snapshot (strict subset of local tree, zero remote-only files) — replaced via `git push --force-with-lease`; branch now tracks origin.
+- What I changed (files):
+  - `Source/Model/Block.h` — `bool alwaysPlayBase = false;` (stack-level, simultaneous only).
+  - `Source/Model/Project.cpp` — propagateStackSettings copies alwaysPlayBase across the group.
+  - `Source/Model/Serialization.cpp` — toJSON writes / fromJSON reads "alwaysPlayBase" (missing key → false; pre-3B projects load unchanged).
+  - `Source/Audio/ArrangementResolver.cpp` — simultaneous pick only: if alwaysPlayBase, base block (FIRST of the stack group in project->blocks order) is pre-picked, remaining (playCount−1) weighted-sampled without replacement from the rest; playCount==1 → base only. `isSimultaneous` hoisted above the pick (only structural move). Sequential/standalone paths untouched; jassert guard intact (now line 345).
+  - `Source/UI/InspectorPanel.h/.cpp` — "Always play base block" ToggleButton, visible ONLY when mode == Simultaneous; undo = local pre-snapshot → mutate → propagateStackSettings → applyExternalMutation (recordMutation, suppressUndo-aware); "(base)" suffix on the base block's row in the combined stack view (shown in Simultaneous mode); mode flips rebuild labels + layout via lastBuiltSimMode.
+  - `Source/Audio/ExportRenderer.cpp` — BSF model.json blocks now carry "alwaysPlayBase".
+  - `CMakeLists.txt` — ExportRenderer.cpp added to ResolverDiag target (diag-only; Step 7 removes target).
+  - `diag/ResolverDiag.cpp` — STEP3B (serialization round-trip + stripped-key load), STEP3C (6 scenarios × 20 resolves), STEP3E (headless renderToBsf → print model.json). All TEMPORARY, remove in Step 7.
+  - `docs/PROGRESS.md` — this entry.
+- Commits: 30f67b4 (3A model+propagation), 182760d (3B serialization), 18f158e (3C resolver), 1610703 (3D inspector+undo), d424800 (3E BSF export).
+- What I proved (PASS/FAIL):
+  - 3B PASS: save→load alwaysPlayBase=true on both stacked blocks; JSON with key stripped → false.
+  - 3C PASS 20/20 each: SIM baseON pc=2 → base present 20/20, exactly 2 entries, identical timelinePos; pc=1 → base only; pc=3 → all three. REGRESSION base OFF: SIM pc=1 → 1 entry, base only 7/20 (varies); SEQ pc=1 → 1 entry; SEQ pc=2 → 2 entries ascending timeline. `git diff` confirmed changes confined to the simultaneous pick.
+  - 3E PASS: headless BSF export, model.json stack blocks show `"alwaysPlayBase": true`.
+- What regressed or surprised me: nothing; all regression scenarios green.
+- Step 3F hand-off (user-run; Step 3 NOT complete until confirmed):
+  1. `open "build-diag/BlockShuffler_artefacts/Debug/Standalone/BlockShuffler.app"`
+  2. 3 blocks with distinguishable clips → stack all three → mode = Simultaneous. The first block of the stack shows "(base)" in the inspector's stack view; the "Always play base block" toggle appears under Play Mode (and disappears in Sequential).
+  3. Toggle ON, How Many to Play = 2 → several Plays: the (base) block sounds EVERY time plus exactly one other.
+  4. Cmd+Z / Cmd+Shift+Z: toggle flips back/forth, one undo step per click.
+  5. Save As → reopen: toggle still ON.
+  6. Open any project saved before today → toggle OFF.
+- NEXT SESSION should: after user confirms 3F, mark Step 3 complete; then Step 4 (effective % — must teach computeStackInclusionProbabilities about alwaysPlayBase and share the picker with the resolver).
 
 ### 2026-07-05 (session 2) — VCS baseline + Step 2 runtime half PASSED (ear check pending)
 - What I changed (files):
