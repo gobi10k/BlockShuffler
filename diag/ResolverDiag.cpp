@@ -93,8 +93,8 @@ static void dumpModel(Project& p, const char* label) {
 //                       tempo-stretched join (Intro tempo 120 tail -> Verse tempo
 //                       160 lead-in) for 10.2/10.4 Audacity/ear comparison.
 //   StressProject.bsp — 50 blocks (5 stacked pairs) for 12.1.
-static void writeToneWav(const juce::File& f, double freqHz, double seconds, bool noise) {
-    const double sr = 44100.0;
+static void writeToneWav(const juce::File& f, double freqHz, double seconds, bool noise,
+                         double sr = 44100.0) {
     const int len = (int)(seconds * sr);
     juce::AudioBuffer<float> buf(2, len);
     juce::Random nz(42);
@@ -1109,6 +1109,91 @@ int main(int argc, char* argv[]) {
                     okResolves == 20 && endedBranch > 0 && continuedBranch > 0,
                     juce::String(okResolves) + "/20, ended: " + juce::String(endedBranch)
                     + ", continued: " + juce::String(continuedBranch));
+        }
+
+        { // T20 (10.5): sample-rate / pitch — a 440 Hz source must stay 440 Hz for
+          // every {source rate} x {project rate} combo, through BOTH the load-time
+          // resample (Clip::loadFromFile) and the offline export (ExportRenderer).
+          // Pitch is measured by positive-going zero crossings interpreted at the
+          // relevant sample rate: freq = crossings / (numSamples / rate). This is
+          // rate-invariant for correct resampling; a missed resample shows up as
+          // freq * (nativeRate/projectRate) (e.g. 440 @48k in a 44.1k project -> 404).
+            auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("resolverdiag_t20");
+            tmpDir.createDirectory();
+            juce::AudioFormatManager afm; afm.registerBasicFormats();
+
+            auto measureFreq = [](const juce::AudioBuffer<float>& b, double rate) {
+                const float* d = b.getReadPointer(0);
+                int n = b.getNumSamples(), crossings = 0;
+                for (int i = 1; i < n; ++i)
+                    if (d[i - 1] <= 0.0f && d[i] > 0.0f) ++crossings;
+                return (double)crossings / ((double)n / rate);
+            };
+            auto readWav = [&](const juce::File& f, juce::AudioBuffer<float>& out) {
+                std::unique_ptr<juce::AudioFormatReader> r(afm.createReaderFor(f));
+                if (!r) return 0.0;
+                out.setSize((int)r->numChannels, (int)r->lengthInSamples);
+                r->read(&out, 0, (int)r->lengthInSamples, 0, true, true);
+                return r->sampleRate;
+            };
+
+            const double rates[2] = { 44100.0, 48000.0 };
+            const double srcFreq  = 440.0;
+            const double srcSecs  = 1.0;
+            bool allOk = true;
+            juce::String detail;
+
+            for (double srcRate : rates) {
+                auto srcFile = tmpDir.getChildFile("src_" + juce::String((int)srcRate) + ".wav");
+                writeToneWav(srcFile, srcFreq, srcSecs, false, srcRate);
+
+                for (double projRate : rates) {
+                    // ── Load-time resample check ──
+                    Project p; p.sampleRate = projRate;
+                    auto* blk = p.addBlock("A");
+                    auto clip = std::make_unique<Clip>();
+                    clip->name = "tone";
+                    clip->probability = 1.0f;
+                    clip->tempo = 120.0;
+                    bool loaded = clip->loadFromFile(srcFile, afm, projRate);
+                    Clip* rawClip = clip.get();
+                    blk->addClip(std::move(clip));
+
+                    double loadFreq = loaded ? measureFreq(*rawClip->audioBuffer, projRate) : 0.0;
+                    double loadSecs = loaded ? (double)rawClip->audioBuffer->getNumSamples() / projRate : 0.0;
+                    bool loadOk = loaded
+                        && std::abs(loadFreq - srcFreq) <= 5.0
+                        && std::abs(loadSecs - srcSecs) <= 0.01;
+
+                    // ── Export check ──
+                    juce::Random r(2050); ArrangementResolver res;
+                    auto arr = res.resolve(p, r);
+                    arr.sampleRate = projRate;
+                    auto outWav = tmpDir.getChildFile("out_" + juce::String((int)srcRate)
+                                       + "_" + juce::String((int)projRate) + ".wav");
+                    juce::WavAudioFormat wavFmt;
+                    ExportRenderer ex;
+                    bool exported = ex.renderToFile(arr, outWav, wavFmt, 16, nullptr);
+
+                    juce::AudioBuffer<float> outBuf;
+                    double outRate = exported ? readWav(outWav, outBuf) : 0.0;
+                    double outFreq = (outRate > 0.0) ? measureFreq(outBuf, outRate) : 0.0;
+                    bool exportOk = exported
+                        && std::abs(outRate - projRate) < 1.0
+                        && std::abs(outFreq - srcFreq) <= 5.0;
+
+                    allOk = allOk && loadOk && exportOk;
+                    detail << "\n      src" << (int)srcRate << "->proj" << (int)projRate
+                           << ": load " << juce::String(loadFreq, 1) << "Hz/"
+                           << juce::String(loadSecs, 3) << "s " << (loadOk ? "ok" : "BAD")
+                           << ", export " << juce::String(outFreq, 1) << "Hz@"
+                           << (int)outRate << " " << (exportOk ? "ok" : "BAD");
+                }
+            }
+            verdict("T20 sample-rate/pitch: 440Hz stays 440Hz (load+export, all rate combos)",
+                    allOk, detail);
+            tmpDir.deleteRecursively();
         }
 
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
