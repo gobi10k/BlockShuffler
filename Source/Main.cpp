@@ -103,19 +103,37 @@ public:
 
     void initialise(const juce::String& commandLine) override {
         mainWindow = std::make_unique<MainWindow>(getApplicationName());
-        // Open a .bsp file passed on the command line (double-click from Finder/Explorer).
-        if (commandLine.isNotEmpty()) {
-            juce::String path = commandLine.trim();
-            if (path.startsWithChar('"') && path.endsWithChar('"'))
-                path = path.substring(1, path.length() - 1);
-            juce::File f(path);
-            if (f.existsAsFile() && f.hasFileExtension(".bsp"))
-                mainWindow->openFile(f);
-        }
+        // Open a .bsp passed on the command line (Windows/Linux double-click,
+        // or launching from a terminal). macOS Finder does NOT use argv — it
+        // delivers an open-document event, which JUCE routes to
+        // anotherInstanceStarted() below (cold start AND already running).
+        openBspFromCommandLine(commandLine);
+    }
+
+    void anotherInstanceStarted(const juce::String& commandLine) override {
+        // macOS: application:openFile:/openFiles: and the odoc Apple event all
+        // land here (juce_MessageManager_mac.mm), with the path quoted if it
+        // contains spaces. Also fires on Windows/Linux when a second instance
+        // forwards its command line. Routes through the SAME loadProject() the
+        // Open button uses — no separate load path.
+        openBspFromCommandLine(commandLine);
     }
 
     void shutdown() override {
         mainWindow = nullptr;
+    }
+
+    /** Shared entry for command-line / Finder-double-click .bsp opening.
+     *  Identical behavior to the Open button: MainWindow::openFile() →
+     *  MainComponent::loadProject(). The Open button does not prompt about
+     *  unsaved changes, so neither does this path. */
+    void openBspFromCommandLine(const juce::String& commandLine) {
+        if (mainWindow == nullptr || commandLine.isEmpty()) return;
+        juce::File f(commandLine.trim().unquoted());
+        if (f.existsAsFile() && f.hasFileExtension(".bsp")) {
+            mainWindow->toFront(true);
+            mainWindow->openFile(f);
+        }
     }
 
     void systemRequestedQuit() override {

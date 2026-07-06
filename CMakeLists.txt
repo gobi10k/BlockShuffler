@@ -31,6 +31,7 @@ juce_add_plugin(BlockShuffler
     PLUGIN_CODE BkSh
     FORMATS Standalone VST3
     PRODUCT_NAME "BlockShuffler"
+    DOCUMENT_EXTENSIONS bsp
     ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon_512.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
 )
