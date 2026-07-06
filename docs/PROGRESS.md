@@ -16,14 +16,14 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 1. ~~**Stack play count regression**~~ — **CLOSED 2026-07-05: does not reproduce.** Verified honored in current code (headless harness + in-app DBG + by ear). PROGRESS entry below has the proof. Keep the jassert guard at ArrangementResolver.cpp:319.
 2. ~~**Simultaneous layering**~~ — **CLOSED 2026-07-05 session 2: MASTER_PROMPT Step 2 COMPLETE.** Grep half PASSED; runtime half PASSED (SIM play 3 → 10/10 identical timelinePos, cursor advances by LONGEST body; proof in entry below); layering confirmed BY EAR by the user. No code change was needed.
 3. ~~**NEW FEATURE: "Always play base block"**~~ — **CLOSED 2026-07-06: MASTER_PROMPT Step 3 COMPLETE.** 3A–3E committed with proof (session-3 entry below); 3F user-confirmed 2026-07-06: all six manual tests pass (ear test base ON play 2 of 3, toggle visibility per mode, undo/redo, save→reopen persistence, pre-3B project loads with toggle off).
-4. **Effective % = inclusion probability** — verify against client numbers (33 / 67 / 100). Share the picker function between resolver and display. MASTER_PROMPT Step 4.
+4. **Effective % = inclusion probability** — **BUILT 2026-07-06 (Steps 4A–4C committed with proof), awaiting user 4D hand-off tests.** Shared StackPicker between resolver and display; client numbers verified in harness (33/67/100/base-100+50/80-10-10). Step 4 closes only after user confirms in-app (repro steps in the 2026-07-06 entry below).
 5. **Logo polish** — background must match transport bar colour exactly, larger, sit just left of Save As. Verify logo + app icon load via BinaryData (cross-platform), not runtime file paths. ACCEPTANCE_TESTS 12.3.
 6. **Windows parity pass** — ACCEPTANCE_TESTS 12.2.
 7. **NEW (found 2026-07-05): juce_Colour.cpp:340 assertion spam** — fires continuously while painting during playback with audio loaded (Debug builds). Something constructs a Colour with an out-of-range float value. Find and fix (likely waveform/playhead/indicator paint code; maybe touch alongside item 5).
 8. ~~**Source/ is UNTRACKED in git**~~ — **CLOSED 2026-07-05 session 2.** Full tree committed on `UI_firstdraft` and tagged `baseline-step1-clean`. IMPORTANT: the old "repo" was accidentally rooted at `$HOME` (that's why Source/ looked untracked); a proper repo now lives at the project directory with the UI_firstdraft history imported and origin set (details in entry below). One commit per completed MASTER_PROMPT step from now on.
 
 ### NEXT UP
-MASTER_PROMPT Step 4 (effective % = inclusion probability; computeStackInclusionProbabilities does NOT yet know about alwaysPlayBase — that is Step 4 work). Then Steps 5–7. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
+User runs the Step 4D hand-off tests (repro steps in the 2026-07-06 entry below). After confirmation: mark Step 4 complete, then MASTER_PROMPT Steps 5–7 in order. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
 
 ---
 
@@ -33,6 +33,30 @@ Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via
 ---
 
 ## SESSION LOG
+
+### 2026-07-06 — Step 3 CLOSED; MASTER_PROMPT Step 4 built (4A–4C committed), awaiting 4D user confirmation
+- Step 0: user confirmed all six 3F manual tests → Step 3 marked complete (232657a); branch pushed, origin now current (03d6fe3..232657a → then 4A–4C pushed on top).
+- What I changed (files):
+  - `Source/Audio/StackPicker.h` — NEW. Shared stack-selection routine: `StackPicker::pick()` (playCount draw + clamp [1, groupSize], alwaysPlayBase branch, weighted sample WITHOUT replacement, all-zero weights → UNIFORM fallback) extracted VERBATIM from the resolver, plus `StackPicker::inclusionProbabilities()` (Monte Carlo 2000 trials driving pick(); shortcut: min playCount >= groupSize → all 100% with no simulation).
+  - `Source/Audio/ArrangementResolver.cpp` — stack slot now calls `StackPicker::pick()`; nothing else changed. RNG call order preserved. NOTE: the stack pick's all-zero-weights fallback was ALREADY uniform (no getLast() in that path — the getLast() hits are in pickClip's float-edge fallback, untouched) → 4A was a zero-behavior-change extraction.
+  - `Source/UI/InspectorPanel.h/.cpp` — `computeStackInclusionProbabilities()` is now a thin wrapper over `StackPicker::inclusionProbabilities()` (old reimplemented sampling deleted — it had a last-element fallback and no alwaysPlayBase awareness). 4C: `recalcStackEffectiveLabels()` gates the MC behind a per-group state fingerprint (mode, alwaysPlayBase, stackPlayCount values+weights, member ids + playChances); recompute happens ONLY when that state changes = weight drag end / playCount +/- / base toggle / membership change / project load (and undo of those). The Play-time recompute (updateTimeDisplay play-follow → inspectorPanel.setBlock → rebuild → fresh time-seeded MC) is now a cache hit; setBlock itself intentionally kept ("inspector follows playing block" is a VERIFIED WORKING feature).
+  - `diag/ResolverDiag.cpp` — STEP4A (all-zero weights SEQ pc=1, 20 resolves) and STEP4B (six inclusion-% scenarios via the exact shared function). TEMPORARY, remove in Step 7.
+  - `docs/PROGRESS.md` — this entry.
+- Commits: 232657a (Step 3 close), 582b598 (4A shared StackPicker), 8361865 (4B inclusion calc), 647b084 (4C recompute triggers).
+- What I proved (PASS/FAIL):
+  - 4A PASS: full harness re-run at previous rates — Step 1 scenarios (SEQ pc=1, SIM pc=1, SIM pc=2 identical timelinePos, JSON round-trip) 10/10 each; Step 2 (SIM pc=3 → identical timelinePos, cursor += longest body: D@2500) 10/10; Step 3C six scenarios 20/20 each incl. baseOFF regressions (SIM pc=1 basePresent 7/20 — same as pre-refactor). NEW STEP4A: all-zero weights SEQ pc=1 → entries==1 20/20, block varies (A=6 B=4 C=10).
+  - 4B PASS (2000-trial MC, shared function): 3 equal pc=1 → 33.6/33.9/32.5 (±2 ✓); pc=2 → 67.6/65.2/67.2 (±2 ✓); pc=3 of 3 → 100.0 flat (shortcut, no simulation); SIM baseON pc=2 → base 100.0, others 48.6/51.4 (±3 ✓); weights 80/10/10 pc=1 → 80.3/10.0/9.7; all-zero → 33.4/31.6/35.0 (uniform fallback).
+  - 4C PASS (static): remaining recompute paths all route through the fingerprint gate; Play leaves the model untouched → fingerprint identical → no recompute. Debug standalone builds clean (0 errors).
+  - Scope freeze honored: link logic, isDone, lead-in, PlaybackEngine mixing, sequential timeline math untouched; jassert guard + Step 1 DBG lines still in place (removal is Step 7).
+- What regressed or surprised me: nothing. The suspected getLast() fallback in the stack picker did not exist (already uniform); the only getLast() is pickClip's roll-edge fallback, out of 4A scope.
+- Step 4D hand-off (user-run; Step 4 NOT complete until confirmed):
+  1. `open "build-diag/BlockShuffler_artefacts/Debug/Standalone/BlockShuffler.app"`
+  2. 3 blocks, one clip each → stack all three (drag 2 onto 1, then 3 onto the stack). Inspector shows the three block rows with weight sliders + "eff:" labels.
+  3. Four hand-checked numbers (all weights equal at 100): How Many to Play = 1 → eff ≈ 33% each; = 2 → ≈ 67% each; = 3 → 100% each (exact); then mode = Simultaneous, "Always play base block" ON, play count 2 → (base) row 100%, others ≈ 50% — the flip to 100/50/50 must appear IMMEDIATELY on toggling.
+  4. Play-stability: note the three eff values, press Play, Stop, Play several times → the numbers must NOT change at all (previously they jiggled on every Play).
+  5. Weight drag: drag a weight slider — eff must stay frozen DURING the drag and update once on release.
+  6. Save As → close → reopen: eff values shown immediately match the pre-save values (same model state → same displayed inclusion %, ±1% MC noise on the initial compute is acceptable; the base row must still read 100%).
+- NEXT SESSION should: after user confirms 4D, mark Step 4 complete; then Step 5 (regression guards), Step 6 (12-point re-test), Step 7 (cleanup: remove diag/ harness + STEP1-4 DBG/diag code, keep jassert guard).
 
 ### 2026-07-05 (session 3) — MASTER_PROMPT Step 3 built (3A–3E committed), awaiting 3F user confirmation
 - Step 0 backup: remote `UI_firstdraft` held a stale 2026-04-29 orphan snapshot (strict subset of local tree, zero remote-only files) — replaced via `git push --force-with-lease`; branch now tracks origin. NOTE: that push happened BEFORE 3A — origin is at 03d6fe3; commits 30f67b4..HEAD are local only. Next session: `git push` first.
