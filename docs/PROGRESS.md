@@ -36,6 +36,48 @@ Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via
 
 ---
 
+## ACCEPTANCE MAP (Step 7E, 2026-07-06) — evidence per ACCEPTANCE_TESTS.md item
+Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 manual checklist (7/7 user-confirmed 2026-07-06) · **H:x** = other harness section · **commit** · **PV** = prior-verified (PROGRESS "VERIFIED WORKING", user-verified pre-push) · **GAP** = NOT-YET-COVERED.
+
+| Item | Evidence | Item | Evidence |
+|---|---|---|---|
+| 1.1 add block | PV | 5.9 effective 33/67/100 | T7 (±2 tol; see known limitation) |
+| 1.2 delete block | PV | 5.10 base 100% + rest | T7 + 4D user-confirmed |
+| 1.3 rename | PV | 5.11 stack drag ops | PV |
+| 1.4 set colour | PV | 5.12 one control per stack | PV + 3D/3F (1610703) |
+| 1.5 drag reorder | PV | 6.1 clip Done still plays | Step 5 grep (0 functional) — no in-app run |
+| 1.6 drag to stack | PV | 6.2 block Done still plays | T10 (exact) + M7 |
+| 2.1 Finder→waveform | PV | 6.3 badge placement | **GAP** (visual) |
+| 2.2 Finder→block tile | PV | 6.4 export all-Done | Step 5 grep (structural) — no run |
+| 2.3 browse button | PV | 6.5 grep isDone Audio | Step 5 (c507dc1) |
+| 2.4 clip rename/colour/remove | PV | 7.1 Play applies randomization | T1–T9 (same resolve()) + PV |
+| 2.5 independent weights | PV | 7.2 playing indicator | PV |
+| 2.6 clip weights 80/15/5 dist. | **GAP** (harness tests BLOCK weights only) | 7.3 waveform follows | PV |
+| 2.7 single clip 0% → 100% | **GAP** | 7.4 selection independent | PV + 4C (647b084) |
+| 2.8 markers snap/Shift | PV | 7.5 Play Block/Clip | PV |
+| 3.1 entry-0 lead-in full gain | PV + M4 | 7.6 rapid play/stop 20× | **GAP** |
+| 3.2 zero-gap bodies | T2 + M1 | 8.1 song ender truncates | PV |
+| 3.3 tail/lead-in crossfade | PV + M4 | 8.2 ender inside stack | **GAP** |
+| 3.4 stretch to adjacent tempo | PV | 9.1 tempo = grid only | PV |
+| 3.5 retain flags | PV | 9.2 one-click tempo field | PV |
+| 4.1 link create + label | PV | 9.3 block tempo + override | PV |
+| 4.2 labels never overlap | PV | 9.4 project default tempo | PV |
+| 4.3 100% deterministic swap | T9 | 10.1 WAV/FLAC/BSF chooser | PV |
+| 4.4 3,2,1 + nothing dropped | T9 (10/10, positions unmutated) | 10.2 export == playback (Audacity) | PV (EntryMixer shared) — no re-run |
+| 4.5 0% / 50% swap rates | **GAP** | 10.3 BSF valid zip + int64 strings | H:STEP3E (d424800) + PV |
+| 4.6 link into stack: that block | **GAP** (code path exists; untested) | 10.4 stretched-join export | **GAP** |
+| 4.7 remove link + undo | PV (partial: undo of link untested) | 11.1 Save/SaveAs/Open | PV |
+| 5.1 SEQ pc=1 exactly one | T1 + H:Step1 + M(3F) | 11.2 reopen: all intact | T11 + M5 |
+| 5.2 SEQ pc=2 | T2 | 11.3 Finder double-click open | **GAP** |
+| 5.3 SEQ pc=3 + continues | **GAP** (T2/T5 adjacent; exact case unrun) | 11.4 undo cleared on load | PV |
+| 5.4 SIM pc=1 | T3 | 11.5 undo exact/no desync | T12 + M6 + PV |
+| 5.5 SIM pc=2 layered | T4 + M2 | 11.6 missing-file warning | PV |
+| 5.6 SIM pc=3 + longest | T5 + M2/M3 | 12.1 stress (50 blocks, rapid undo) | **GAP** |
+| 5.7 block weights bias | T8 | 12.2 Windows parity | **GAP** (TODO 6) |
+| 5.8 base toggle ON/OFF | T6 + H:STEP3C + M(3F ear) | 12.3 logo polish | **GAP** (TODO 5) |
+
+**NOT-YET-COVERED (13):** 2.6, 2.7, 4.5, 4.6, 5.3, 6.3, 7.6, 8.2, 10.4, 11.3, 12.1, 12.2, 12.3 — plus partials noted inline (4.7 undo-of-link, 6.1/6.4 structural-only, 10.2 no re-run). These are the remaining pre-delivery work; NO fixes attempted this session per instruction.
+
 ## SESSION LOG
 
 ### 2026-07-06 (session 2) — Step 4 CLOSED; Step 5 guards + Step 6 DONE — **Step 6 CLOSED 2026-07-06: harness 12/12 + manual checklist 7/7 user-confirmed.**
