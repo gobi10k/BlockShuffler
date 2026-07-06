@@ -5,6 +5,7 @@
 // same ArrangementResolver::resolve() the transport Play button calls.
 #include <iostream>
 #include <map>
+#include <set>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "Model/Project.h"
 #include "Audio/ArrangementResolver.h"
@@ -17,6 +18,34 @@ static std::shared_ptr<juce::AudioBuffer<float>> makeBuf(int len = 1000) {
     auto b = std::make_shared<juce::AudioBuffer<float>>(2, len);
     b->clear();
     return b;
+}
+
+// File-backed clip for save/load and undo tests (T11/T12): resetAndLoad clamps
+// marks to the reloaded buffer length (Serialization.cpp FIX M7), so those tests
+// need a real audio file on disk — exactly the app's condition.
+static void addClipWithFile(Block* blk, const juce::String& nm, int bodyLen,
+                            const juce::File& dir) {
+    auto f = dir.getChildFile(nm + ".wav");
+    f.deleteFile();
+    juce::WavAudioFormat fmt;
+    if (auto os = std::unique_ptr<juce::FileOutputStream>(f.createOutputStream())) {
+        if (auto* w = fmt.createWriterFor(os.get(), 44100.0, 2, 16, {}, 0)) {
+            os.release();  // writer owns the stream now
+            std::unique_ptr<juce::AudioFormatWriter> writer(w);
+            juce::AudioBuffer<float> buf(2, bodyLen);
+            buf.clear();
+            writer->writeFromAudioSampleBuffer(buf, 0, bodyLen);
+        }
+    }
+    auto c = std::make_unique<Clip>();
+    c->name = nm;
+    c->audioFile = f;
+    c->audioBuffer = std::make_shared<juce::AudioBuffer<float>>(2, bodyLen);
+    c->audioBuffer->clear();
+    c->startMark = 0;
+    c->endMark = bodyLen;
+    c->probability = 1.0f;
+    blk->addClip(std::move(c));
 }
 
 static void addClipTo(Block* blk, const juce::String& nm, int bodyLen = 1000) {
@@ -417,6 +446,309 @@ int main() {
         for (auto* b : group8)
             std::cout << " " << b->name << "=" << juce::String(probsA[b->id] * 100.0f, 2) << "%";
         std::cout << "\n";
+    }
+
+    // STEP6 DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // Harness half of the Step 6 re-test: T1-T12, PASS/FAIL with evidence.
+    {
+        std::cout << "\n=== STEP6: harness half T1-T12 ===\n";
+        int failed = 0;
+        auto verdict = [&](const char* test, bool pass, const juce::String& evidence) {
+            std::cout << test << (pass ? "  PASS  " : "  FAIL  ") << evidence << "\n";
+            if (!pass) ++failed;
+        };
+
+        // Shared 3-block stack builder: A(1000) B(1200) C(1500), A = base.
+        auto buildStack3 = [&](Project& p, StackPlayMode mode, int pc, bool base,
+                               float wA, float wB, float wC) {
+            auto* A = p.addBlock("A");
+            auto* B = p.addBlock("B");
+            auto* C = p.addBlock("C");
+            addClipTo(A, "cA", 1000);
+            addClipTo(B, "cB", 1200);
+            addClipTo(C, "cC", 1500);
+            p.stackBlocks(B->id, A->id);
+            p.stackBlocks(C->id, A->id);
+            A->stackPlayMode = mode;
+            A->stackPlayCount.values.set(0, pc);
+            A->alwaysPlayBase = base;
+            p.propagateStackSettings(A->stackGroup, A);
+            A->playChance = wA; B->playChance = wB; C->playChance = wC;
+            return A;
+        };
+
+        // Signature of n resolves: "Name@pos;Name@pos;|..." — for exact comparisons.
+        auto runSig = [&](Project& p, juce::int64 seed, int n) {
+            juce::Random r(seed);
+            ArrangementResolver res;
+            juce::String sig;
+            for (int i = 0; i < n; ++i) {
+                auto arr = res.resolve(p, r);
+                for (const auto& e : arr.entries) {
+                    auto* b = p.getBlockById(e.blockId);
+                    sig << (b ? b->name : juce::String("?")) << "@"
+                        << juce::String((juce::int64)e.timelinePos) << ";";
+                }
+                sig << "|";
+            }
+            return sig;
+        };
+
+        { // T1: SEQ pc=1 → exactly 1 entry, 10 runs
+            Project p; buildStack3(p, StackPlayMode::Sequential, 1, false, 1, 1, 1);
+            juce::Random r(601); ArrangementResolver res; int ok = 0;
+            for (int i = 0; i < 10; ++i) ok += (res.resolve(p, r).entries.size() == 1);
+            verdict("T1  SEQ pc=1 exactly 1 entry", ok == 10, juce::String(ok) + "/10");
+        }
+        { // T2: SEQ pc=2 → exactly 2, gapless sequential timeline, random order
+            Project p; buildStack3(p, StackPlayMode::Sequential, 2, false, 1, 1, 1);
+            juce::Random r(602); ArrangementResolver res;
+            int okN = 0, okGap = 0; std::set<juce::String> firstBlocks;
+            for (int i = 0; i < 20; ++i) {
+                auto arr = res.resolve(p, r);
+                if (arr.entries.size() == 2) ++okN;
+                if (arr.entries.size() == 2) {
+                    const auto& e0 = arr.entries.getReference(0);
+                    const auto& e1 = arr.entries.getReference(1);
+                    if (e1.timelinePos == e0.timelinePos + (e0.endMark - e0.startMark)) ++okGap;
+                    auto* b = p.getBlockById(e0.blockId);
+                    firstBlocks.insert(b ? b->name : juce::String("?"));
+                }
+            }
+            verdict("T2  SEQ pc=2 gapless + random order",
+                    okN == 20 && okGap == 20 && firstBlocks.size() > 1,
+                    "entries==2: " + juce::String(okN) + "/20, zero-gap: " + juce::String(okGap)
+                    + "/20, distinct first blocks: " + juce::String((int)firstBlocks.size()));
+        }
+        { // T3: SIM pc=1 → exactly 1
+            Project p; buildStack3(p, StackPlayMode::Simultaneous, 1, false, 1, 1, 1);
+            juce::Random r(603); ArrangementResolver res; int ok = 0;
+            for (int i = 0; i < 10; ++i) ok += (res.resolve(p, r).entries.size() == 1);
+            verdict("T3  SIM pc=1 exactly 1 entry", ok == 10, juce::String(ok) + "/10");
+        }
+        { // T4: SIM pc=2 → exactly 2, identical timelinePos
+            Project p; buildStack3(p, StackPlayMode::Simultaneous, 2, false, 1, 1, 1);
+            juce::Random r(604); ArrangementResolver res; int ok = 0;
+            for (int i = 0; i < 10; ++i) {
+                auto arr = res.resolve(p, r);
+                ok += (arr.entries.size() == 2
+                       && arr.entries[0].timelinePos == arr.entries[1].timelinePos);
+            }
+            verdict("T4  SIM pc=2 two entries, identical pos", ok == 10, juce::String(ok) + "/10");
+        }
+        { // T5: SIM pc=3 → 3 identical pos, next block at cursor + LONGEST body (1500)
+            Project p; buildStack3(p, StackPlayMode::Simultaneous, 3, false, 1, 1, 1);
+            auto* D = p.addBlock("D"); addClipTo(D, "cD", 700);
+            juce::Random r(605); ArrangementResolver res; int ok = 0;
+            for (int i = 0; i < 10; ++i) {
+                auto arr = res.resolve(p, r);
+                bool good = (arr.entries.size() == 4);
+                if (good) {
+                    for (int e = 0; e < 3; ++e)
+                        if (arr.entries[e].timelinePos != arr.entries[0].timelinePos) good = false;
+                    if (arr.entries[3].timelinePos != arr.entries[0].timelinePos + 1500) good = false;
+                    auto* b = p.getBlockById(arr.entries[3].blockId);
+                    if (!b || b->name != "D") good = false;
+                }
+                ok += good;
+            }
+            verdict("T5  SIM pc=3 layered + D at +longest(1500)", ok == 10, juce::String(ok) + "/10");
+        }
+        { // T6: base ON, SIM pc=2 of 3 → base present 20/20 + exactly 1 other
+            Project p; auto* A = buildStack3(p, StackPlayMode::Simultaneous, 2, true, 1, 1, 1);
+            juce::Random r(606); ArrangementResolver res; int ok = 0;
+            for (int i = 0; i < 20; ++i) {
+                auto arr = res.resolve(p, r);
+                bool hasBase = false;
+                for (const auto& e : arr.entries) if (e.blockId == A->id) hasBase = true;
+                ok += (arr.entries.size() == 2 && hasBase);
+            }
+            verdict("T6  SIM baseON pc=2: base + exactly 1 other", ok == 20, juce::String(ok) + "/20");
+        }
+        { // T7: inclusion % — 33±2 / 67±2 / 100 flat / base 100 + 50±3
+            Project p; auto* A = buildStack3(p, StackPlayMode::Sequential, 1, false, 1, 1, 1);
+            auto group = [&]() {
+                std::vector<Block*> g;
+                for (auto* b : p.blocks) if (b->stackGroup == A->stackGroup) g.push_back(b);
+                return g;
+            };
+            auto inRange = [&](std::map<juce::String, float>& m, float target, float tol) {
+                for (auto* b : group())
+                    if (std::abs(m[b->id] * 100.0f - target) > tol) return false;
+                return true;
+            };
+            auto cfg = [&](StackPlayMode mode, bool base, int pc) {
+                A->stackPlayMode = mode; A->alwaysPlayBase = base;
+                A->stackPlayCount.values.set(0, pc);
+                p.propagateStackSettings(A->stackGroup, A);
+            };
+            auto fmt = [&](std::map<juce::String, float>& m) {
+                juce::String s;
+                for (auto* b : group()) s << b->name << "=" << juce::String(m[b->id] * 100.0f, 2) << "% ";
+                return s;
+            };
+            cfg(StackPlayMode::Sequential, false, 1);
+            auto m1 = StackPicker::inclusionProbabilities(group(), p.blocks);
+            bool ok1 = inRange(m1, 33.33f, 2.0f);
+            cfg(StackPlayMode::Sequential, false, 2);
+            auto m2 = StackPicker::inclusionProbabilities(group(), p.blocks);
+            bool ok2 = inRange(m2, 66.67f, 2.0f);
+            cfg(StackPlayMode::Sequential, false, 3);
+            auto m3 = StackPicker::inclusionProbabilities(group(), p.blocks);
+            bool ok3 = inRange(m3, 100.0f, 0.0f);
+            cfg(StackPlayMode::Simultaneous, true, 2);
+            auto m4 = StackPicker::inclusionProbabilities(group(), p.blocks);
+            bool ok4 = (m4[A->id] == 1.0f);
+            for (auto* b : group())
+                if (b != A && std::abs(m4[b->id] * 100.0f - 50.0f) > 3.0f) ok4 = false;
+            verdict("T7  inclusion % (33/67/100/base-100+50)", ok1 && ok2 && ok3 && ok4,
+                    "pc1[" + fmt(m1) + "] pc2[" + fmt(m2) + "] pc3[" + fmt(m3) + "] base[" + fmt(m4) + "]");
+        }
+        { // T8: weights 80/10/10, pc=1, 20 resolves → the 80 block picked most
+            Project p; auto* A = buildStack3(p, StackPlayMode::Sequential, 1, false, 0.8f, 0.1f, 0.1f);
+            juce::Random r(608); ArrangementResolver res;
+            std::map<juce::String, int> byBlock;
+            for (int i = 0; i < 20; ++i) {
+                auto arr = res.resolve(p, r);
+                for (const auto& e : arr.entries) {
+                    auto* b = p.getBlockById(e.blockId);
+                    byBlock[b ? b->name : juce::String("?")]++;
+                }
+            }
+            bool ok = byBlock["A"] > byBlock["B"] && byBlock["A"] > byBlock["C"];
+            verdict("T8  weights 80/10/10 pc=1: 80-block most", ok,
+                    "A=" + juce::String(byBlock["A"]) + " B=" + juce::String(byBlock["B"])
+                    + " C=" + juce::String(byBlock["C"]));
+        }
+        { // T9: link 1<->3 at 100% → 3,2,1 every time; model positions untouched
+            Project p;
+            auto* X = p.addBlock("X"); auto* Y = p.addBlock("Y"); auto* Z = p.addBlock("Z");
+            addClipTo(X, "cX", 1000); addClipTo(Y, "cY", 1000); addClipTo(Z, "cZ", 1000);
+            p.addLink(X->id, Z->id, 1.0f);
+            juce::String posBefore, posAfter;
+            for (auto* b : p.blocks) posBefore << b->name << "=" << juce::String(b->position) << ";";
+            juce::Random r(609); ArrangementResolver res; int ok = 0;
+            for (int i = 0; i < 10; ++i) {
+                auto arr = res.resolve(p, r);
+                bool good = (arr.entries.size() == 3);
+                if (good) {
+                    const char* expect[3] = { "Z", "Y", "X" };
+                    for (int e = 0; e < 3; ++e) {
+                        auto* b = p.getBlockById(arr.entries[e].blockId);
+                        if (!b || b->name != expect[e]) good = false;
+                    }
+                }
+                ok += good;
+            }
+            for (auto* b : p.blocks) posAfter << b->name << "=" << juce::String(b->position) << ";";
+            verdict("T9  link 100%: Z,Y,X every time + positions unmutated",
+                    ok == 10 && posBefore == posAfter,
+                    "order Z,Y,X: " + juce::String(ok) + "/10, pos before[" + posBefore
+                    + "] after[" + posAfter + "]");
+        }
+        { // T10: isDone must not affect selection — same seed, toggled isDone,
+          // 100 resolves each → bit-identical pick sequences (exact, not statistical).
+            Project p; buildStack3(p, StackPlayMode::Sequential, 1, false, 1, 1, 1);
+            Block* B = nullptr;
+            for (auto* b : p.blocks) if (b->name == "B") B = b;
+            B->isDone = true;
+            auto sigDone = runSig(p, 610, 100);
+            B->isDone = false;
+            auto sigNotDone = runSig(p, 610, 100);
+            int doneCount = 0;
+            for (int i = 0; i + 1 < sigDone.length(); ++i)
+                if (sigDone[i] == 'B' && sigDone[i + 1] == '@') ++doneCount;
+            verdict("T10 isDone ignored: identical sequences + done block plays",
+                    sigDone == sigNotDone && doneCount > 0,
+                    "sequences identical: " + juce::String(sigDone == sigNotDone ? "yes" : "NO")
+                    + ", done-block inclusions: " + juce::String(doneCount) + "/100");
+        }
+        { // T11: save->load round-trip: fields survive + identical entry structure.
+          // File-backed clips: the load path re-reads the audio and restores marks
+          // exactly as the app does on open/undo.
+            auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("resolverdiag_step6");
+            tmpDir.createDirectory();
+            Project p;
+            auto* A = p.addBlock("A");
+            auto* B = p.addBlock("B");
+            auto* C = p.addBlock("C");
+            auto* D = p.addBlock("D");
+            addClipWithFile(A, "t11A", 1000, tmpDir);
+            addClipWithFile(B, "t11B", 1200, tmpDir);
+            addClipWithFile(C, "t11C", 1500, tmpDir);
+            addClipWithFile(D, "t11D", 1000, tmpDir);
+            p.stackBlocks(B->id, A->id);
+            p.stackBlocks(C->id, A->id);
+            A->stackPlayMode = StackPlayMode::Simultaneous;
+            A->stackPlayCount.values.set(0, 2);
+            A->alwaysPlayBase = true;
+            p.propagateStackSettings(A->stackGroup, A);
+            A->playChance = 0.8f; B->playChance = 0.1f; C->playChance = 0.1f;
+            p.addLink(A->id, D->id, 0.5f);
+            const juce::String aId = A->id, dId = D->id;
+            auto pre = runSig(p, 611, 10);
+            auto snap = p.toJSON();
+            p.resetAndLoad(snap);
+            auto* A2 = p.getBlockById(aId);
+            bool fields = (A2 != nullptr
+                && A2->stackPlayMode == StackPlayMode::Simultaneous
+                && A2->stackPlayCount.values.size() == 1 && A2->stackPlayCount.values[0] == 2
+                && A2->alwaysPlayBase
+                && std::abs(A2->playChance - 0.8f) < 1e-5f
+                && p.links.size() == 1
+                && ((p.links[0]->blockA == aId && p.links[0]->blockB == dId)
+                    || (p.links[0]->blockA == dId && p.links[0]->blockB == aId))
+                && std::abs(p.links[0]->swapProbability - 0.5f) < 1e-5f);
+            auto post = runSig(p, 611, 10);
+            verdict("T11 save->load: fields + identical entry structure",
+                    fields && pre == post,
+                    juce::String("fields: ") + (fields ? "ok" : "BAD")
+                    + ", entry structure identical: " + (pre == post ? "yes" : "NO"));
+        }
+        { // T12: undo structural — mutate, resetAndLoad(snapshot), JSON string-identical.
+          // File-backed clips for the same reason as T11 (undo path reloads audio).
+            auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("resolverdiag_step6");
+            tmpDir.createDirectory();
+            Project p;
+            auto* A = p.addBlock("A");
+            auto* B = p.addBlock("B");
+            auto* C = p.addBlock("C");
+            addClipWithFile(A, "t12A", 1000, tmpDir);
+            addClipWithFile(B, "t12B", 1200, tmpDir);
+            addClipWithFile(C, "t12C", 1500, tmpDir);
+            p.stackBlocks(B->id, A->id);
+            p.stackBlocks(C->id, A->id);
+            A->stackPlayMode = StackPlayMode::Simultaneous;
+            A->stackPlayCount.values.set(0, 2);
+            p.propagateStackSettings(A->stackGroup, A);
+            auto snapVar = p.toJSON();
+            auto snapStr = juce::JSON::toString(snapVar);
+            auto undoAndCompare = [&]() {
+                p.resetAndLoad(snapVar);
+                return juce::JSON::toString(p.toJSON()) == snapStr;
+            };
+            { auto* blk = p.blocks.getFirst();
+              blk->alwaysPlayBase = true;
+              p.propagateStackSettings(blk->stackGroup, blk); }
+            bool okBase = undoAndCompare();
+            { auto* blk = p.blocks.getFirst();
+              blk->stackPlayCount.values.set(0, 3);
+              p.propagateStackSettings(blk->stackGroup, blk); }
+            bool okPc = undoAndCompare();
+            { auto* blk = p.blocks.getFirst(); blk->playChance = 0.42f; }
+            bool okW = undoAndCompare();
+            verdict("T12 undo structural: JSON identical after revert", okBase && okPc && okW,
+                    juce::String("baseToggle: ") + (okBase ? "ok" : "BAD")
+                    + ", playCount: " + (okPc ? "ok" : "BAD")
+                    + ", weight: " + (okW ? "ok" : "BAD"));
+            juce::File::getSpecialLocation(juce::File::tempDirectory)
+                .getChildFile("resolverdiag_step6").deleteRecursively();
+        }
+
+        std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
+                  << "\n";
     }
 
     std::cout << "DONE\n";

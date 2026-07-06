@@ -34,6 +34,24 @@ Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via
 
 ## SESSION LOG
 
+### 2026-07-06 (session 2) — Step 4 CLOSED; Step 5 guards + Step 6 harness half DONE, awaiting user manual checklist
+- Step 0: Step 4 marked CLOSED (user-confirmed incl. amendment; known limitation accepted, client tolerance ±2); stale root PROGRESS.md removed — docs/PROGRESS.md is the only log (c41f164).
+- What I changed (files):
+  - `Source/Audio/ArrangementResolver.cpp` — Step 5: four-point invariant comment block at top (isDone cosmetic-only / playCount honored via StackPicker / links bidirectional on local position map / sequential timeline gapless); violation DBG added next to the permanent per-stack jassert guard (lines 312–315). grep isDone over Source/Audio/: all hits comments, zero functional.
+  - `diag/ResolverDiag.cpp` — Step 6 harness half: T1–T12 with per-test PASS/FAIL + evidence; `addClipWithFile()` helper writes real temp WAVs for T11/T12. TEMPORARY, remove in Step 7.
+- Commits: c41f164 (Step 0), c507dc1 (Step 5), Step 6 commit below.
+- What I proved (PASS/FAIL): T1–T12 ALL PASS (details in the Step 6 commit / harness output). Highlights: T2 zero-gap sequential timeline 20/20 with random order (3 distinct first blocks); T5 next block lands at +longest body (1500) 10/10; T9 link 1↔3 @100% → Z,Y,X 10/10 AND model block->position values unmutated (dumped before/after, identical); T10 isDone proof is EXACT — same RNG seed with isDone toggled produces bit-identical 100-resolve pick sequences (done block included 31/100 both ways); T11 fields + entry structure identical across save→load; T12 base/playCount/weight mutations each revert to string-identical model JSON. Full pre-existing suite (Steps 1/2/3C/4A/4B/amendment) re-ran green in the same binary.
+- What regressed or surprised me: T11/T12 first FAILED — diagnosis showed a HARNESS artifact, not a product bug: harness clips had no on-disk audio file, so resetAndLoad's mark clamp (Serialization.cpp:200–201, FIX M7) zeroed endMark (bufLen=0 with the file missing). In-app, files exist and marks survive (long-verified). Fixed the TESTS to use real temp WAV files (the app's actual condition) — zero product code changed for Step 6.
+- STEP 6 MANUAL CHECKLIST (user-run; the ear/UI halves the harness can't see). App: `open "build-diag/BlockShuffler_artefacts/Debug/Standalone/BlockShuffler.app"`. Setup once: 3 blocks with clearly distinguishable clips (e.g. drums/bass/vocals) → drag block 2 onto block 1, drag block 3 onto the stack → 3-block stack; add a 4th unstacked block after it.
+  1. T2 by ear — inspector: mode = Sequential, How Many to Play = 2 → Play several times: two different clips back-to-back with NO audible gap between them, order varies across plays.
+  2. T4/T5 by ear — mode = Simultaneous, play 2 → exactly two clips AT THE SAME TIME; play 3 → all three layered, starting together.
+  3. T5 next-block wait — with play 3, the 4th block must start only after the LONGEST of the three stack clips finishes (not after the first/shortest).
+  4. Lead-in/crossfade — use clips with lead-in audio before the start marker: entry 0's lead-in plays at full gain from t=0; later transitions crossfade tail→lead-in smoothly (no click, no dropout).
+  5. Project open — Save As, quit, reopen the .bsp: all blocks visible IMMEDIATELY in the strip (no blank strip, no delayed paint), stack intact.
+  6. T12 in-app undo feel — toggle base → Cmd+Z flips it back (ONE step per click); playCount +/− → one undo step per click; drag a weight slider end-to-end → ONE undo step for the whole drag; redo (Cmd+Shift+Z) replays each cleanly.
+  7. isDone visual-only — right-click a stacked block → Mark as Done → it dims/greys with the done badge but STILL plays per its normal odds (Play repeatedly; it must keep appearing).
+- NEXT SESSION should: after user confirms this checklist, run MASTER_PROMPT Step 7 (remove Step 1 DBG lines + diag/ harness + ResolverDiag CMake target, KEEP the jassert guard + violation DBG + invariant block; clean rebuild both configs; final report). Then ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
+
 ### 2026-07-06 — Step 3 CLOSED; MASTER_PROMPT Step 4 built (4A–4C committed), awaiting 4D user confirmation
 - Step 0: user confirmed all six 3F manual tests → Step 3 marked complete (232657a); branch pushed, origin now current (03d6fe3..232657a → then 4A–4C pushed on top).
 - What I changed (files):
