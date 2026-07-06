@@ -34,7 +34,7 @@ Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via
 
 ## SESSION LOG
 
-### 2026-07-06 (session 2) — Step 4 CLOSED; Step 5 guards + Step 6 harness half DONE, awaiting user manual checklist
+### 2026-07-06 (session 2) — Step 4 CLOSED; Step 5 guards + Step 6 DONE — **Step 6 CLOSED 2026-07-06: harness 12/12 + manual checklist 7/7 user-confirmed.**
 - Step 0: Step 4 marked CLOSED (user-confirmed incl. amendment; known limitation accepted, client tolerance ±2); stale root PROGRESS.md removed — docs/PROGRESS.md is the only log (c41f164).
 - What I changed (files):
   - `Source/Audio/ArrangementResolver.cpp` — Step 5: four-point invariant comment block at top (isDone cosmetic-only / playCount honored via StackPicker / links bidirectional on local position map / sequential timeline gapless); violation DBG added next to the permanent per-stack jassert guard (lines 312–315). grep isDone over Source/Audio/: all hits comments, zero functional.

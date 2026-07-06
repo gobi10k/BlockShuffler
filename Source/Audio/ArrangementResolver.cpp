@@ -202,14 +202,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             const bool isSimultaneous =
                 (allBlocks[0]->stackPlayMode == StackPlayMode::Simultaneous);
 
-            // STEP1 DIAG (remove in MASTER_PROMPT Step 7)
-            DBG("STACK grp=" + juce::String(allBlocks[0]->stackGroup)
-                + " mode=" + juce::String(isSimultaneous ? "Sim" : "Seq")
-                + " playCount=" + juce::String(playCount)
-                + " groupSize=" + juce::String((int)allBlocks.size()));
-            DBG("picked=" + juce::String((int)picked.size()));
-
-            [[maybe_unused]] const int entriesBefore = result.entries.size();
+            const int entriesBefore = result.entries.size();
 
             if (isSimultaneous) {
                 // All picked blocks' bodies start at the same timeline position.
