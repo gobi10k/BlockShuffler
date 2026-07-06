@@ -85,7 +85,7 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 | 2.9 clip drag between blocks; strip does NOT scroll to start | code-inspection (BlockStrip.cpp:228–234 saves/restores scrollX on rebuild) + PENDING-MANUAL (script 10) |
 | 7.7 Play Clip preserves lead-in into following block | code-inspection (playClip: timelinePos=startMark, totalDuration=endMark incl. lead-in; MainComponent.cpp:381) + PENDING-MANUAL (script 11) |
 | 10.5 sample-rate/pitch (44.1k & 48k, no semitone shift) | **T20** (load-resample + export, all 4 rate combos, 440Hz→440Hz) |
-| 13.1 colour renders true (no blue tint / yellow≠green) | **FINDING — CONFIRMED (see session 7)**; PENDING-FIX (needs go-ahead) |
+| 13.1 colour renders true (no blue tint / yellow≠green) | **FIXED (session 8)** — body now 0.85 identity over neutral grey 0x3A3A3A; all 8 hues composite dominant-channel-correct (arithmetic proof); PENDING-MANUAL visual confirm (script 13) |
 | 13.2 large stack (9 blocks) all tiles visible/reachable | code-inspection: does NOT reproduce at current 360px strip (perH≈36 for 9, fits; >~9 clamps to 16px + vertical scroll) — PENDING-MANUAL confirm (script 12) |
 | 13.3 grid lines don't obscure waveform (long clips) | code-inspection (adaptive grid coarsens until ≥8px, ClipWaveformView.cpp:174) + PENDING-MANUAL (script 13) |
 | 13.4 zoom max scales with clip length | code-inspection (computeMaxZoom = duration/0.5s, ClipWaveformView.cpp:793) — see session-7 note on wording ambiguity + PENDING-MANUAL (script 13) |
@@ -93,6 +93,14 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 **STATUS (updated 2026-07-06 session 7):** harness-coverable items all green (T1–T20). PENDING-MANUAL: 6.1, 6.3, 6.4, 7.6, 10.2, 10.4, 12.1, plus new 2.9, 7.7, 13.2, 13.3, 13.4 (scripts in session-5 + session-7 entries). 11.3 FIXED (7400d79). **13.1 CONFIRMED FINDING (colour hue-shift) — PENDING-FIX, awaiting go-ahead.** NOTE for 12.2: the .bsp fix covers the macOS bundle plist only — WINDOWS file association is registry/installer-level, DEFERRED to the 12.2 session. Remaining build tasks: 12.2 Windows parity, 12.3 logo. Partials 6.1/6.4 upgrade to full once the manual run passes.
 
 ## SESSION LOG
+
+### 2026-07-07 (session 8) — Fix 13.1: identity colour dominant on non-stacked block body
+- Root cause (confirmed session 7): non-stacked block body was `block->color.withAlpha(0.10f)` over the cool blue-grey theme base → 10% of the hue over a blue-dominant base desaturated + hue-shifted every colour (yellow composited to green-dominant (41,44,37); pink to blue-dominant). True colour survived only in the ~20px header.
+- Fix (BlockComponent::paint ONLY, one file): body of full-size tiles now `juce::Colour(0xFF3A3A3A).interpolatedWith(block->color, 0.85f)` — the identity hue rendered DOMINANT over a NEUTRAL grey base. Name label + bottom bpm readout adopt luminance-based black/white (same rule as clip-row headers: lum>0.55 → black) so they stay legible on the now-vivid body. Tiny/stacked path (withAlpha(0.80f)) and header strip (withAlpha(1.0f)) left byte-for-byte identical (not in the diff); tiny name colour stays textPrimary via a no-op guard.
+- Chosen alpha 0.85; neutral base 0xFF3A3A3A = RGB(58,58,58).
+- Proof (arithmetic modeling the exact code): all 8 palette hues composite with dominant channel MATCHING the source AFTER (yellow→R-dom (189,179,63); green→G; cyan→B; pink→R; etc.); BEFORE, yellow→G and pink→B (the bug). grep confirms withAlpha(0.80f)/(1.0f) unchanged; isDone in Source/Audio still 4 comment-only hits (zero functional). Full resolver/model harness STEP6 RESULT: ALL PASS (paint change can't touch resolver; run confirms build intact). Both Debug + Release rebuilt clean.
+- Verification section 13: 13.1 PASS (arithmetic; in-app visual is script 13, now expected to pass). 13.2 unchanged (BlockStrip layout untouched). 13.3/13.4 unchanged (ClipWaveformView untouched). Header + stacked-tile rendering provably unchanged (those withAlpha lines absent from the diff).
+- NEXT SESSION should: run the manual script (13 items) incl. the 13.1 visual confirm across all 8 palette colours; then 12.3 logo, 12.2 Windows parity, TODO 7 Colour assert.
 
 ### 2026-07-06 (session 7) — Doc sync + new-item mapping + 10.5 harness (T20) + Group 13 inspection
 - Committed client doc revs (925c6ee): SPEC.md + ACCEPTANCE_TESTS.md rev 2026-07-06 + new CURRENT_STATE.md. Logged dirty-state/unsaved-prompt as an accepted POST-DELIVERY enhancement (do not build).

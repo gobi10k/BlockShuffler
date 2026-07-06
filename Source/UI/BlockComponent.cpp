@@ -69,13 +69,35 @@ void BlockComponent::paint(juce::Graphics& g) {
     g.setColour(bg);
     g.fillRoundedRectangle(inner, cr);
 
+    // Body identity colour for full-size tiles: the palette hue rendered
+    // DOMINANT (0.85) over a NEUTRAL grey base. Compositing only 10% of the
+    // colour over the cool blue-grey theme base desaturated and hue-shifted
+    // every colour (bug 13.1: yellow read as green). Text colour follows the
+    // body luminance (same rule as the clip-row headers) so the name stays
+    // legible on both light and dark colours.
+    static constexpr juce::uint32 neutralBodyBase = 0xFF3A3A3A;  // neutral grey, no hue
+    const juce::Colour bodyCol =
+        juce::Colour(neutralBodyBase).interpolatedWith(block->color, 0.85f);
+    const float bodyLum = bodyCol.getFloatRed()   * 0.299f
+                        + bodyCol.getFloatGreen() * 0.587f
+                        + bodyCol.getFloatBlue()  * 0.114f;
+    const juce::Colour bodyTextCol = (bodyLum > 0.55f) ? juce::Colours::black
+                                                       : juce::Colours::white;
+    // Tiny (stacked) tiles keep the existing textPrimary name colour; only the
+    // large-body path adopts the luminance-based colour.
+    const juce::Colour nameCol = tinyTile
+        ? juce::Colour(LookAndFeel_BlockShuffler::textPrimary)
+        : bodyTextCol;
+    if (nameLabel.findColour(juce::Label::textColourId) != nameCol)
+        nameLabel.setColour(juce::Label::textColourId, nameCol);
+
     if (tinyTile) {
         // Compact mode: full-height color strip + name only
         g.setColour(block->color.withAlpha(0.80f));
         g.fillRoundedRectangle(inner, juce::jmin(cr, (float)full.getHeight() * 0.4f));
     } else {
-        // Subtle identity-color tint in body
-        g.setColour(block->color.withAlpha(0.10f));
+        // Identity colour DOMINANT over the neutral base (see bug 13.1 above)
+        g.setColour(bodyCol);
         g.fillRoundedRectangle(inner, cr);
 
         // ── 2. Header strip (rounded top corners only) ────────────────────────
@@ -139,7 +161,7 @@ void BlockComponent::paint(juce::Graphics& g) {
         auto botArea = juce::Rectangle<int>(full.getX(), full.getBottom() - botH,
                                             full.getWidth(), botH);
         g.setFont(LookAndFeel_BlockShuffler::monoFont(9.0f));
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textTertiary));
+        g.setColour(bodyTextCol.withAlpha(0.70f));  // legible on the vivid body (13.1)
         if (block->tempo > 0.0)
             g.drawText(juce::String((int)block->tempo) + " bpm",
                        botArea.withTrimmedLeft(5).withTrimmedRight(22),
