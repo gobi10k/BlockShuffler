@@ -86,8 +86,141 @@ static void dumpModel(Project& p, const char* label) {
     }
 }
 
-int main() {
+// ── Manual-round project generator (invoked as: ResolverDiag --gen-manual <dir>)
+// Writes tone WAVs + two .bsp projects for the manual acceptance session:
+//   TestProject.bsp   — DETERMINISTIC (SIM stack plays 2 of 2, link at 0%) so any
+//                       Play and any export produce identical audio; contains one
+//                       tempo-stretched join (Intro tempo 120 tail -> Verse tempo
+//                       160 lead-in) for 10.2/10.4 Audacity/ear comparison.
+//   StressProject.bsp — 50 blocks (5 stacked pairs) for 12.1.
+static void writeToneWav(const juce::File& f, double freqHz, double seconds, bool noise) {
+    const double sr = 44100.0;
+    const int len = (int)(seconds * sr);
+    juce::AudioBuffer<float> buf(2, len);
+    juce::Random nz(42);
+    for (int i = 0; i < len; ++i) {
+        float v = noise ? (nz.nextFloat() * 2.0f - 1.0f) * 0.5f
+                        : 0.6f * (float)std::sin(2.0 * juce::MathConstants<double>::pi
+                                                 * freqHz * i / sr);
+        // 10ms fade in/out so the FILES themselves have no clicks — any click heard
+        // at a join is then attributable to the mixer/stretcher, not the material.
+        const int fade = (int)(0.010 * sr);
+        if (i < fade)       v *= (float)i / fade;
+        if (i >= len - fade) v *= (float)(len - 1 - i) / fade;
+        buf.setSample(0, i, v);
+        buf.setSample(1, i, v);
+    }
+    f.deleteFile();
+    juce::WavAudioFormat fmt;
+    if (auto os = std::unique_ptr<juce::FileOutputStream>(f.createOutputStream())) {
+        if (auto* w = fmt.createWriterFor(os.get(), sr, 2, 16, {}, 0)) {
+            os.release();
+            std::unique_ptr<juce::AudioFormatWriter> writer(w);
+            writer->writeFromAudioSampleBuffer(buf, 0, len);
+        }
+    }
+}
+
+static void addFileClipMeta(Block* blk, const juce::File& f, const juce::String& nm,
+                            juce::int64 startMark, juce::int64 endMark, double tempo) {
+    auto c = std::make_unique<Clip>();
+    c->name = nm;
+    c->audioFile = f;
+    c->startMark = startMark;
+    c->endMark = endMark;
+    c->probability = 1.0f;
+    c->tempo = tempo;
+    blk->addClip(std::move(c));
+}
+
+static int generateManualRound(const juce::File& dir) {
+    auto media = dir.getChildFile("media");
+    media.createDirectory();
+    writeToneWav(media.getChildFile("intro_440.wav"),   440.0, 2.5, false);
+    writeToneWav(media.getChildFile("verse_220.wav"),   220.0, 2.5, false);
+    writeToneWav(media.getChildFile("chorusA_880.wav"), 880.0, 2.0, false);
+    writeToneWav(media.getChildFile("chorusB_noise.wav"),  0.0, 2.0, true);
+    const double sr = 44100.0;
+
+    { // TestProject.bsp
+        Project p;
+        p.name = "ManualRound";
+        p.sampleRate = sr;
+        auto* intro = p.addBlock("Intro");
+        auto* verse = p.addBlock("Verse");
+        auto* chA   = p.addBlock("ChorusA");
+        auto* chB   = p.addBlock("ChorusB");
+        // Intro: 440Hz, tempo 120, body 0..2.0s, TAIL 0.5s (stretch source)
+        addFileClipMeta(intro, media.getChildFile("intro_440.wav"), "intro 440",
+                        0, (juce::int64)(2.0 * sr), 120.0);
+        // Verse: 220Hz, tempo 160, LEAD-IN 0.4s, body to end (stretch target)
+        addFileClipMeta(verse, media.getChildFile("verse_220.wav"), "verse 220",
+                        (juce::int64)(0.4 * sr), (juce::int64)(2.5 * sr), 160.0);
+        // Chorus stack: 880Hz + noise, layered, BOTH always play (deterministic)
+        addFileClipMeta(chA, media.getChildFile("chorusA_880.wav"), "chorus 880",
+                        0, (juce::int64)(2.0 * sr), 120.0);
+        addFileClipMeta(chB, media.getChildFile("chorusB_noise.wav"), "chorus noise",
+                        0, (juce::int64)(2.0 * sr), 120.0);
+        p.stackBlocks(chB->id, chA->id);
+        chA->stackPlayMode = StackPlayMode::Simultaneous;
+        chA->stackPlayCount.values.set(0, 2);
+        p.propagateStackSettings(chA->stackGroup, chA);
+        // Link at 0% — present for the UI/arc, deterministic for export comparison
+        // (link behavior itself is covered by T9/T13/T14).
+        p.addLink(intro->id, verse->id, 0.0f);
+        if (!p.saveToFile(dir.getChildFile("TestProject.bsp"))) {
+            std::cout << "GEN FAIL: TestProject.bsp save failed\n";
+            return 1;
+        }
+    }
+    { // StressProject.bsp — 50 blocks, 5 stacked pairs (10&11, 20&21, ... 50&49)
+        Project p;
+        p.name = "Stress50";
+        p.sampleRate = sr;
+        const char* files[4] = { "intro_440.wav", "verse_220.wav",
+                                 "chorusA_880.wav", "chorusB_noise.wav" };
+        std::vector<Block*> blocks;
+        for (int i = 1; i <= 50; ++i) {
+            auto* b = p.addBlock("Block " + juce::String(i));
+            auto f = media.getChildFile(files[(i - 1) % 4]);
+            addFileClipMeta(b, f, "clip " + juce::String(i),
+                            0, (juce::int64)(2.0 * sr), 120.0);
+            blocks.push_back(b);
+        }
+        for (int i = 10; i <= 50; i += 10)
+            p.stackBlocks(blocks[(size_t)(i - 1)]->id, blocks[(size_t)(i - 2)]->id);
+        if (!p.saveToFile(dir.getChildFile("StressProject.bsp"))) {
+            std::cout << "GEN FAIL: StressProject.bsp save failed\n";
+            return 1;
+        }
+    }
+    // Verify both load cleanly (files found, blocks intact) and TestProject resolves.
+    for (const char* name : { "TestProject.bsp", "StressProject.bsp" }) {
+        Project q;
+        bool ok = q.loadFromFile(dir.getChildFile(name));
+        std::cout << name << ": load=" << (ok ? "ok" : "FAIL")
+                  << " blocks=" << q.blocks.size()
+                  << " links=" << q.links.size()
+                  << " missingFiles=" << q.missingFilesOnLoad.size() << "\n";
+        if (!ok || !q.missingFilesOnLoad.isEmpty()) return 1;
+        if (juce::String(name) == "TestProject.bsp") {
+            juce::Random r(1); ArrangementResolver res;
+            auto arr = res.resolve(q, r);
+            std::cout << "  resolve: entries=" << arr.entries.size()
+                      << " totalSamples=" << arr.totalDurationSamples
+                      << " (~" << juce::String(arr.totalDurationSamples / 44100.0, 2)
+                      << "s)\n";
+        }
+    }
+    std::cout << "GEN OK: " << dir.getFullPathName() << "\n";
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
     juce::ScopedJuceInitialiser_GUI init;
+
+    if (argc >= 3 && juce::String(argv[1]) == "--gen-manual")
+        return generateManualRound(juce::File(juce::String(argv[2])));
 
     Project p;
     auto* a = p.addBlock("A");
