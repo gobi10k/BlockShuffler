@@ -80,6 +80,20 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-07-06 (session 3) — STEP 7 COMPLETE (with 7B deviation) → tag `delivery-candidate-1`. FINAL REPORT (7F)
+- **Step 6 CLOSED**: harness 12/12 + manual checklist 7/7 user-confirmed.
+- **7A** (e0dd863): Step-1 diag DBG lines removed from ArrangementResolver.cpp; the ONLY remaining DBG in Source/Audio is the Step 5 guard-violation DBG (line 305, next to the jassert at 308).
+- **7B deviation** (0564ba6): diag/ResolverDiag.cpp + ResolverDiag target KEPT permanently as the regression suite (see STANDING RULE above); target is EXCLUDE_FROM_ALL — default build proven not to compile it; explicit `--target ResolverDiag` works.
+- **7C**: clean-first Standalone builds — Debug (build-diag/) exit 0 and Release (build-release/, new dir, gitignored) exit 0; 0 errors, 51 warnings all pre-existing (DraggableNumberBox ctor shadows ×24, WSOLA synthesisPos ×8, resolver bodyStart ×2, JUCE Font deprecation ×4, misc sign/shadow). Full harness re-run against the fresh Debug tree: all SUMMARY lines green, STEP4AMEND determinism IDENTICAL, STEP6 RESULT: ALL PASS (T1–T12).
+- **7D release sanity**: in non-debug builds JUCE defines `jassert(x)` → empty statement and `DBG(x)` → nothing (juce_PlatformDefs.h:188/196, JUCE_LOG_ASSERTIONS off) → the Step 5 guard is inert in Release. **TODO #7 (juce_Colour.cpp:340 assert spam): DEFERRED DEV-NOISE** — it is `jassert(newAlpha >= 0 && newAlpha <= 1.0f)` inside `Colour::withAlpha`, JUCE_DEBUG-only, invisible in the client's Release build. Root-cause hint for later: some paint code calls withAlpha() with an out-of-range float. NOT fixed this session per instruction.
+- **7E** (06bd4f7): ACCEPTANCE MAP section above — 13 items NOT-YET-COVERED (2.6, 2.7, 4.5, 4.6, 5.3, 6.3, 7.6, 8.2, 10.4, 11.3, 12.1, 12.2, 12.3) + partials noted; no fixes attempted.
+- **Step 1 conclusion (for the record)**: the reported "play 1 plays ALL blocks" regression DID NOT REPRODUCE — the fix was already in the tree before this push (fossils: the guard comment describing the old slot-splitting failure, FIX H6/H7 stack-state resets). The per-stack guard (jassert + violation DBG) is retained permanently.
+- **Every file touched across the push** (baseline-step1-clean..HEAD): `Source/Model/Block.h`, `Source/Model/Project.cpp`, `Source/Model/Serialization.cpp`, `Source/Audio/ArrangementResolver.cpp`, `Source/Audio/StackPicker.h` (NEW), `Source/Audio/ExportRenderer.cpp`, `Source/UI/InspectorPanel.h/.cpp`, `CMakeLists.txt`, `diag/ResolverDiag.cpp`, `docs/PROGRESS.md`, root `PROGRESS.md` (deleted). PlaybackEngine, link logic, lead-in/mixing, sequential timeline math: untouched (scope freeze held).
+- **Results**: harness T1–T12 ALL PASS (see session-2 entry + acceptance map); manual checklist 7/7 (gapless SEQ, layering, longest-wait, crossfades, instant project open, undo feel, isDone visual-only).
+- **Known limitations**: (1) equal-weight effective % may display 33/34/34 — within client tolerance ±2; exact-enumeration fix scoped, deferred. (2) TODO #7 Colour jassert — Debug-only dev-noise, deferred. (3) 13 acceptance items not yet covered (map above) — the remaining pre-delivery work.
+- **Commits this push**: 641c345, b5dab68, 03d6fe3 (Step 2) · 30f67b4, 182760d, 18f158e, 1610703, d424800, c0c2de6, f4a6f44, 232657a (Step 3) · 582b598, 8361865, 647b084, db5b564, 089a8e1, c41f164 (Step 4 + amendment + close) · c507dc1 (Step 5) · 6b8628c (Step 6) · e0dd863, 0564ba6, 06bd4f7 + this commit (Step 7). Tagged `delivery-candidate-1`.
+- NEXT SESSION should: work the 13 uncovered acceptance items (start with the cheap harness ones: 2.6, 2.7, 4.5, 4.6, 5.3, 8.2), then logo (12.3), Windows parity (12.2), stress (12.1), Colour assert (TODO 7).
+
 ### 2026-07-06 (session 2) — Step 4 CLOSED; Step 5 guards + Step 6 DONE — **Step 6 CLOSED 2026-07-06: harness 12/12 + manual checklist 7/7 user-confirmed.**
 - Step 0: Step 4 marked CLOSED (user-confirmed incl. amendment; known limitation accepted, client tolerance ±2); stale root PROGRESS.md removed — docs/PROGRESS.md is the only log (c41f164).
 - What I changed (files):
