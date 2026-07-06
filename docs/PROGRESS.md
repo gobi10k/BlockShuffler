@@ -27,6 +27,9 @@ MASTER_PROMPT Step 5 (permanent guards) + Step 6 harness half, then user runs th
 
 ---
 
+## POST-DELIVERY ENHANCEMENTS (accepted rulings — do NOT build before delivery)
+- **Dirty-state tracking + unsaved-changes prompt on open/new/quit** (ruled 2026-07-06): today NO path prompts on unsaved changes except New Project's blanket confirm; Open button and Finder double-click both load without prompting (identical by design, user-accepted). Proper fix post-delivery: dirty flag on model mutations + prompt on Open/double-click/New/Quit.
+
 ## STANDING RULE (Step 7B): REGRESSION HARNESS
 `diag/ResolverDiag.cpp` + the `ResolverDiag` CMake target are PERMANENT — they encode every invariant that historically regressed (playCount, layering, links, isDone, lead-in timeline, save/load, undo). The target is EXCLUDE_FROM_ALL, so client/Release builds never touch it. **Run the FULL harness before ANY future change to resolver, stack, or link code:**
 `cmake --build build-diag --target ResolverDiag && ./build-diag/ResolverDiag_artefacts/Debug/ResolverDiag 2>/dev/null | grep -E "SUMMARY|STEP6 RESULT|FAIL"` — everything must stay green (STEP6 RESULT: ALL PASS).
@@ -75,9 +78,37 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 | 5.6 SIM pc=3 + longest | T5 + M2/M3 | 12.1 stress (50 blocks, rapid undo) | PENDING-MANUAL (script 8) |
 | 5.7 block weights bias | T8 | 12.2 Windows parity | **GAP** (TODO 6) |
 | 5.8 base toggle ON/OFF | T6 + H:STEP3C + M(3F ear) | 12.3 logo polish | **GAP** (TODO 5) |
-**STATUS (updated 2026-07-06 session 5):** harness-coverable items all green (T1–T19). PENDING-MANUAL: 6.1, 6.3, 6.4, 7.6, 10.2, 10.4, 12.1 (session script in the 2026-07-06 session-5 entry). 11.3 FIXED (7400d79: DOCUMENT_EXTENSIONS bsp + anotherInstanceStarted), PENDING-MANUAL script 7a/7b. NOTE for 12.2: the .bsp fix covers the macOS bundle plist only — WINDOWS file association is registry/installer-level and DEFERRED to the 12.2 Windows parity session (assess there; do not forget). Remaining build tasks: 12.2 Windows parity, 12.3 logo. Partials 6.1/6.4 upgrade to full once the manual run passes.
+
+**New items — client rev 2026-07-06 (mapped session 7):**
+| Item | Evidence |
+|---|---|
+| 2.9 clip drag between blocks; strip does NOT scroll to start | code-inspection (BlockStrip.cpp:228–234 saves/restores scrollX on rebuild) + PENDING-MANUAL (script 10) |
+| 7.7 Play Clip preserves lead-in into following block | code-inspection (playClip: timelinePos=startMark, totalDuration=endMark incl. lead-in; MainComponent.cpp:381) + PENDING-MANUAL (script 11) |
+| 10.5 sample-rate/pitch (44.1k & 48k, no semitone shift) | **T20** (load-resample + export, all 4 rate combos, 440Hz→440Hz) |
+| 13.1 colour renders true (no blue tint / yellow≠green) | **FINDING — CONFIRMED (see session 7)**; PENDING-FIX (needs go-ahead) |
+| 13.2 large stack (9 blocks) all tiles visible/reachable | code-inspection: does NOT reproduce at current 360px strip (perH≈36 for 9, fits; >~9 clamps to 16px + vertical scroll) — PENDING-MANUAL confirm (script 12) |
+| 13.3 grid lines don't obscure waveform (long clips) | code-inspection (adaptive grid coarsens until ≥8px, ClipWaveformView.cpp:174) + PENDING-MANUAL (script 13) |
+| 13.4 zoom max scales with clip length | code-inspection (computeMaxZoom = duration/0.5s, ClipWaveformView.cpp:793) — see session-7 note on wording ambiguity + PENDING-MANUAL (script 13) |
+
+**STATUS (updated 2026-07-06 session 7):** harness-coverable items all green (T1–T20). PENDING-MANUAL: 6.1, 6.3, 6.4, 7.6, 10.2, 10.4, 12.1, plus new 2.9, 7.7, 13.2, 13.3, 13.4 (scripts in session-5 + session-7 entries). 11.3 FIXED (7400d79). **13.1 CONFIRMED FINDING (colour hue-shift) — PENDING-FIX, awaiting go-ahead.** NOTE for 12.2: the .bsp fix covers the macOS bundle plist only — WINDOWS file association is registry/installer-level, DEFERRED to the 12.2 session. Remaining build tasks: 12.2 Windows parity, 12.3 logo. Partials 6.1/6.4 upgrade to full once the manual run passes.
 
 ## SESSION LOG
+
+### 2026-07-06 (session 7) — Doc sync + new-item mapping + 10.5 harness (T20) + Group 13 inspection
+- Committed client doc revs (925c6ee): SPEC.md + ACCEPTANCE_TESTS.md rev 2026-07-06 + new CURRENT_STATE.md. Logged dirty-state/unsaved-prompt as an accepted POST-DELIVERY enhancement (do not build).
+- 10.5 harness: **T20** (118f0fc) — 440Hz source at {44.1k,48k} → project {44.1k,48k}, load-resample AND export, zero-crossing pitch = 440.0Hz all 4 combos, exported file rate = project rate. PASS.
+- **GROUP 13 FINDINGS (client-reported bugs inspected as live suspects; NO fixes made):**
+  - **13.1 "global blue tint / yellow renders green" — CONFIRMED (root cause found).** The stored palette is correct (getBlockPalette → paletteYellow 0xFFD4C840 is genuine yellow; menu maps names→hues correctly, LookAndFeel_BlockShuffler.cpp:128). The defect is in RENDERING: a non-stacked block's large body is painted `block->color.withAlpha(0.10f)` over the cool blue-grey theme base (bgMedium 0xFF161B22 / bgLight 0xFF1F2630, both blue-channel-dominant) — BlockComponent.cpp:78. A 10% yellow over bgMedium composites to RGB≈(41,44,37): green channel highest → reads as muddy green-grey; every hue desaturates toward the blue-grey base → the strip looks "blue-tinted." The full-colour identity is only the ~20px header strip (BlockComponent.cpp:88); the dominant body area is washed out. (Tiny stacked tiles use withAlpha(0.80f) so they read correctly — the bug is worst on large/unstacked blocks, matching "everything looks tinted.")
+    - SCOPED FIX PROPOSAL (needs go-ahead): make the identity colour dominant, not a 10% wash — e.g. (a) raise body alpha substantially and composite over a NEUTRAL grey rather than the blue theme base, or (b) render a solid full-height colour bar / larger colour field at ~0.7–1.0 alpha so the true hue is unmistakable, keeping text legibility via the existing luminance-based black/white choice. One-file change in BlockComponent::paint; then re-verify 13.1 by eye against all 8 palette colours. NOT done this session.
+  - **13.2 "stack tiles cut off at 7–9 blocks" — NOT REPRODUCED in current code.** Strip height is 360px (MainComponent.h:70). Layout (BlockStrip.cpp:190–206): perH = jmax(16, (areaH−gaps)/n). For n=9: gaps=32, perH=jmax(16,36)=36, neededH=356 ≤ 360 → fits, centred. n=7/8 also fit. For >~9, perH clamps to 16px and the content area exceeds the viewport → vertical scrollbar (setScrollBarsShown(true,true)) makes them reachable. So the reported cut-off appears already resolved by the 360px height + min-16 + vertical-scroll fallback. No code change proposed — recommend manual confirmation at 9 (script 12). If a bottom sliver hides under the 8px horizontal scrollbar, that's the only residual; flag if the manual test shows it.
+  - 13.3 grid-over-waveform: adaptive grid already coarsens until lines ≥8px apart (ClipWaveformView.cpp:174) — believed handled; manual confirm (script 13).
+  - 13.4 zoom-scales-with-length: computeMaxZoom = maxDurationSeconds/0.5 (ClipWaveformView.cpp:793) → max zoom always reveals ~0.5s regardless of clip length. NOTE the spec wording "shorter clips zoom in further" is ambiguous: the implementation gives LONGER clips a bigger zoom FACTOR (to reach the same 0.5s window), i.e. equal finest detail rather than more zoom for short clips. Reasonable reading of "scales with length" but flag for client if they meant literal per-clip zoom-factor differences. Manual confirm (script 13).
+- ADDITIONAL MANUAL SCRIPT ITEMS (append to the session-5 script):
+  10. **2.9 clip drag, no scroll reset** — Open StressProject.bsp, scroll the strip right, drag a clip from a visible block onto a later block. EXPECT: clip moves; strip stays scrolled where it was (does NOT jump to block 1). FAILURE: strip snaps back to the start after the drop.
+  11. **7.7 Play Clip lead-in** — Open TestProject.bsp, select Verse (has a 0.4s lead-in), right-click its clip → Play Clip. EXPECT: you hear the lead-in from its start (audio before the start marker is not cut off). FAILURE: playback starts abruptly at the start marker, lead-in clipped.
+  12. **13.2 large stack visibility** — In StressProject.bsp (has 5 stacked pairs) build one stack of 9 (drag blocks together) OR just confirm the existing pairs render fully; then make a 9-high stack. EXPECT: all 9 tiles visible, or reachable by the strip's vertical scrollbar; none permanently hidden. FAILURE: tiles below ~7 vanish with no way to scroll to them.
+  13. **13.1/13.3/13.4 visual** — 13.1: set blocks to Yellow, Green, Blue via right-click → Set Color; EXPECT each block reads as its true colour (yellow looks yellow, not green; no overall blue wash) — **this is the CONFIRMED finding, expected to FAIL until fixed**. 13.3: on a long clip, grid lines must not hide the waveform. 13.4: short vs long clip — max zoom reveals fine detail on both.
+- NEXT SESSION should: await go-ahead on the 13.1 colour fix; run the manual script (now 13 items); then 12.3 logo, 12.2 Windows parity (incl. Windows .bsp association), TODO 7 Colour assert.
 
 ### 2026-07-06 (session 6) — 11.3 FIXED: .bsp file association + open-document handling (7400d79)
 - CMake: `DOCUMENT_EXTENSIONS bsp` on the plugin target → Standalone bundle plist now carries CFBundleDocumentTypes (bsp, Editor role, Default rank) in BOTH configs (plutil-verified). App: `anotherInstanceStarted()` override — verified in juce_MessageManager_mac.mm that macOS routes application:openFile:/openFiles:/odoc there for BOTH cold start and already-running; shared `openBspFromCommandLine()` (trim + unquoted) also serves the Windows/Linux argv path in initialise(); window brought to front before load.
