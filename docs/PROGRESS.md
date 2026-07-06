@@ -35,7 +35,7 @@ Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via
 ## SESSION LOG
 
 ### 2026-07-05 (session 3) — MASTER_PROMPT Step 3 built (3A–3E committed), awaiting 3F user confirmation
-- Step 0 backup: remote `UI_firstdraft` held a stale 2026-04-29 orphan snapshot (strict subset of local tree, zero remote-only files) — replaced via `git push --force-with-lease`; branch now tracks origin.
+- Step 0 backup: remote `UI_firstdraft` held a stale 2026-04-29 orphan snapshot (strict subset of local tree, zero remote-only files) — replaced via `git push --force-with-lease`; branch now tracks origin. NOTE: that push happened BEFORE 3A — origin is at 03d6fe3; commits 30f67b4..HEAD are local only. Next session: `git push` first.
 - What I changed (files):
   - `Source/Model/Block.h` — `bool alwaysPlayBase = false;` (stack-level, simultaneous only).
   - `Source/Model/Project.cpp` — propagateStackSettings copies alwaysPlayBase across the group.
