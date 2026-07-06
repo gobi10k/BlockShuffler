@@ -15,7 +15,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 ### BROKEN / TODO (in priority order)
 1. ~~**Stack play count regression**~~ — **CLOSED 2026-07-05: does not reproduce.** Verified honored in current code (headless harness + in-app DBG + by ear). PROGRESS entry below has the proof. Keep the jassert guard at ArrangementResolver.cpp:319.
 2. ~~**Simultaneous layering**~~ — **CLOSED 2026-07-05 session 2: MASTER_PROMPT Step 2 COMPLETE.** Grep half PASSED; runtime half PASSED (SIM play 3 → 10/10 identical timelinePos, cursor advances by LONGEST body; proof in entry below); layering confirmed BY EAR by the user. No code change was needed.
-3. **NEW FEATURE: "Always play base block"** (simultaneous only) — **BUILT 2026-07-05 session 3 (Steps 3A–3E all committed with proof), awaiting user 3F hand-off tests.** Step 3 closes only after user confirms: ear test (base ON, play 2 of 3), toggle undo/redo, save→reopen persistence, pre-3B project loads with toggle off. Repro steps in entry below.
+3. ~~**NEW FEATURE: "Always play base block"**~~ — **CLOSED 2026-07-06: MASTER_PROMPT Step 3 COMPLETE.** 3A–3E committed with proof (session-3 entry below); 3F user-confirmed 2026-07-06: all six manual tests pass (ear test base ON play 2 of 3, toggle visibility per mode, undo/redo, save→reopen persistence, pre-3B project loads with toggle off).
 4. **Effective % = inclusion probability** — verify against client numbers (33 / 67 / 100). Share the picker function between resolver and display. MASTER_PROMPT Step 4.
 5. **Logo polish** — background must match transport bar colour exactly, larger, sit just left of Save As. Verify logo + app icon load via BinaryData (cross-platform), not runtime file paths. ACCEPTANCE_TESTS 12.3.
 6. **Windows parity pass** — ACCEPTANCE_TESTS 12.2.
@@ -23,7 +23,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 8. ~~**Source/ is UNTRACKED in git**~~ — **CLOSED 2026-07-05 session 2.** Full tree committed on `UI_firstdraft` and tagged `baseline-step1-clean`. IMPORTANT: the old "repo" was accidentally rooted at `$HOME` (that's why Source/ looked untracked); a proper repo now lives at the project directory with the UI_firstdraft history imported and origin set (details in entry below). One commit per completed MASTER_PROMPT step from now on.
 
 ### NEXT UP
-User runs the Step 3F hand-off tests (repro steps in the 2026-07-05 session-3 entry). After confirmation: mark Step 3 complete, then MASTER_PROMPT Step 4 (effective % = inclusion probability; note computeStackInclusionProbabilities does NOT yet know about alwaysPlayBase — that is Step 4 work, deliberately not touched in Step 3). Then Steps 5–7. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
+MASTER_PROMPT Step 4 (effective % = inclusion probability; computeStackInclusionProbabilities does NOT yet know about alwaysPlayBase — that is Step 4 work). Then Steps 5–7. Then remaining ACCEPTANCE_TESTS groups, logo (item 5), Windows parity (item 6), Colour assertion (item 7).
 
 ---
 
