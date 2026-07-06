@@ -1,4 +1,4 @@
-# BlockShuffler — ACCEPTANCE_TESTS.md (Client Measure of Success)
+# BlockShuffler — ACCEPTANCE_TESTS.md (Client Measure of Success, rev 2026-07-06)
 
 Derived 1:1 from the client's final feature list (2026-07-03) and clarifications. ALL tests must PASS before delivery. Run top to bottom. Any FAIL blocks delivery. After any code change, re-run the affected group AND groups 4–5 (highest regression risk).
 
@@ -19,6 +19,7 @@ Derived 1:1 from the client's final feature list (2026-07-03) and clarifications
 - [ ] 2.6 Weights drive selection: 80/15/5 over 30 plays roughly matches
 - [ ] 2.7 Single clip at 0% weight → shows 100% effective → always plays
 - [ ] 2.8 Start/end markers draggable; snap to grid; Shift bypasses snap
+- [ ] 2.9 Drag an existing clip from one block into a later block → clip moves; block strip does NOT scroll back to the start
 
 ## Group 3 — Lead-ins and tails (clip alignment)
 - [ ] 3.1 First clip with start marker moved forward → lead-in audio audible at song start (full volume)
@@ -64,6 +65,7 @@ Derived 1:1 from the client's final feature list (2026-07-03) and clarifications
 - [ ] 7.4 User selection/inspector unaffected by playback; stop reverts waveform to the selected block
 - [ ] 7.5 Play Block / Play Clip (right-click) work EVERY time
 - [ ] 7.6 Rapid play/stop 20× → no crash, no stuck audio
+- [ ] 7.7 Play Clip on a clip with a lead-in still leads into the following block (lead-in not cut off)
 
 ## Group 8 — Song enders
 - [ ] 8.1 Song-ender clip plays → arrangement truncates after it (tail included); nothing after
@@ -80,6 +82,7 @@ Derived 1:1 from the client's final feature list (2026-07-03) and clarifications
 - [ ] 10.2 WAV/FLAC: correct pitch, speed, and crossfades — identical to in-editor playback (Audacity check)
 - [ ] 10.3 BSF: valid ZIP with manifest.json + model.json + clips/*.flac; big ints as strings
 - [ ] 10.4 Export with tempo-stretched joins matches playback
+- [ ] 10.5 Source clips of any sample rate (44.1 kHz and 48 kHz) play and export at correct pitch — no semitone shift
 
 ## Group 11 — Sessions & undo
 - [ ] 11.1 Save / Save As / Open work; window title shows project name; Cmd+S / Cmd+Shift+S
@@ -93,6 +96,12 @@ Derived 1:1 from the client's final feature list (2026-07-03) and clarifications
 - [ ] 12.1 15 rapid undos, drag-heavy session, 50-block project → no crash
 - [ ] 12.2 Windows build: same behavior as macOS for groups 1–11; logo and app icon appear (BinaryData-embedded)
 - [ ] 12.3 Logo: background matches transport bar exactly, sized ~2/3 bar height, sits just left of Save As
+
+## Group 13 — UI fidelity (client-reported visual defects)
+- [ ] 13.1 Clip/block colour renders true — no global blue tint; each palette colour displays correctly ("yellow" is yellow)
+- [ ] 13.2 Large stack of 9 blocks → all tiles visible and reachable, none cut off out of view
+- [ ] 13.3 Long clip → grid lines do not obscure the waveform preview
+- [ ] 13.4 Zoom maximum scales with clip length (short clips zoom further than long clips)
 
 ## Sign-off
 All boxes checked → build both platforms → send to client with this checklist attached.
