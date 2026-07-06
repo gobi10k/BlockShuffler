@@ -52,33 +52,46 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 | 2.3 browse button | PV | 6.5 grep isDone Audio | Step 5 (c507dc1) |
 | 2.4 clip rename/colour/remove | PV | 7.1 Play applies randomization | T1–T9 (same resolve()) + PV |
 | 2.5 independent weights | PV | 7.2 playing indicator | PV |
-| 2.6 clip weights 80/15/5 dist. | **GAP** (harness tests BLOCK weights only) | 7.3 waveform follows | PV |
-| 2.7 single clip 0% → 100% | **GAP** | 7.4 selection independent | PV + 4C (647b084) |
+| 2.6 clip weights 80/15/5 dist. | T16 (81.5/12.0/6.5 over 200) | 7.3 waveform follows | PV |
+| 2.7 single clip 0% → 100% | T17 (20/20) | 7.4 selection independent | PV + 4C (647b084) |
 | 2.8 markers snap/Shift | PV | 7.5 Play Block/Clip | PV |
 | 3.1 entry-0 lead-in full gain | PV + M4 | 7.6 rapid play/stop 20× | **GAP** |
 | 3.2 zero-gap bodies | T2 + M1 | 8.1 song ender truncates | PV |
-| 3.3 tail/lead-in crossfade | PV + M4 | 8.2 ender inside stack | **GAP** |
+| 3.3 tail/lead-in crossfade | PV + M4 | 8.2 ender inside stack | T19 (both branches) |
 | 3.4 stretch to adjacent tempo | PV | 9.1 tempo = grid only | PV |
 | 3.5 retain flags | PV | 9.2 one-click tempo field | PV |
 | 4.1 link create + label | PV | 9.3 block tempo + override | PV |
 | 4.2 labels never overlap | PV | 9.4 project default tempo | PV |
 | 4.3 100% deterministic swap | T9 | 10.1 WAV/FLAC/BSF chooser | PV |
 | 4.4 3,2,1 + nothing dropped | T9 (10/10, positions unmutated) | 10.2 export == playback (Audacity) | PV (EntryMixer shared) — no re-run |
-| 4.5 0% / 50% swap rates | **GAP** | 10.3 BSF valid zip + int64 strings | H:STEP3E (d424800) + PV |
-| 4.6 link into stack: that block | **GAP** (code path exists; untested) | 10.4 stretched-join export | **GAP** |
-| 4.7 remove link + undo | PV (partial: undo of link untested) | 11.1 Save/SaveAs/Open | PV |
+| 4.5 0% / 50% swap rates | T13 (0/50; 103/200) | 10.3 BSF valid zip + int64 strings | H:STEP3E (d424800) + PV |
+| 4.6 link into stack: that block | T14 (20/20, positions unmutated) | 10.4 stretched-join export | **GAP** |
+| 4.7 remove link + undo | PV + T15 (undo of create + % change) | 11.1 Save/SaveAs/Open | PV |
 | 5.1 SEQ pc=1 exactly one | T1 + H:Step1 + M(3F) | 11.2 reopen: all intact | T11 + M5 |
 | 5.2 SEQ pc=2 | T2 | 11.3 Finder double-click open | **GAP** |
-| 5.3 SEQ pc=3 + continues | **GAP** (T2/T5 adjacent; exact case unrun) | 11.4 undo cleared on load | PV |
+| 5.3 SEQ pc=3 + continues | T18 (10/10 gapless, D plays) | 11.4 undo cleared on load | PV |
 | 5.4 SIM pc=1 | T3 | 11.5 undo exact/no desync | T12 + M6 + PV |
 | 5.5 SIM pc=2 layered | T4 + M2 | 11.6 missing-file warning | PV |
 | 5.6 SIM pc=3 + longest | T5 + M2/M3 | 12.1 stress (50 blocks, rapid undo) | **GAP** |
 | 5.7 block weights bias | T8 | 12.2 Windows parity | **GAP** (TODO 6) |
 | 5.8 base toggle ON/OFF | T6 + H:STEP3C + M(3F ear) | 12.3 logo polish | **GAP** (TODO 5) |
-
-**NOT-YET-COVERED (13):** 2.6, 2.7, 4.5, 4.6, 5.3, 6.3, 7.6, 8.2, 10.4, 11.3, 12.1, 12.2, 12.3 — plus partials noted inline (4.7 undo-of-link, 6.1/6.4 structural-only, 10.2 no re-run). These are the remaining pre-delivery work; NO fixes attempted this session per instruction.
+**NOT-YET-COVERED (7, updated 2026-07-06 round 1):** 6.3 (badge placement, visual), 7.6 (rapid play/stop 20×), 10.4 (stretched-join export), 11.3 (Finder double-click open), 12.1 (stress), 12.2 (Windows parity), 12.3 (logo) — plus partials: 6.1/6.4 (structural grep only; no in-app/export run), 10.2 (no Audacity re-run). Round 1 (T13–T19) closed 2.6, 2.7, 4.5, 4.6, 4.7-partial, 5.3, 8.2. Remaining items are manual/UI/export/platform — not harness-addressable.
 
 ## SESSION LOG
+
+### 2026-07-06 (session 4) — Acceptance gaps round 1: T13–T19 added, ALL PASS (verification only, zero product code)
+- What I changed (files): `diag/ResolverDiag.cpp` only (T13–T19); `docs/PROGRESS.md` (acceptance map flips + this entry). No product code touched.
+- Commits: e83385c (A: link tests T13–T15), 2c8369b (B: flow tests T16–T19), map/log commit below.
+- What I proved (all PASS, full suite green after):
+  - T13 (4.5): link 0% → 0 swaps/50; 50% → 103/200 = 51.5% (within 50±10); 100% determinism already T9.
+  - T14 (4.6): link endpoint inside a stack → only the linked pair swaps; resolve shape {S1,S3},W,S2 20/20; pulled-out block leaves its stack for the pass (this IS the designed cross-stack link behavior — swappedBlockIds, ArrangementResolver.cpp slot-building); nothing dropped; model positions unmutated.
+  - T15 (4.7): undo of link-create and link-% change → string-identical JSON.
+  - T16 (2.6): CLIP weights 80/10/10 → 81.5/12.0/6.5 over 200 pickClip calls (pickClip is public static — no product hook needed).
+  - T17 (2.7): single clip at 0% weight plays 20/20 (uniform fallback).
+  - T18 (5.3): SEQ pc=3 → gapless 3-block run then follower D plays, 10/10, order varies.
+  - T19 (8.2): song-ender inside stack — picked → final entry, no D (15/20); not picked → 2 stack + D (5/20); both branches observed, 20/20 correct.
+  - Full existing suite re-ran green (Steps 1/2/3C/4A/4B/amendment + T1–T12): STEP6 RESULT: ALL PASS.
+- NEXT SESSION should: the manual/export round for the remaining 7 gaps (6.3 badge, 7.6 rapid play/stop, 10.4 stretched-join export, 11.3 Finder double-click, 12.1 stress, 12.2 Windows parity, 12.3 logo) + partial re-runs (6.1/6.4 in-app, 10.2 Audacity). Then Colour assert (TODO 7).
 
 ### 2026-07-06 (session 3) — STEP 7 COMPLETE (with 7B deviation) → tag `delivery-candidate-1`. FINAL REPORT (7F)
 - **Step 6 CLOSED**: harness 12/12 + manual checklist 7/7 user-confirmed.
