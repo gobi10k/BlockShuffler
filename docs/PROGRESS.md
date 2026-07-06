@@ -27,6 +27,10 @@ MASTER_PROMPT Step 5 (permanent guards) + Step 6 harness half, then user runs th
 
 ---
 
+## STANDING RULE (Step 7B): REGRESSION HARNESS
+`diag/ResolverDiag.cpp` + the `ResolverDiag` CMake target are PERMANENT — they encode every invariant that historically regressed (playCount, layering, links, isDone, lead-in timeline, save/load, undo). The target is EXCLUDE_FROM_ALL, so client/Release builds never touch it. **Run the FULL harness before ANY future change to resolver, stack, or link code:**
+`cmake --build build-diag --target ResolverDiag && ./build-diag/ResolverDiag_artefacts/Debug/ResolverDiag 2>/dev/null | grep -E "SUMMARY|STEP6 RESULT|FAIL"` — everything must stay green (STEP6 RESULT: ALL PASS).
+
 ## VERIFIED WORKING (do not re-break)
 Core sequential playback; entry-0 full-gain lead-in; lead-in/tail crossfades via shared EntryMixer.h (playback + export identical); WSOLA stretch with retain flags; block add/remove/rename/colour; drag reorder + drag-to-stack + drag-to-gap-unstack + Shift+drag whole stack + rearrange within stack; clip add (Finder / block tile / browse) + drag clips between blocks + independent per-clip weights + song enders + per-clip play; markers with grid snap + Shift bypass + adaptive grid + proportional zoom persistence + arrow nudge; one-click tempo field + block tempo + per-clip override + project default tempo; links create/remove + name labels (no UUIDs) + collision-avoided arc labels; white playing indicator + waveform follows playing block + playhead line + time display + selection independent of playback + Play Block/Play Clip; Save/Save As/Open + window title + single synchronous loadProject() + relative portable paths + missing-file warning + undo cleared on load; snapshot undo + one-entry-per-drag + undoable stack-count buttons; export WAV/FLAC/BSF + int64 strings + project-rate writers; app icon wired.
 

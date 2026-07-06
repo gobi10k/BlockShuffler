@@ -153,8 +153,12 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(BlockShuffler PRIVATE ALSA::ALSA)
 endif()
 
-# ── STEP1 DIAG (temporary — remove in MASTER_PROMPT Step 7) ──────────────────
+# ── ResolverDiag: PERMANENT regression harness (Step 7B deviation: kept).
+# Excluded from default builds — build explicitly with:
+#   cmake --build build-diag --target ResolverDiag
+# Run the FULL harness before ANY change to resolver, stack, or link code. ──
 juce_add_console_app(ResolverDiag PRODUCT_NAME "ResolverDiag")
+set_target_properties(ResolverDiag PROPERTIES EXCLUDE_FROM_ALL TRUE)
 target_sources(ResolverDiag PRIVATE
     diag/ResolverDiag.cpp
     Source/Model/Project.cpp

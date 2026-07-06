@@ -1,4 +1,4 @@
-// STEP1 DIAG (temporary — remove in MASTER_PROMPT Step 7).
+// STEP1 DIAG (permanent regression suite — Step 7B kept it).
 // Headless reproduction of the stack play-count regression:
 // builds a 3-block stack through the same model APIs the UI uses
 // (Project::addBlock / stackBlocks / propagateStackSettings) and calls the
@@ -133,7 +133,7 @@ int main() {
     dumpModel(p, "after JSON round-trip (resetAndLoad)");
     runResolves(p, r, rng, "after JSON round-trip, playCount=1 SIM");
 
-    // STEP2 DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP2 DIAG (permanent regression suite — Step 7B kept it).
     // Simultaneous layering + cursor advance: 3-block SIM stack, playCount=3,
     // DISTINCT body lengths (1000/2500/1800) so "cursor += longest body" is
     // observable, plus a trailing unstacked block D exposing the cursor.
@@ -171,7 +171,7 @@ int main() {
         }
     }
 
-    // STEP3B DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP3B DIAG (permanent regression suite — Step 7B kept it).
     // alwaysPlayBase serialization round-trip + missing-key default.
     {
         std::cout << "\n=== STEP3B: alwaysPlayBase serialization ===\n";
@@ -205,7 +205,7 @@ int main() {
                       << " alwaysPlayBase=" << (blk->alwaysPlayBase ? "true" : "false") << "\n";
     }
 
-    // STEP3C DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP3C DIAG (permanent regression suite — Step 7B kept it).
     // "Always play base block" resolver logic. Base = first block of the stack
     // group in project->blocks order (here: A).
     {
@@ -276,7 +276,7 @@ int main() {
         run20("REGRESSION SEQ baseOFF playCount=2 (sequential timeline)", 2, false);
     }
 
-    // STEP3E DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP3E DIAG (permanent regression suite — Step 7B kept it).
     // BSF export: model.json must carry alwaysPlayBase per block.
     {
         std::cout << "\n=== STEP3E: BSF model.json alwaysPlayBase ===\n";
@@ -313,7 +313,7 @@ int main() {
         bsf.deleteFile();
     }
 
-    // STEP4A DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP4A DIAG (permanent regression suite — Step 7B kept it).
     // All-zero weights → shared picker's UNIFORM fallback: SEQ playCount=1,
     // 20 resolves → exactly 1 entry every time, and the block VARIES.
     {
@@ -352,7 +352,7 @@ int main() {
         std::cout << " (block must vary)\n";
     }
 
-    // STEP4B DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP4B DIAG (permanent regression suite — Step 7B kept it).
     // Inclusion-probability numbers via the EXACT shared function the inspector
     // calls (StackPicker::inclusionProbabilities → StackPicker::pick).
     // Expected: 3 equal pc=1 → 33±2%; pc=2 → 67±2%; pc=3 → 100% flat;
@@ -412,7 +412,7 @@ int main() {
         report("all-zero weights, pc=1 (uniform fallback, expect ~33 each)");
     }
 
-    // STEP4AMEND DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP4AMEND DIAG (permanent regression suite — Step 7B kept it).
     // Timing: one 50000-trial recompute for a 6-block stack, plus a
     // determinism check (two calls on identical state → identical maps).
     {
@@ -448,7 +448,7 @@ int main() {
         std::cout << "\n";
     }
 
-    // STEP6 DIAG (temporary — remove in MASTER_PROMPT Step 7).
+    // STEP6 DIAG (permanent regression suite — Step 7B kept it).
     // Harness half of the Step 6 re-test: T1-T12, PASS/FAIL with evidence.
     {
         std::cout << "\n=== STEP6: harness half T1-T12 ===\n";
