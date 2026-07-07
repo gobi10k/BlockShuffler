@@ -170,6 +170,7 @@ target_sources(ResolverDiag PRIVATE
     Source/Audio/ArrangementResolver.cpp
     Source/Audio/TempoStretcher.cpp
     Source/Audio/ExportRenderer.cpp
+    Source/Audio/PlaybackEngine.cpp
     Source/UI/LookAndFeel_BlockShuffler.cpp
 )
 target_include_directories(ResolverDiag PRIVATE Source)

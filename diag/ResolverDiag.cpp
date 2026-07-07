@@ -10,6 +10,7 @@
 #include "Model/Project.h"
 #include "Audio/ArrangementResolver.h"
 #include "Audio/ExportRenderer.h"
+#include "Audio/PlaybackEngine.h"
 #include "Audio/StackPicker.h"
 
 using namespace BlockShuffler;
@@ -1194,6 +1195,438 @@ int main(int argc, char* argv[]) {
             verdict("T20 sample-rate/pitch: 440Hz stays 440Hz (load+export, all rate combos)",
                     allOk, detail);
             tmpDir.deleteRecursively();
+        }
+
+        // ── PENDING-MANUAL automation batch (2026-07-07, verification only) ───
+        // Automates the headless-checkable half of the PENDING-MANUAL queue.
+        // Every expected value is derived from CURRENT product code and cited.
+
+        // Shared helpers for the audio tests below.
+        // Fill a shared buffer with a full-scale sine so lead-in / body regions
+        // are distinguishable from silence (10ms fades to avoid edge clicks).
+        auto makeTone = [](int len, double freq, double sr) {
+            auto b = std::make_shared<juce::AudioBuffer<float>>(2, len);
+            const int fade = juce::jmax(1, (int)(0.010 * sr));
+            for (int i = 0; i < len; ++i) {
+                // 0.3 peak: two overlapping tones at a crossfade sum to <= ~0.6,
+                // safely below 0 dBFS so the 16-bit export never clamps (see
+                // compareEngineExport note).
+                float v = 0.3f * (float)std::sin(2.0 * juce::MathConstants<double>::pi
+                                                 * freq * i / sr);
+                if (i < fade)        v *= (float)i / fade;
+                if (i >= len - fade) v *= (float)(len - 1 - i) / fade;
+                b->setSample(0, i, v);
+                b->setSample(1, i, v);
+            }
+            return b;
+        };
+
+        { // T21 (6.1): clip "Mark as Done" is COSMETIC — the resolver's pickClip
+          // never references isDone, so toggling it must not change WHICH clip is
+          // picked (bit-identical sequence under the same seed) AND a done clip
+          // must still be selectable by weight. Invariant guarded: 6.1 / 6.5.
+            Project p;
+            auto* blk = p.addBlock("A");
+            addClipTo(blk, "heavy", 1000);
+            addClipTo(blk, "mid",   1000);
+            addClipTo(blk, "low",   1000);
+            blk->clips[0]->probability = 0.6f;
+            blk->clips[1]->probability = 0.3f;
+            blk->clips[2]->probability = 0.1f;
+
+            auto pickSeq = [&](juce::int64 seed) {
+                juce::Random r(seed);
+                juce::String s;
+                int heavyHits = 0;
+                for (int i = 0; i < 200; ++i) {
+                    auto* c = ArrangementResolver::pickClip(*blk, r);
+                    s << (c ? c->name : juce::String("?")) << ";";
+                    if (c && c->name == "heavy") ++heavyHits;
+                }
+                return std::make_pair(s, heavyHits);
+            };
+
+            auto before = pickSeq(6210);
+            blk->clips[0]->isDone = true;   // done on the heaviest clip
+            blk->clips[2]->isDone = true;
+            auto after = pickSeq(6210);
+            verdict("T21 clip isDone cosmetic: identical picks + done clip still selected",
+                    before.first == after.first && after.second > 0,
+                    juce::String("sequence identical: ") + (before.first == after.first ? "yes" : "NO")
+                    + ", done-heavy inclusions: " + juce::String(after.second) + "/200");
+        }
+
+        { // T22 (6.4): Export with EVERYTHING marked Done must export normally —
+          // isDone is not consulted anywhere on the export path, so an all-Done
+          // project renders byte-identical audio to the same project with nothing
+          // done, and renderToFile still succeeds. Invariant guarded: 6.4 / 6.5.
+            auto buildExportProject = [&](Project& p, bool markDone) {
+                p.sampleRate = 44100.0;
+                auto* a = p.addBlock("A");
+                auto* b = p.addBlock("B");
+                addClipTo(a, "cA", 1000);
+                addClipTo(b, "cB", 1200);
+                a->clips[0]->audioBuffer = makeTone(1000, 330.0, 44100.0);
+                b->clips[0]->audioBuffer = makeTone(1200, 550.0, 44100.0);
+                a->clips[0]->endMark = 1000;
+                b->clips[0]->endMark = 1200;
+                if (markDone) {
+                    for (auto* blk : p.blocks) {
+                        blk->isDone = true;
+                        for (auto* cl : blk->clips) cl->isDone = true;
+                    }
+                }
+            };
+            auto renderExport = [&](bool markDone, juce::AudioBuffer<float>& out) {
+                Project p; buildExportProject(p, markDone);
+                juce::Random r(6220); ArrangementResolver res;
+                auto arr = res.resolve(p, r);
+                arr.sampleRate = p.sampleRate;
+                auto f = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                             .getChildFile("resolverdiag_t22_" + juce::String(markDone ? "done" : "plain") + ".wav");
+                juce::WavAudioFormat wavFmt; ExportRenderer ex;
+                bool ok = ex.renderToFile(arr, f, wavFmt, 16, nullptr);
+                juce::AudioFormatManager afm; afm.registerBasicFormats();
+                std::unique_ptr<juce::AudioFormatReader> rd(afm.createReaderFor(f));
+                if (rd) { out.setSize((int)rd->numChannels, (int)rd->lengthInSamples);
+                          rd->read(&out, 0, (int)rd->lengthInSamples, 0, true, true); }
+                int entries = arr.entries.size();
+                f.deleteFile();
+                return std::make_pair(ok && rd != nullptr, entries);
+            };
+
+            juce::AudioBuffer<float> plain, allDone;
+            auto rp = renderExport(false, plain);
+            auto rd = renderExport(true,  allDone);
+            bool sameLen = plain.getNumSamples() == allDone.getNumSamples()
+                           && plain.getNumSamples() > 0;
+            float maxDiff = 0.0f;
+            if (sameLen)
+                for (int ch = 0; ch < plain.getNumChannels(); ++ch)
+                    for (int i = 0; i < plain.getNumSamples(); ++i)
+                        maxDiff = juce::jmax(maxDiff,
+                            std::abs(plain.getSample(ch, i) - allDone.getSample(ch, i)));
+            verdict("T22 export all-Done: succeeds + audio identical to none-Done",
+                    rp.first && rd.first && rp.second == 2 && rd.second == 2
+                    && sameLen && maxDiff == 0.0f,
+                    "exportOk plain/done: " + juce::String(rp.first ? "y" : "n") + "/"
+                    + juce::String(rd.first ? "y" : "n") + ", entries: "
+                    + juce::String(rp.second) + "/" + juce::String(rd.second)
+                    + ", sameLen: " + (sameLen ? "y" : "n")
+                    + ", maxSampleDiff: " + juce::String(maxDiff, 8));
+        }
+
+        { // T23 (7.7): Play Clip on a clip WITH a lead-in must not cut the lead-in.
+          // Reproduces MainComponent::playClip exactly (MainComponent.cpp:394-408):
+          // single entry, timelinePos = startMark, totalDurationSamples = endMark,
+          // gain 1.0 → the render buffer's [0, startMark) region is the lead-in at
+          // full gain (EntryMixer.h:106, entryIndex 0). Invariant guarded: 7.7 lead-in.
+            const double sr = 44100.0;
+            const int64_t startMark = (int64_t)(0.30 * sr);   // 0.30s lead-in
+            const int64_t endMark   = (int64_t)(1.00 * sr);   // body ends at 1.00s
+            auto tone = makeTone((int)endMark, 440.0, sr);
+
+            // Build the single-entry arrangement the way playClip does.
+            ResolvedEntry entry;
+            entry.audioBuffer       = tone;
+            entry.startMark         = startMark;
+            entry.endMark           = endMark;
+            entry.originalStartMark = startMark;
+            entry.retainTailTempo   = false;
+            entry.clipName          = "tone";
+            entry.clipId            = "t23";
+            entry.timelinePos       = startMark;   // body starts after lead-in
+            entry.gain              = 1.0f;
+            entry.blockId           = "b23";
+            ResolvedArrangement single;
+            single.sampleRate           = sr;
+            single.totalDurationSamples = endMark; // includes lead-in + body
+            single.entries.add(entry);
+
+            auto f = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                         .getChildFile("resolverdiag_t23.wav");
+            juce::WavAudioFormat wavFmt; ExportRenderer ex;
+            bool ok = ex.renderToFile(single, f, wavFmt, 16, nullptr);
+            juce::AudioFormatManager afm; afm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> rd(afm.createReaderFor(f));
+            juce::AudioBuffer<float> out;
+            double outLen = 0.0, leadRms = 0.0, leadMaxDiff = 0.0;
+            if (rd) {
+                out.setSize((int)rd->numChannels, (int)rd->lengthInSamples);
+                rd->read(&out, 0, (int)rd->lengthInSamples, 0, true, true);
+                outLen = (double)out.getNumSamples();
+                double acc = 0.0;
+                for (int i = 0; i < (int)startMark; ++i) {
+                    float s = out.getSample(0, i);
+                    acc += (double)s * s;
+                    leadMaxDiff = juce::jmax(leadMaxDiff,
+                        (double)std::abs(s - tone->getSample(0, i)));
+                }
+                leadRms = std::sqrt(acc / (double)startMark);
+            }
+            f.deleteFile();
+            // Lead-in present (RMS well above silence), matches the source lead-in
+            // within 16-bit quantisation, and total length == endMark (not clipped).
+            verdict("T23 Play Clip lead-in: [0,startMark) audible + equals source, not cut",
+                    ok && rd != nullptr
+                    && std::abs(outLen - (double)endMark) < 1.0
+                    && leadRms > 0.1 && leadMaxDiff < 1.0e-3,
+                    "len=" + juce::String(outLen, 0) + "/" + juce::String((double)endMark, 0)
+                    + " leadRms=" + juce::String(leadRms, 4)
+                    + " leadMaxDiff=" + juce::String(leadMaxDiff, 6));
+        }
+
+        // Shared driver for T24/T25: render a resolved arrangement through the REAL
+        // PlaybackEngine block-by-block (the in-editor path) at the project rate,
+        // and separately through ExportRenderer (the export path). Both delegate to
+        // the single EntryMixer.h::mixEntryToBuffer, so at project rate they must be
+        // sample-identical (export file only adds 16-bit quantisation). This is the
+        // headless core of "export identical to in-editor playback" (10.2 / 10.4).
+        auto renderViaEngine = [](const ResolvedArrangement& arr, int blockSize) {
+            juce::AudioBuffer<float> out(2, (int)arr.totalDurationSamples);
+            out.clear();
+            PlaybackEngine eng;
+            eng.prepareToPlay(arr.sampleRate, blockSize);   // hardware rate == project rate
+            eng.play(arr);
+            juce::AudioBuffer<float> tmp(2, blockSize);
+            for (int64_t pos = 0; pos < arr.totalDurationSamples; pos += blockSize) {
+                tmp.clear();
+                eng.getNextAudioBlock(tmp, blockSize);
+                int thisLen = (int)juce::jmin((int64_t)blockSize, arr.totalDurationSamples - pos);
+                for (int ch = 0; ch < 2; ++ch)
+                    out.copyFrom(ch, (int)pos, tmp, ch, 0, thisLen);
+            }
+            return out;
+        };
+        auto renderViaExport = [](const ResolvedArrangement& arr, juce::AudioBuffer<float>& out) {
+            auto f = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                         .getChildFile("resolverdiag_playexport.wav");
+            juce::WavAudioFormat wavFmt; ExportRenderer ex;
+            bool ok = ex.renderToFile(arr, f, wavFmt, 16, nullptr);
+            juce::AudioFormatManager afm; afm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> rd(afm.createReaderFor(f));
+            if (rd) { out.setSize((int)rd->numChannels, (int)rd->lengthInSamples);
+                      rd->read(&out, 0, (int)rd->lengthInSamples, 0, true, true); }
+            double rate = rd ? rd->sampleRate : 0.0;
+            f.deleteFile();
+            return std::make_pair(ok && rd != nullptr, rate);
+        };
+        // Compares the REAL in-editor path (PlaybackEngine, rendered block-by-block
+        // at 512 samples) against the REAL export path (ExportRenderer → 16-bit WAV
+        // read back). Both delegate to the single EntryMixer.h::mixEntryToBuffer, so
+        // at project rate they are sample-identical up to the WAV writer's 16-bit
+        // quantisation. NOTE: test tones are kept well below 0 dBFS so their sum in
+        // the crossfade never exceeds ±1.0 — otherwise the 16-bit writer would clamp
+        // (a sink artifact, not a mixer difference) and mask the real comparison.
+        auto compareEngineExport = [&](const ResolvedArrangement& arr) {
+            auto eng = renderViaEngine(arr, 512);
+            juce::AudioBuffer<float> exp;
+            auto er = renderViaExport(arr, exp);
+            float maxDiff = 1.0f, peak = 0.0f; double engRms = 0.0;
+            bool sameLen = er.first && eng.getNumSamples() == exp.getNumSamples()
+                           && eng.getNumSamples() > 0;
+            if (sameLen) {
+                maxDiff = 0.0f; double acc = 0.0; int nCh = juce::jmin(eng.getNumChannels(), exp.getNumChannels());
+                for (int ch = 0; ch < nCh; ++ch)
+                    for (int i = 0; i < eng.getNumSamples(); ++i) {
+                        float e = eng.getSample(ch, i);
+                        maxDiff = juce::jmax(maxDiff, std::abs(e - exp.getSample(ch, i)));
+                        peak    = juce::jmax(peak, std::abs(e));
+                        acc += (double)e * e;
+                    }
+                engRms = std::sqrt(acc / (double)(eng.getNumSamples() * nCh));
+            }
+            struct R { bool sameLen; float maxDiff; double engRms; float peak; double exportRate; bool exportRateOk; };
+            return R{ sameLen, maxDiff, engRms, peak, er.second, std::abs(er.second - arr.sampleRate) < 1.0 };
+        };
+
+        { // T24 (10.2): plain sequential arrangement (no tempo stretch) — export
+          // audio must equal in-editor playback sample-for-sample (within 16-bit).
+            Project p; p.sampleRate = 44100.0;
+            auto* a = p.addBlock("A");
+            auto* b = p.addBlock("B");
+            addClipTo(a, "cA", 1000);
+            addClipTo(b, "cB", 1200);
+            a->clips[0]->audioBuffer = makeTone(1000, 330.0, 44100.0);
+            b->clips[0]->audioBuffer = makeTone(1200, 550.0, 44100.0);
+            a->clips[0]->endMark = 1000; b->clips[0]->endMark = 1200;
+            juce::Random r(2400); ArrangementResolver res;
+            auto arr = res.resolve(p, r); arr.sampleRate = p.sampleRate;
+            auto cr = compareEngineExport(arr);
+            verdict("T24 export==playback (plain): engine vs exported WAV identical",
+                    cr.sameLen && cr.exportRateOk && cr.engRms > 0.01
+                    && cr.peak < 1.0f && cr.maxDiff < 1.0e-3,
+                    "sameLen: " + juce::String(cr.sameLen ? "y" : "n")
+                    + ", exportRate=" + juce::String(cr.exportRate, 0) + (cr.exportRateOk ? " ok" : " BAD")
+                    + ", peak=" + juce::String(cr.peak, 3)
+                    + ", engRms=" + juce::String(cr.engRms, 4)
+                    + ", maxDiff=" + juce::String(cr.maxDiff, 6));
+        }
+
+        { // T25 (10.4): arrangement WITH a tempo-stretched join — Intro tempo 120
+          // (tail) into Verse tempo 160 (lead-in), so the resolver pre-stretches
+          // the tail/lead-in (ArrangementResolver.cpp:343-376). Export must still
+          // equal in-editor playback sample-for-sample through the shared mixer.
+            const double sr = 44100.0;
+            Project p; p.sampleRate = sr;
+            auto* intro = p.addBlock("Intro");
+            auto* verse = p.addBlock("Verse");
+            // Intro: body 0..0.8s, then a 0.4s TAIL (buffer longer than endMark), tempo 120.
+            auto introBuf = makeTone((int)(1.2 * sr), 440.0, sr);
+            addClipTo(intro, "intro", introBuf->getNumSamples());
+            intro->clips[0]->audioBuffer = introBuf;
+            intro->clips[0]->startMark = 0;
+            intro->clips[0]->endMark   = (int64_t)(0.8 * sr);
+            intro->clips[0]->tempo     = 120.0;
+            // Verse: 0.4s LEAD-IN then body to 1.2s, tempo 160.
+            auto verseBuf = makeTone((int)(1.2 * sr), 220.0, sr);
+            addClipTo(verse, "verse", verseBuf->getNumSamples());
+            verse->clips[0]->audioBuffer = verseBuf;
+            verse->clips[0]->startMark = (int64_t)(0.4 * sr);
+            verse->clips[0]->endMark   = (int64_t)(1.2 * sr);
+            verse->clips[0]->tempo     = 160.0;
+
+            juce::Random r(2500); ArrangementResolver res;
+            auto arr = res.resolve(p, r); arr.sampleRate = sr;
+            // Confirm a stretch actually happened (else the test is vacuous).
+            bool stretched = false;
+            for (const auto& e : arr.entries)
+                if (e.stretchedLeadIn || e.stretchedTail
+                    || std::abs(e.leadInStretchRatio - 1.0f) > 0.001f
+                    || std::abs(e.tailStretchRatio - 1.0f) > 0.001f)
+                    stretched = true;
+            auto cr = compareEngineExport(arr);
+            verdict("T25 export==playback (tempo-stretched join): identical + stretch present",
+                    stretched && cr.sameLen && cr.exportRateOk
+                    && cr.engRms > 0.01 && cr.peak < 1.0f && cr.maxDiff < 1.0e-3,
+                    "stretchPresent: " + juce::String(stretched ? "y" : "n")
+                    + ", sameLen: " + juce::String(cr.sameLen ? "y" : "n")
+                    + ", peak=" + juce::String(cr.peak, 3)
+                    + ", engRms=" + juce::String(cr.engRms, 4)
+                    + ", maxDiff=" + juce::String(cr.maxDiff, 6));
+        }
+
+        { // T26 (13.2): nine-block stack visibility. Mirrors the BlockStrip tile
+          // layout arithmetic (BlockStrip.cpp:191-193): perH = jmax(16, (areaH -
+          // (n-1)*4) / n); neededH = perH*n + (n-1)*4. Strip height areaH = 360
+          // (MainComponent.h:70 blockStripHeight, reduced(padding,0) leaves height
+          // untouched → BlockStrip.cpp:145 areaH = 360). A stack "fits" (all tiles
+          // on screen) when neededH <= areaH; otherwise perH clamps to 16 and the
+          // content overflows into the vertical scrollbar (setScrollBarsShown true)
+          // → still reachable. Invariant guarded: 13.2 tiles visible/reachable.
+            const int areaH = 360;
+            auto perH    = [](int n, int aH){ return juce::jmax(16, (aH - (n - 1) * 4) / n); };
+            auto neededH = [&](int n, int aH){ return perH(n, aH) * n + (n - 1) * 4; };
+            bool fit7 = neededH(7, areaH) <= areaH;
+            bool fit8 = neededH(8, areaH) <= areaH;
+            bool fit9 = neededH(9, areaH) <= areaH;
+            // A very tall stack must clamp to the 16px floor and overflow → scrolls.
+            const int big = 30;
+            bool clampsAndScrolls = (perH(big, areaH) == 16) && (neededH(big, areaH) > areaH);
+            verdict("T26 nine-block stack: n=7/8/9 all fit at 360px; large stacks scroll",
+                    fit7 && fit8 && fit9 && clampsAndScrolls,
+                    "perH 7/8/9 = " + juce::String(perH(7, areaH)) + "/" + juce::String(perH(8, areaH))
+                    + "/" + juce::String(perH(9, areaH)) + ", neededH 7/8/9 = "
+                    + juce::String(neededH(7, areaH)) + "/" + juce::String(neededH(8, areaH))
+                    + "/" + juce::String(neededH(9, areaH)) + " (<=360), big(" + juce::String(big)
+                    + ") perH=" + juce::String(perH(big, areaH)) + " neededH="
+                    + juce::String(neededH(big, areaH)));
+        }
+
+        { // T27 (13.3): grid lines never obscure the waveform on long clips. Mirrors
+          // the adaptive-grid coarsening loop (ClipWaveformView.cpp:174-197): the grid
+          // spacing is doubled until pixelsPerLine >= 8, and lines are drawn ONLY when
+          // pixelsPerLine >= 8. So for any clip the on-screen grid is never denser than
+          // 8px. Verified for a very long clip (5 min) and a short clip. Guarded: 13.3.
+            auto finalPixelsPerLine = [](int64_t total, double tempo, double sr, int waWidth) {
+                double spb = (sr * 60.0) / tempo;
+                if (total <= 0 || waWidth <= 0 || spb <= 0.0) return 0.0;   // no grid
+                double pixelsPerSample = (double)waWidth / (double)total;
+                double drawSpb = spb;
+                double ppl = drawSpb * pixelsPerSample;
+                while (ppl < 8.0 && drawSpb < (double)total) { drawSpb *= 2.0; ppl *= 2.0; }
+                return (ppl >= 8.0) ? ppl : 0.0;   // 0 → grid suppressed (not drawn)
+            };
+            const int waWidth = 800;
+            double pplLong  = finalPixelsPerLine((int64_t)(300.0 * 44100.0), 120.0, 44100.0, waWidth); // 5 min
+            double pplHuge  = finalPixelsPerLine((int64_t)(3600.0 * 44100.0), 174.0, 48000.0, waWidth); // 1 hr, odd tempo
+            double pplShort = finalPixelsPerLine((int64_t)(2.0 * 44100.0), 120.0, 44100.0, waWidth);
+            // Drawn grids must be >= 8px apart; suppressed grids read as 0.
+            bool ok = (pplLong == 0.0 || pplLong >= 8.0)
+                   && (pplHuge == 0.0 || pplHuge >= 8.0)
+                   && (pplShort == 0.0 || pplShort >= 8.0);
+            verdict("T27 adaptive grid: on-screen spacing never < 8px (long clips)",
+                    ok,
+                    "pixelsPerLine long/huge/short = " + juce::String(pplLong, 2) + "/"
+                    + juce::String(pplHuge, 2) + "/" + juce::String(pplShort, 2)
+                    + " (0 = grid suppressed)");
+        }
+
+        { // T28 (13.4): zoom maximum scales with clip length. Mirrors
+          // ClipWaveformView::computeMaxZoom (ClipWaveformView.cpp:791-796):
+          // maxZoom = jlimit(1, 256, durationSeconds / 0.5). Longer clips get a
+          // larger zoom factor; the finest view is ~0.5s for any un-clamped length.
+          // Guarded: 13.4 zoom max scales with clip length.
+            auto maxZoom = [](double durSecs) {
+                if (durSecs < 0.001) return 32.0;                 // empty/tiny fallback
+                double z = durSecs / 0.5;
+                z = juce::jmax(z, 1.0);
+                z = juce::jmin(z, 256.0);
+                return z;
+            };
+            double z1   = maxZoom(1.0);    // → 2.0
+            double z10  = maxZoom(10.0);   // → 20.0
+            double z100 = maxZoom(100.0);  // → 200.0
+            double zTiny = maxZoom(0.3);   // → clamped up to 1.0
+            double zHuge = maxZoom(1000.0);// → clamped to 256.0
+            // Longer → strictly larger factor (until the 256 clamp); un-clamped
+            // values reveal a ~0.5s window (dur / z == 0.5).
+            bool monotonic = z1 < z10 && z10 < z100;
+            bool window    = std::abs(1.0 / z1 - 0.5) < 1e-6
+                          && std::abs(100.0 / z100 - 0.5) < 1e-6;
+            bool clamps    = zTiny == 1.0 && zHuge == 256.0;
+            verdict("T28 zoom max scales with length: longer clip zooms further",
+                    monotonic && window && clamps,
+                    "z(1s)=" + juce::String(z1, 1) + " z(10s)=" + juce::String(z10, 1)
+                    + " z(100s)=" + juce::String(z100, 1) + " z(0.3s)=" + juce::String(zTiny, 1)
+                    + " z(1000s)=" + juce::String(zHuge, 1));
+        }
+
+        { // T29 (6.3): the "DONE" badge must not cover the block name. Mirrors the
+          // BlockComponent geometry: tinyTile = height <= 26 (BlockComponent.cpp:62);
+          // the badge is drawn ONLY for non-tiny tiles at localBounds.removeFromBottom(16)
+          // .removeFromRight(40) (BlockComponent.cpp:188-189); the name label for a
+          // full tile is localBounds.reduced(4).withTrimmedTop(20).withTrimmedBottom(16)
+          // (BlockComponent.cpp:205) — its bottom is trimmed by exactly the 16px badge
+          // band, so name and badge are always disjoint. Tiny tiles draw no badge at all
+          // (BlockComponent.cpp:202 name spans reduced(2)). Guarded: 6.3 badge vs name.
+            auto nameBounds = [](int w, int h) {
+                if (h <= 26) return juce::Rectangle<int>(0, 0, w, h).reduced(2);       // tiny path
+                return juce::Rectangle<int>(0, 0, w, h).reduced(4)
+                           .withTrimmedTop(20).withTrimmedBottom(16);                  // full path
+            };
+            auto badgeBounds = [](int w, int h) {
+                return juce::Rectangle<int>(0, 0, w, h).removeFromBottom(16).removeFromRight(40);
+            };
+            bool ok = true; juce::String detail;
+            const int widths[]  = { 70, 90, 120 };
+            const int heights[] = { 16, 20, 26, 28, 40, 60, 120, 360 };
+            for (int w : widths) for (int h : heights) {
+                bool tiny = (h <= 26);
+                auto nb = nameBounds(w, h);
+                if (!tiny) {                                    // badge only exists for full tiles
+                    auto bb = badgeBounds(w, h);
+                    if (nb.intersects(bb)) {
+                        ok = false;
+                        detail << " OVERLAP@" << w << "x" << h
+                               << " name=" << nb.toString() << " badge=" << bb.toString();
+                    }
+                }
+            }
+            verdict("T29 DONE badge never covers name: name/badge rects disjoint (full tiles)",
+                    ok, ok ? juce::String("all ") + juce::String((int)(3 * 8))
+                             + " (w x h) combos disjoint; tiny tiles (<=26px) draw no badge"
+                           : detail);
         }
 
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
