@@ -1629,6 +1629,63 @@ int main(int argc, char* argv[]) {
                            : detail);
         }
 
+        { // T30 (12.2): cross-platform audio paths. A .bsp must (a) store audio paths
+          // RELATIVE with forward slashes, and (b) load whether the stored path uses
+          // '/' (macOS/Linux/current) or '\' (a Windows-written .bsp). Save side:
+          // Serialization.cpp:53 getRelativePathFrom(...).replaceCharacter('\\','/');
+          // load side normalises '\'→'/' so getChildFile resolves on every platform.
+            auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                           .getChildFile("resolverdiag_t30");
+            tmp.deleteRecursively(); tmp.createDirectory();
+            auto media = tmp.getChildFile("media"); media.createDirectory();
+
+            Project p; p.sampleRate = 44100.0;
+            auto* blk = p.addBlock("A");
+            addClipWithFile(blk, "tone", 1000, media);   // writes media/tone.wav, sets audioFile
+            auto bsp = tmp.getChildFile("proj.bsp");
+            bool saved = p.saveToFile(bsp);
+
+            // (a) read back the serialized audioFile string
+            auto parsed = juce::JSON::parse(bsp.loadFileAsString());
+            juce::String storedPath;
+            if (auto* barr = parsed.getProperty("blocks", {}).getArray())
+                if (barr->size() > 0)
+                    if (auto* carr = (*barr)[0].getProperty("clips", {}).getArray())
+                        if (carr->size() > 0)
+                            storedPath = (*carr)[0].getProperty("audioFile", "").toString();
+            bool relOk = saved && storedPath.isNotEmpty()
+                         && !storedPath.startsWithChar('/')                       // not POSIX-absolute
+                         && !(storedPath.length() >= 2 && storedPath[1] == ':')   // not Windows-absolute
+                         && storedPath.contains("/")                              // has a forward slash
+                         && !storedPath.contains("\\");                           // and no backslash
+
+            // (b1) load the forward-slash .bsp → clip resolves
+            Project pf; bool lf = pf.loadFromFile(bsp);
+            bool fwdOk = lf && pf.missingFilesOnLoad.isEmpty()
+                         && pf.blocks.size() == 1 && pf.blocks[0]->clips.size() == 1
+                         && pf.blocks[0]->clips[0]->audioBuffer != nullptr;
+
+            // (b2) write a BACKSLASH variant of the same .bsp → must still resolve.
+            // A Windows-written .bsp stores the backslash JSON-escaped ("\\"), which
+            // juce::JSON::parse decodes to a single '\' in the path value — so we
+            // replace '/' with the two-char escape "\\" in the raw JSON text.
+            auto bspBk = tmp.getChildFile("proj_backslash.bsp");
+            bspBk.replaceWithText(bsp.loadFileAsString()
+                                     .replace(storedPath, storedPath.replace("/", "\\\\")));
+            Project pb; bool lb = pb.loadFromFile(bspBk);
+            bool bkOk = lb && pb.missingFilesOnLoad.isEmpty()
+                        && pb.blocks.size() == 1 && pb.blocks[0]->clips.size() == 1
+                        && pb.blocks[0]->clips[0]->audioBuffer != nullptr;
+
+            verdict("T30 cross-platform paths: relative+forward-slash; loads '/' and '\\'",
+                    relOk && fwdOk && bkOk,
+                    "stored=\"" + storedPath + "\" relOk=" + (relOk ? "y" : "N")
+                    + " fwdLoad=" + (fwdOk ? "y" : "N") + " backslashLoad=" + (bkOk ? "y" : "N")
+                    + " (missing fwd/bk: " + juce::String(pf.missingFilesOnLoad.size())
+                    + "/" + juce::String(pb.missingFilesOnLoad.size()) + ")");
+            tmp.deleteRecursively();
+        }
+
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
                   << "\n";
     }

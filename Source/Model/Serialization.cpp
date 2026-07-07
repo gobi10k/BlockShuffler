@@ -141,7 +141,12 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
                     // Resolve audio path: relative paths are resolved against baseDir (project dir).
                     // Absolute paths (from undo/redo snapshots or old project files) are used as-is.
                     {
-                        const juce::String pathStr = cVar.getProperty("audioFile", "").toString();
+                        // Normalise separators to '/' so a .bsp written on Windows
+                        // (backslash paths) resolves on macOS/Linux and vice-versa.
+                        // Symmetric with the save side, which stores forward slashes.
+                        // JUCE's File/getChildFile accept '/' on every platform.
+                        const juce::String pathStr =
+                            cVar.getProperty("audioFile", "").toString().replaceCharacter('\\', '/');
                         if (pathStr.isEmpty()) {
                             clip->audioFile = juce::File{};
                         } else if (pathStr.startsWithChar('/') ||

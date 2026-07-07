@@ -32,8 +32,11 @@ juce_add_plugin(BlockShuffler
     FORMATS Standalone VST3
     PRODUCT_NAME "BlockShuffler"
     DOCUMENT_EXTENSIONS bsp
-    ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon_512.png"
-    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
+    # Square RiverMix app icon (matches Resources/app.icns / the in-app wordmark).
+    # JUCE rasterises this PNG into the macOS .icns and the Windows .ico for us, so
+    # a single square source drives the icon on BOTH platforms.
+    ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/appicon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/appicon.png"
 )
 
 target_sources(BlockShuffler PRIVATE
@@ -93,9 +96,9 @@ target_sources(BlockShuffler PRIVATE
     Source/Utils/UuidGenerator.h
 )
 
-if(WIN32)
-    target_sources(BlockShuffler PRIVATE Resources/BlockShuffler.rc)
-endif()
+# Windows .exe icon: JUCE auto-generates an icon resource from ICON_BIG/ICON_SMALL
+# above (Resources/appicon.png) and embeds it, so no hand-written .rc is needed.
+# (Resources/BlockShuffler.rc + app.ico are retained in-repo only for reference.)
 
 target_compile_definitions(BlockShuffler PUBLIC
     JUCE_WEB_BROWSER=0
@@ -105,17 +108,9 @@ target_compile_definitions(BlockShuffler PUBLIC
     JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
 )
 
-# Copy app.icns into the bundle and set CFBundleIconFile (macOS only)
-if(APPLE)
-    add_custom_command(TARGET BlockShuffler_Standalone POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/Resources/app.icns"
-                "$<TARGET_BUNDLE_DIR:BlockShuffler_Standalone>/Contents/Resources/app.icns"
-        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_icon.sh"
-                "$<TARGET_BUNDLE_DIR:BlockShuffler_Standalone>/Contents/Info.plist"
-        COMMENT "Installing app.icns into bundle"
-    )
-endif()
+# macOS .app icon: JUCE generates Icon.icns from ICON_BIG/ICON_SMALL (appicon.png)
+# and sets CFBundleIconFile in the bundle's Info.plist automatically — the previous
+# hand-rolled app.icns copy + patch_icon.sh are no longer needed.
 
 # Re-sign the Standalone app with ad-hoc signature after build (macOS only)
 if(APPLE)

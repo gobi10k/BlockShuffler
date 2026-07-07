@@ -161,6 +161,48 @@ harness; record only if something contradicts the test.
 
 ---
 
+## GROUP C — Windows-only follow-ups (12.2 / 12.3, require a Windows machine)
+The macOS/Linux side is verified in-session (paths T30, open-on-launch handler, icon build).
+These remaining checks need an actual **Windows** build + Explorer and cannot be run on macOS.
+The MSVC build itself is validated by GitHub Actions (`.github/workflows/build-windows.yml`,
+now triggered on `UI_firstdraft`) — check that run is green first.
+
+### Step 5 — 12.3 app icon on Windows
+1. Build/download the Windows `BlockShuffler.exe` (CI artifact "BlockShuffler-Standalone-Windows").
+2. In Explorer, view the `.exe` at large-icon size.
+**Expected:** the RiverMix owl icon (blue/cyan on black) shows on the `.exe` — JUCE embeds it
+from `Resources/appicon.png` via `ICON_BIG`/`ICON_SMALL`; no distortion.
+**PASS / FAIL:** ______
+
+### Step 6 — 12.2 cross-platform .bsp round-trip
+1. Copy a `.bsp` **saved on macOS** (e.g. `TestProject.bsp` + its `media/` folder) to Windows.
+2. Open it in the Windows build via the in-app **Open** button.
+**Expected:** all clips load (no "Missing Audio Files" warning) — forward-slash relative paths
+resolve on Windows. Also save a project on Windows, copy back to macOS, open → clips resolve
+(backslash paths normalise; proven headless by **T30**).
+**PASS / FAIL:** ______
+
+### Step 7 — 12.2 open-on-launch + double-click association (Windows)
+1. From a terminal: `BlockShuffler.exe "C:\path\to\TestProject.bsp"` → the project opens on launch
+   (argv path → canonical `loadProject`).
+2. Register the `.bsp` association (installer, or the `.reg` in `docs/WINDOWS_PACKAGING.md`), then
+   double-click a `.bsp` in Explorer.
+**Expected:** double-click opens the project in BlockShuffler (a fresh instance loads it).
+**Note:** no installer is built yet — until one runs the registry writes in
+`docs/WINDOWS_PACKAGING.md`, only the command-line/argv path (step 7.1) works.
+**PASS / FAIL:** ______
+
+### Step 8 — 12.3 in-app logo sizing (macOS or Windows, cosmetic)
+ACCEPTANCE 12.3 asks the transport-bar logo be "~2/3 bar height, just left of Save As". The
+asset (RiverMix wordmark, `BinaryData::icon_png`) and position are correct; confirm the **size**
+reads right (currently fills the transport content-area height). Flag if it looks too tall/short.
+**PASS / FLAG:** ______
+
+---
+
 ## Report back
 Fill each **PASS / FAIL** above. Any FAIL → note the item, what you saw, and (if Debug) the
-Terminal line. GUI-only items requiring your run before delivery: **2.9, 7.6, 12.1, 13.1.**
+Terminal line.
+- **macOS/Linux GUI-only (run locally):** 2.9, 7.6, 12.1, 13.1, + 12.3 logo-size eyeball (Step 8).
+- **Windows-only (need a Windows box):** 12.3 exe icon (Step 5), 12.2 .bsp round-trip (Step 6),
+  12.2 open-on-launch + double-click assoc (Step 7).
