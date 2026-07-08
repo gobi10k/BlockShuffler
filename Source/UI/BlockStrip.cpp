@@ -4,6 +4,7 @@
 namespace BlockShuffler {
 
 BlockStrip::~BlockStrip() {
+    cancelPendingUpdate();  // drop any queued deferred rebuild before teardown
     if (project) project->removeChangeListener(this);
 }
 
@@ -235,10 +236,38 @@ void BlockStrip::changeListenerCallback(juce::ChangeBroadcaster*) {
     });
 }
 
+void BlockStrip::handleAsyncUpdate() {
+    // DROP-PATH-ONLY deferred rebuild: triggered exclusively by blockDropped(),
+    // where the rebuild must not run while the dragged component's mouseUp is on
+    // the call stack (the 12.1 use-after-free). Undo/redo and all other model
+    // changes refresh via changeListenerCallback above — per change, uncoalesced,
+    // byte-identical to the pre-UAF-fix wiring (coalescing them through this
+    // AsyncUpdater regressed rapid undo: triggerAsyncUpdate() is a no-op while an
+    // update is pending, so N rapid undos collapsed into one rebuild, leaving
+    // blockComponents dangling on Blocks freed by each undo's resetAndLoad).
+    if (!project) return;
+    if (activeDragComp != nullptr) {      // safety: never rebuild mid-drag
+        needsRebuildAfterDrag = true;
+        return;
+    }
+    // Same scroll preservation as the per-change path (2.9).
+    int savedScrollX = viewport.getViewPositionX();
+    needsRebuildAfterDrag = false;
+    rebuildBlocks();
+    resized();
+    repaint();
+    if (savedScrollX > 0)
+        viewport.setViewPosition(savedScrollX, 0);
+}
+
 // ── Block component management ────────────────────────────────────────────────
 
 void BlockStrip::rebuildBlocks() {
     if (!project) return;
+    // Re-entrancy guard: rebuildBlocks() frees every BlockComponent. It must NEVER
+    // run while a drop handler is on the stack (that freed the dragged component
+    // mid-mouseUp — the 12.1 UAF). Rebuilds from a drop go through the AsyncUpdater.
+    jassert(!isInDropHandler);
     // Reset drag state — any component pointers are about to be freed.
     activeDragComp  = nullptr;
     dropTargetComp  = nullptr;
@@ -516,6 +545,15 @@ void BlockStrip::updateDragFeedback(BlockComponent* draggedComp, juce::Point<int
 }
 
 void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> centre, bool shiftDrag) {
+    // Re-entrancy guard (see rebuildBlocks()): flags that a drop handler is on the
+    // stack for the whole body, including early returns. rebuildBlocks() must not
+    // run synchronously while this is set — the rebuild is deferred via AsyncUpdater.
+    struct DropGuard {
+        bool& f;
+        DropGuard(bool& flag) : f(flag) { f = true; }
+        ~DropGuard() { f = false; }
+    } dropGuard(isInDropHandler);
+
     if (!project) { clearDragFeedback(); return; }
 
     // Recalculate at the exact release position (mouseDrag isn't called for the final pixel).
@@ -647,7 +685,12 @@ void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> cent
     }
     stackDragStartPositions.clear();
 
-    // activeDragComp must be cleared BEFORE rebuildBlocks() frees the array.
+    // Clear drag state, then request a DEFERRED rebuild. The rebuild must NOT run
+    // synchronously here: it frees the dragged BlockComponent, whose mouseUp() is
+    // still on the call stack (12.1 use-after-free). triggerAsyncUpdate() coalesces
+    // and runs rebuildBlocks()+resized()+repaint() on the message loop, after this
+    // mouse event has fully unwound. activeDragComp is cleared first so
+    // handleAsyncUpdate() (which also honours needsRebuildAfterDrag) will proceed.
     activeDragComp        = nullptr;
     needsRebuildAfterDrag = false;
     currentDropAction     = DropAction::None;
@@ -655,9 +698,7 @@ void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> cent
     dropTargetComp        = nullptr;
     isStackMove           = false;
 
-    rebuildBlocks();
-    resized();
-    repaint();
+    triggerAsyncUpdate();
 }
 
 void BlockStrip::clearDragFeedback() {

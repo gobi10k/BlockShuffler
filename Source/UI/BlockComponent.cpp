@@ -281,18 +281,24 @@ void BlockComponent::mouseUp(const juce::MouseEvent& e) {
         return;
     }
 
-    isDragging = false;
-
+    // Capture everything the drop handler needs into locals, and reset ALL member
+    // state, BEFORE calling onDragEnded(). The strip's rebuild is deferred so this
+    // component is no longer freed during onDragEnded — but as defence in depth we
+    // touch NO member (and read nothing from `this`) after the call, so a future
+    // change can never reintroduce the 12.1 use-after-free here.
+    const bool shiftDrag  = isShiftDrag;
     // Capture the drop centre BEFORE snapping back; getBounds() changes on snap.
-    auto dropCentre = getBounds().getCentre();
+    const auto dropCentre = getBounds().getCentre();
+
+    isDragging  = false;
+    isShiftDrag = false;
 
     // Snap the tile back to where it started; BlockStrip's rebuild will re-layout.
     setTopLeftPosition(dragStartPos);
 
     if (onDragEnded)
-        onDragEnded(this, dropCentre, isShiftDrag);
-
-    isShiftDrag = false;
+        onDragEnded(this, dropCentre, shiftDrag);
+    // NOTE: do not access any member of this component below this line.
 }
 
 void BlockComponent::mouseDoubleClick(const juce::MouseEvent&) {

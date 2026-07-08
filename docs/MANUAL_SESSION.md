@@ -47,10 +47,10 @@ Launch the **Debug** app from Terminal, then Open `~/Desktop/BlockShuffler_Manua
 ### Step 1 — 12.1 stress: 50 blocks, 15 rapid undos, drag-heavy, no crash
 **Precondition:** StressProject.bsp just opened.
 **Steps:**
-1. On load, confirm **all 50 blocks are visible/reachable** in the strip (scroll right to the end; the 5 stacked pairs render stacked).
-2. Make **15 quick edits** (weight-slider drags, a rename or two, a couple of reorders), then press **Cmd+Z ×15** rapidly.
-3. Do ~1 minute of **drag chaos**: reorder blocks, drag blocks into/out of the 5 stacks, **Shift+drag** a whole stack.
-4. **Play ~30s**, then **rapid Play/Stop ×5**.
+1. On load, confirm **all 50 blocks are visible/reachable** in the strip (scroll right to the end; the 5 stacked pairs render stacked). - yes
+2. Make **15 quick edits** (weight-slider drags, a rename or two, a couple of reorders), then press **Cmd+Z ×15** rapidly. - yes 
+3. Do ~1 minute of **drag chaos**: reorder blocks, drag blocks into/out of the 5 stacks, **Shift+drag** a whole stack. - crash
+4. **Play ~30s**, then **rapid Play/Stop ×5**. - pass
 
 **Expected observable:** every undo reverts one step (no blank waveform/strip); no crash,
 no non-`Colour` assertion in the Terminal, no block vanishing, no strip corruption, no stuck audio.
@@ -62,6 +62,58 @@ diag/ResolverDiag.cpp:185       auto* b = p.addBlock("Block " + juce::String(i))
 diag/ResolverDiag.cpp:191   for (int i = 10; i <= 50; i += 10)
 diag/ResolverDiag.cpp:193       p.stackBlocks(...)  // → StressProject.bsp
 ```
+**PASS / FAIL:** ______
+
+### Step 1b — 12.1 UAF re-gate under AddressSanitizer (the real acceptance test)
+The stack-drag crash was a use-after-free the headless suite structurally cannot catch
+(T31 passes while the app crashed). Validate the fix on an **ASan Standalone**.
+
+**Build (already built at `build-asan/…`; rebuild if needed):**
+```bash
+cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+  -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+cmake --build build-asan --target BlockShuffler_Standalone
+```
+**Run (inner binary, from Terminal, so ASan prints to stderr):**
+```bash
+ASAN_OPTIONS=abort_on_error=1:detect_leaks=0 \
+  "build-asan/BlockShuffler_artefacts/Debug/Standalone/BlockShuffler.app/Contents/MacOS/BlockShuffler"
+```
+**Steps:** Open `~/Desktop/BlockShuffler_ManualRound/StressProject.bsp`, then for ~1 min:
+drag blocks **OUT of** the 5 stacks, **Shift+drag** whole stacks, and do rapid **reorders**.
+**Expected (PASS):** no `AddressSanitizer` report, no `malloc: pointer being freed…` abort,
+and **no burst/flood of `juce_Colour.cpp:340`** tied to the drags. Dropped blocks/stacks land
+in the correct final position (deferred rebuild).
+**KNOWN separate noise:** a *sporadic* `juce_Colour.cpp:340` still comes from the waveform grid
+alpha (`ClipWaveformView.cpp:187`, `jmap` unclamped — TODO-7), independent of the drag. That is
+NOT the UAF and NOT a flood; ignore isolated `:340` lines from waveform painting.
+**PASS / FAIL:** ______
+
+### Step 1c — stack drop-out-onto-block BEHAVIOUR (headless-green T32–T34; confirm by eye)
+On the SAME ASan run, verify the stack-classification fix (a block dragged out of a stack and
+dropped onto a different block must NOT pull a third block in):
+1. In a stack of 2 (e.g. one of StressProject's pairs, or build S={A,B}), drag **A** out and drop
+   it **onto a standalone block C**. EXPECT: a fresh 2-block stack **{A,C}**; **B becomes standalone**
+   (last-remaining auto-unstacks); C is **not** swallowed into the old stack; no third tile appears.
+2. With two stacks S={A,B} and S2={C,D}, drag **A** onto **C**. EXPECT: **A joins S2** (so S2={A,C,D});
+   **B standalone**; **D stays** in S2; no block lost.
+3. Drag a **non-stacked** block onto a **stacked** one. EXPECT: it **joins** that stack (unchanged).
+4. `Cmd+Z` after each: **one** undo restores the exact prior stack membership.
+**Expected (PASS):** every case matches; no block absorbed/dropped; single-step undo.
+**PASS / FAIL:** ______
+
+### Step 1d — rapid undo ×15 re-check (regression found + narrowed 2026-07-08)
+Routing ALL strip rebuilds through the coalescing AsyncUpdater collapsed per-step undo
+refresh (stale strip across a multi-undo window). Fixed by narrowing: undo/model changes
+refresh per change via `changeListenerCallback` (`MessageManager::callAsync`, the original
+wiring); the AsyncUpdater now serves ONLY the drop path (headless guard: **T35**, per-step
+model exactness ×15 + redo ×15).
+1. On the SAME ASan run, make **15 quick edits** (weight drags, renames, reorders, a stack
+   drag or two), then press **Cmd+Z ×15 rapidly**.
+**Expected (PASS):** each undo visibly reverts one step as it happens (strip/waveform track
+per press, no frozen or blank strip until the end); final state = original; no ASan report.
 **PASS / FAIL:** ______
 
 ### Step 2 — 2.9 clip drag between blocks does NOT scroll the strip back to start

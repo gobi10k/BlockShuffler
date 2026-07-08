@@ -18,7 +18,8 @@ namespace BlockShuffler {
  * Clip dragging still uses DragAndDropContainer; BlockComponent handles those drops.
  */
 class BlockStrip : public juce::Component,
-                   public juce::ChangeListener {
+                   public juce::ChangeListener,
+                   public juce::AsyncUpdater {
 public:
     BlockStrip() = default;
     ~BlockStrip() override;
@@ -134,9 +135,23 @@ private:
     /// component array while the drag event handler is still on the call stack.
     BlockComponent* activeDragComp = nullptr;
 
-    /// Set by changeListenerCallback if a rebuild is requested during an active drag.
-    /// Applied after the drag completes in blockDropped().
+    /// Set by handleAsyncUpdate() if a rebuild fires during an active drag.
+    /// The drop's deferred rebuild request re-runs handleAsyncUpdate() once the
+    /// drag has cleared activeDragComp.
     bool needsRebuildAfterDrag = false;
+
+    /// True only while blockDropped()'s body runs. rebuildBlocks() asserts this is
+    /// false so a synchronous rebuild can never again be invoked from inside a drop
+    /// handler (that was the 12.1 use-after-free: freeing the dragged component
+    /// while its mouseUp was still on the call stack).
+    bool isInDropHandler = false;
+
+    /// AsyncUpdater: DROP-PATH-ONLY deferred strip rebuild, triggered exclusively
+    /// by blockDropped() so the dragged BlockComponent outlives the mouse event
+    /// that dropped it (12.1 UAF). Model-change refreshes (undo/redo, inspector,
+    /// load) do NOT route through this — changeListenerCallback queues a rebuild
+    /// PER change (coalescing them regressed rapid undo, see .cpp comment).
+    void handleAsyncUpdate() override;
 
     void rebuildBlocks();
     void deleteBlock(const juce::String& blockId);

@@ -1686,6 +1686,180 @@ int main(int argc, char* argv[]) {
             tmp.deleteRecursively();
         }
 
+        { // T31 (12.1 crash DIAGNOSIS): replay the MODEL-level mutations of the four
+          // drag ops (reorder / stack-in / unstack / shift-drag-whole-stack) in a
+          // randomized loop on a 50-block, 5-stacked-pair project (== StressProject),
+          // interleaved with undo/redo (resetAndLoad). Purpose: prove whether the
+          // OwnedArray<Block> ownership is double-freed at the MODEL layer. Runs under
+          // ASan when built with -fsanitize=address. Each op re-fetches Block* by id
+          // (undo's resetAndLoad invalidates raw pointers) and calls toJSON() after,
+          // mimicking a repaint reading the model.
+            Project p; p.sampleRate = 44100.0;
+            std::vector<juce::String> ids;
+            for (int i = 1; i <= 50; ++i) {
+                auto* b = p.addBlock("Block " + juce::String(i));
+                addClipTo(b, "c" + juce::String(i), 1000);
+                ids.push_back(b->id);
+            }
+            for (int i = 10; i <= 50; i += 10)     // 5 stacked pairs: (10,9)(20,19)...
+                p.stackBlocks(ids[(size_t)(i - 1)], ids[(size_t)(i - 2)]);
+
+            juce::Random r(31031);
+            int ops = 0;
+            for (int iter = 0; iter < 3000; ++iter) {
+                int op = r.nextInt(6);
+                if (op == 0 && p.blocks.size() >= 2) {          // (a) reorder
+                    p.moveBlock(r.nextInt(p.blocks.size()), r.nextInt(p.blocks.size()));
+                } else if (op == 1 && p.blocks.size() >= 2) {   // (b) stack-in
+                    int i = r.nextInt(p.blocks.size()), j = r.nextInt(p.blocks.size());
+                    if (i != j) p.stackBlocks(p.blocks[i]->id, p.blocks[j]->id);
+                } else if (op == 2) {                            // (c) unstack + dissolve-solo
+                    Block* dragged = nullptr;
+                    for (auto* b : p.blocks) if (b->stackGroup >= 0) { dragged = b; break; }
+                    if (dragged) {
+                        auto pre = p.toJSON();
+                        int oldGroup = dragged->stackGroup;
+                        dragged->stackGroup = -1;
+                        int remaining = 0; Block* last = nullptr;
+                        for (auto* b : p.blocks) if (b->stackGroup == oldGroup) { ++remaining; last = b; }
+                        if (remaining == 1 && last) last->stackGroup = -1;
+                        else if (remaining > 1) p.propagateStackSettings(oldGroup);
+                        int from = p.blocks.indexOf(dragged);
+                        int dest = juce::jlimit(0, p.blocks.size() - 1, r.nextInt(p.blocks.size()));
+                        if (from >= 0 && from != dest) p.blocks.move(from, dest);
+                        for (int k = 0; k < p.blocks.size(); ++k) p.blocks[k]->position = k;
+                        p.applyExternalMutation(pre);
+                    }
+                } else if (op == 3) {                            // (d) shift-drag whole stack
+                    int sg = -1;
+                    for (auto* b : p.blocks) if (b->stackGroup >= 0) { sg = b->stackGroup; break; }
+                    if (sg >= 0) {
+                        auto pre = p.toJSON();
+                        juce::Array<int> stackIndices;
+                        for (int k = 0; k < p.blocks.size(); ++k)
+                            if (p.blocks[k]->stackGroup == sg) stackIndices.add(k);
+                        juce::OwnedArray<Block> extracted;           // <-- transient co-owner
+                        for (int k = stackIndices.size() - 1; k >= 0; --k)
+                            extracted.insert(0, p.blocks.removeAndReturn(stackIndices[k]));
+                        int insertPos = juce::jlimit(0, p.blocks.size(), r.nextInt(p.blocks.size() + 1));
+                        int count = extracted.size();
+                        for (int k = 0; k < count; ++k)
+                            p.blocks.insert(insertPos + k, extracted.removeAndReturn(0));
+                        for (int k = 0; k < p.blocks.size(); ++k) p.blocks[k]->position = k;
+                        p.applyExternalMutation(pre);
+                    }
+                } else if (op == 4) {                            // undo (resetAndLoad(before))
+                    if (p.undoManager.canUndo()) p.undoManager.undo();
+                } else {                                          // redo (resetAndLoad(after))
+                    if (p.undoManager.canRedo()) p.undoManager.redo();
+                }
+                auto snap = p.toJSON();  // simulate a repaint reading the model
+                if (juce::JSON::toString(snap).length() < 0) std::cout << "x";  // force use
+                ++ops;
+            }
+            verdict("T31 drag-op MODEL replay (50 blocks/5 stacks, 3000 ops, ASan-ready)",
+                    p.blocks.size() > 0,
+                    juce::String(ops) + " ops applied, final blocks=" + juce::String(p.blocks.size())
+                    + " (no model-level double-free if this line prints)");
+        }
+
+        { // T35 (rapid-undo regression guard): 15 varied mutations (the manual run's
+          // edit kinds: weight drags, renames, reorders, stack/unstack,
+          // play-count and mode changes), then 15 undos — after EACH undo the model
+          // JSON must equal the snapshot taken before the corresponding mutation
+          // (per-step exactness, not just the final state), then 15 redos must land
+          // back on the final state. File-backed clips as in T11/T12: undo's
+          // resetAndLoad reloads audio and clamps marks (FIX M7), so the files must
+          // exist on disk — the app's real condition.
+            auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("resolverdiag_t35");
+            tmpDir.createDirectory();
+            Project p;
+            auto* A = p.addBlock("A");
+            auto* B = p.addBlock("B");
+            auto* C = p.addBlock("C");
+            auto* D = p.addBlock("D");
+            addClipWithFile(A, "t35A", 1000, tmpDir);
+            addClipWithFile(B, "t35B", 1200, tmpDir);
+            addClipWithFile(C, "t35C", 1500, tmpDir);
+            addClipWithFile(D, "t35D", 900,  tmpDir);
+            const juce::String aId = A->id, bId = B->id, cId = C->id, dId = D->id;
+            p.undoManager.clearUndoHistory();   // ledger starts AFTER setup
+
+            auto snap = [&] { return juce::JSON::toString(p.toJSON()); };
+            // Inspector-style undoable mutation: pre-snapshot → mutate → applyExternalMutation.
+            auto mutApply = [&](std::function<void()> m) {
+                auto pre = p.toJSON(); m(); p.applyExternalMutation(pre);
+            };
+            juce::StringArray before;   // before[i] = state before mutation i
+            auto step = [&](std::function<void()> op) { before.add(snap()); op(); };
+
+            step([&]{ mutApply([&]{ p.getBlockById(aId)->playChance = 0.3f; }); });        // 1 weight drag
+            step([&]{ mutApply([&]{ p.getBlockById(bId)->name = "Renamed B"; }); });       // 2 rename
+            step([&]{ p.moveBlock(0, 2); });                                               // 3 reorder
+            step([&]{ p.stackBlocks(bId, aId); });                                         // 4 stack {A,B}
+            step([&]{ mutApply([&]{ auto* a = p.getBlockById(aId);                          // 5 play count 2
+                                    a->stackPlayCount.values.set(0, 2);
+                                    p.propagateStackSettings(a->stackGroup, a); }); });
+            step([&]{ p.stackBlocks(aId, cId); });                                         // 6 stack C into A's group
+            step([&]{ mutApply([&]{ p.getBlockById(cId)->playChance = 0.7f; }); });        // 7 weight drag
+            step([&]{ p.moveBlock(3, 0); });                                               // 8 reorder
+            step([&]{ p.stackBlocks(dId, bId); });                                         // 9 stack D with B
+            step([&]{ auto pre = p.toJSON();                                                // 10 gap-drop unstack A
+                      // Inline replay of the UI gap-drop branch (unstack + dissolve solo).
+                      auto* a = p.getBlockById(aId);
+                      int oldGroup = a->stackGroup;
+                      a->stackGroup = -1;
+                      int remaining = 0; Block* last = nullptr;
+                      for (auto* b : p.blocks)
+                          if (b->stackGroup == oldGroup) { ++remaining; last = b; }
+                      if (remaining == 1 && last != nullptr) {
+                          last->stackGroup = -1;
+                          last->stackPlayCount.values.clearQuick();
+                          last->stackPlayCount.values.add(1);
+                          last->stackPlayCount.weights.clearQuick();
+                          last->stackPlayCount.weights.add(1.0f);
+                          last->stackPlayMode = StackPlayMode::Sequential;
+                      } else if (remaining > 1) {
+                          p.propagateStackSettings(oldGroup);
+                      }
+                      int from = p.blocks.indexOf(a);
+                      if (from >= 0 && from != 0) p.blocks.move(from, 0);
+                      for (int i = 0; i < p.blocks.size(); ++i) p.blocks[i]->position = i;
+                      p.applyExternalMutation(pre); });
+            step([&]{ mutApply([&]{ p.getBlockById(dId)->name = "Renamed D"; }); });       // 11 rename
+            step([&]{ p.stackBlocks(bId, aId); });                                         // 12 stack A back with B
+            step([&]{ mutApply([&]{ p.getBlockById(bId)->playChance = 0.05f; }); });       // 13 weight drag
+            step([&]{ p.moveBlock(1, 3); });                                               // 14 reorder
+            step([&]{ mutApply([&]{ auto* a = p.getBlockById(aId);                          // 15 mode toggle
+                                    a->stackPlayMode = StackPlayMode::Simultaneous;
+                                    p.propagateStackSettings(a->stackGroup, a); }); });
+
+            const juce::String finalState = snap();
+            const int n = before.size();   // 15
+
+            // 15 rapid undos: after undo k the state must equal before[n-k] exactly.
+            bool undoOk = true; int firstBadUndo = -1;
+            for (int i = n - 1; i >= 0; --i) {
+                bool did = p.undoManager.undo();
+                if (!did || snap() != before[i]) { undoOk = false; firstBadUndo = i; break; }
+            }
+            // 15 redos must return to the exact final state.
+            bool redoOk = true;
+            if (undoOk) {
+                for (int i = 0; i < n; ++i)
+                    if (!p.undoManager.redo()) { redoOk = false; break; }
+                redoOk = redoOk && (snap() == finalState);
+            }
+            verdict("T35 rapid undo x15: per-step model state exact + redo x15 restores",
+                    n == 15 && undoOk && redoOk,
+                    "steps=" + juce::String(n)
+                    + ", perStepUndo: " + (undoOk ? juce::String("15/15 exact")
+                                                  : "MISMATCH at step " + juce::String(firstBadUndo + 1))
+                    + ", redoToFinal: " + (redoOk ? "exact" : "BAD"));
+            tmpDir.deleteRecursively();
+        }
+
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
                   << "\n";
     }
