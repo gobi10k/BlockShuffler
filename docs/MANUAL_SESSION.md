@@ -97,10 +97,20 @@ dropped onto a different block must NOT pull a third block in):
 1. In a stack of 2 (e.g. one of StressProject's pairs, or build S={A,B}), drag **A** out and drop
    it **onto a standalone block C**. EXPECT: a fresh 2-block stack **{A,C}**; **B becomes standalone**
    (last-remaining auto-unstacks); C is **not** swallowed into the old stack; no third tile appears.
+   POSITION (user ruling 2026-07-10, headless: T36): the {A,C} stack sits at **C's slot** (the drop
+   location); B stays at the old stack's slot; nothing swaps back to A's old index.
 2. With two stacks S={A,B} and S2={C,D}, drag **A** onto **C**. EXPECT: **A joins S2** (so S2={A,C,D});
-   **B standalone**; **D stays** in S2; no block lost.
-3. Drag a **non-stacked** block onto a **stacked** one. EXPECT: it **joins** that stack (unchanged).
-4. `Cmd+Z` after each: **one** undo restores the exact prior stack membership.
+   **B standalone**; **D stays** in S2; no block lost. POSITION: S2 stays at its own slot.
+3. Drag a **non-stacked** block onto a **stacked** one. EXPECT: it **joins** that stack, and the
+   stack stays anchored at ITS slot (all drops now route through `restackBlockOnto`; the old
+   standalone→`stackBlocks` dispatch anchored the stack at the DRAGGED block's old slot whenever
+   the target was to the RIGHT — the 2026-07-13 in-app finding; headless: T36 case 3).
+4. DIRECTION CHECK (the bug T36 used to miss): with standalone blocks, drop **X onto a block to
+   its RIGHT**, then (fresh pair) **onto a block to its LEFT**. EXPECT both: the new stack sits at
+   the TARGET's slot; the target never appears to jump back to X's old slot ("swap" illusion).
+5. RIGHT-CLICK path: right-click X → **Stack with...** → click Y. EXPECT: same as dropping X onto
+   Y — merged stack anchored at **Y's slot** (same `restackBlockOnto` routing since 2026-07-13).
+6. `Cmd+Z` after each: **one** undo restores the exact prior stack membership.
 **Expected (PASS):** every case matches; no block absorbed/dropped; single-step undo.
 **PASS / FAIL:** ______
 

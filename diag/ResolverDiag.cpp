@@ -1763,6 +1763,100 @@ int main(int argc, char* argv[]) {
                     + " (no model-level double-free if this line prints)");
         }
 
+        { // T32 (1c.1): a STACKED block dropped onto a STANDALONE block forms a
+          // FRESH two-block stack {dragged, target}. The old mate auto-unstacks
+          // (last-remaining, settings reset), the target is NOT absorbed into the
+          // old stack, and no third block joins the new pair.
+            Project p;
+            auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+            auto* C = p.addBlock("C"); auto* D = p.addBlock("D");
+            addClipTo(A, "cA"); addClipTo(B, "cB"); addClipTo(C, "cC"); addClipTo(D, "cD");
+            const juce::String aId = A->id, bId = B->id, cId = C->id, dId = D->id;
+            p.stackBlocks(aId, bId);                       // S = {A,B}
+
+            p.restackBlockOnto(aId, cId);                  // drop A onto standalone C
+
+            auto* a = p.getBlockById(aId); auto* b = p.getBlockById(bId);
+            auto* c = p.getBlockById(cId); auto* d = p.getBlockById(dId);
+            // "Fresh pair, no absorption" = the new group's members are EXACTLY
+            // {A,C} by identity. (Group IDs are recycled — maxGroup+1 — so the
+            // dissolved S's id may be reused; identity, not id, is the invariant.)
+            int newGroup = a->stackGroup;
+            juce::StringArray memberNames;
+            for (auto* blk : p.blocks)
+                if (blk->stackGroup == newGroup) memberNames.add(blk->name);
+            bool pairOk   = newGroup >= 0 && c->stackGroup == newGroup
+                         && memberNames.size() == 2
+                         && memberNames.contains("A") && memberNames.contains("C");
+            bool mateSolo = b->stackGroup == -1
+                         && b->stackPlayCount.values.size() == 1
+                         && b->stackPlayCount.values[0] == 1
+                         && b->stackPlayMode == StackPlayMode::Sequential;
+            bool noThird  = d->stackGroup == -1 && p.blocks.size() == 4;
+            verdict("T32 stacked->standalone drop: fresh {A,C}, mate solo, no absorption",
+                    pairOk && mateSolo && noThird,
+                    "members={" + memberNames.joinIntoString(",") + "} (want {A,C})"
+                    + ", B.sg=" + juce::String(b->stackGroup)
+                    + ", D.sg=" + juce::String(d->stackGroup));
+        }
+
+        { // T33 (1c.2): a STACKED block dropped onto a block in ANOTHER stack JOINS
+          // that stack; its old stack keeps its remaining members; nothing is lost.
+            Project p;
+            auto* A = p.addBlock("A"); auto* B = p.addBlock("B"); auto* E = p.addBlock("E");
+            auto* C = p.addBlock("C"); auto* D = p.addBlock("D");
+            addClipTo(A, "cA"); addClipTo(B, "cB"); addClipTo(E, "cE");
+            addClipTo(C, "cC"); addClipTo(D, "cD");
+            const juce::String aId = A->id, bId = B->id, eId = E->id, cId = C->id, dId = D->id;
+            p.stackBlocks(aId, bId); p.stackBlocks(eId, aId);   // S  = {A,B,E}
+            p.stackBlocks(cId, dId);                            // S2 = {C,D}
+            const int sGroup  = p.getBlockById(aId)->stackGroup;
+            const int s2Group = p.getBlockById(cId)->stackGroup;
+
+            p.restackBlockOnto(aId, cId);                       // drop A onto C (in S2)
+
+            auto* a = p.getBlockById(aId); auto* b = p.getBlockById(bId);
+            auto* e = p.getBlockById(eId); auto* c = p.getBlockById(cId);
+            auto* d = p.getBlockById(dId);
+            int s2Members = 0;
+            for (auto* blk : p.blocks) if (blk->stackGroup == s2Group) ++s2Members;
+            bool joined  = a->stackGroup == s2Group && c->stackGroup == s2Group
+                        && d->stackGroup == s2Group && s2Members == 3;
+            bool oldKept = b->stackGroup == sGroup && e->stackGroup == sGroup
+                        && sGroup != s2Group;
+            bool nothingLost = p.blocks.size() == 5;
+            verdict("T33 stacked->other-stack drop: A joins S2={A,C,D}, S keeps {B,E}",
+                    joined && oldKept && nothingLost,
+                    "S2 members=" + juce::String(s2Members)
+                    + ", B.sg=" + juce::String(b->stackGroup)
+                    + ", E.sg=" + juce::String(e->stackGroup)
+                    + ", blocks=" + juce::String(p.blocks.size()));
+        }
+
+        { // T34 (1c.3): a NON-stacked block dropped onto a stacked one JOINS that
+          // stack. Since the 1c anchor fix ALL drops (standalone or stacked
+          // dragged) route through restackBlockOnto; membership/no-absorption is
+          // asserted here, slot anchoring in T36.
+            Project p;
+            auto* X = p.addBlock("X"); auto* C = p.addBlock("C"); auto* D = p.addBlock("D");
+            addClipTo(X, "cX"); addClipTo(C, "cC"); addClipTo(D, "cD");
+            const juce::String xId = X->id, cId = C->id, dId = D->id;
+            p.stackBlocks(cId, dId);                            // S2 = {C,D}
+            const int s2Group = p.getBlockById(cId)->stackGroup;
+
+            p.restackBlockOnto(xId, cId);                       // GUI drop dispatch
+
+            auto* x = p.getBlockById(xId); auto* c = p.getBlockById(cId);
+            auto* d = p.getBlockById(dId);
+            int members = 0;
+            for (auto* blk : p.blocks) if (blk->stackGroup == s2Group) ++members;
+            bool ok = x->stackGroup == s2Group && c->stackGroup == s2Group
+                   && d->stackGroup == s2Group && members == 3 && p.blocks.size() == 3;
+            verdict("T34 non-stacked->stack drop: X joins {C,D} via restackBlockOnto",
+                    ok, "members=" + juce::String(members)
+                    + ", X.sg=" + juce::String(x->stackGroup));
+        }
+
         { // T35 (rapid-undo regression guard): 15 varied mutations (the manual run's
           // edit kinds: weight drags, renames, reorders, stack/unstack,
           // play-count and mode changes), then 15 undos — after EACH undo the model
@@ -1857,6 +1951,172 @@ int main(int argc, char* argv[]) {
                     + ", perStepUndo: " + (undoOk ? juce::String("15/15 exact")
                                                   : "MISMATCH at step " + juce::String(firstBadUndo + 1))
                     + ", redoToFinal: " + (redoOk ? "exact" : "BAD"));
+            tmpDir.deleteRecursively();
+        }
+
+        { // T36 (1c position): the stack formed by a drop sits at the DROP TARGET's
+          // slot, not the dragged block's old slot. Slots computed exactly as
+          // BlockStrip::resized(): scan blocks[] in order; the first member of each
+          // stackGroup opens the slot.
+            auto slotOf = [](Project& p, const juce::String& blockId) -> int {
+                juce::Array<int> seenGroups, groupSlot;   // parallel arrays
+                int slot = -1;
+                for (auto* b : p.blocks) {
+                    int sg = b->stackGroup, mySlot;
+                    if (sg < 0) {
+                        mySlot = ++slot;                  // standalone opens its own slot
+                    } else {
+                        int gi = seenGroups.indexOf(sg);
+                        if (gi < 0) { mySlot = ++slot; seenGroups.add(sg); groupSlot.add(mySlot); }
+                        else        { mySlot = groupSlot[gi]; }   // later member: group's slot
+                    }
+                    if (b->id == blockId) return mySlot;
+                }
+                return -1;
+            };
+            auto arrayOrder = [](Project& p) {
+                juce::String s;
+                for (auto* b : p.blocks) s << b->name;
+                return s;
+            };
+
+            // GUI-DISPATCH MIRROR (test-gap fix): T36 originally hardcoded
+            // restackBlockOnto, but BlockStrip::blockDropped routed STANDALONE
+            // dragged blocks to stackBlocks (no re-anchor) — so the suite was green
+            // while the app anchored rightward drops at the dragged block's old
+            // slot. This lambda must stay byte-equivalent to the DropAction::Stack
+            // dispatch in BlockStrip::blockDropped (and completePendingMode's
+            // Stack branch): since the 1c anchor fix, BOTH dragged states route
+            // through restackBlockOnto unconditionally.
+            auto guiDrop = [](Project& p, const juce::String& draggedId, const juce::String& targetId) {
+                p.restackBlockOnto(draggedId, targetId);
+            };
+
+            // Case 1: X in stack S (slot 0) dropped onto STANDALONE D (slot 2).
+            Project p;
+            auto* A = p.addBlock("A"); auto* B = p.addBlock("B"); auto* C = p.addBlock("C");
+            auto* D = p.addBlock("D"); auto* E = p.addBlock("E");
+            addClipTo(A, "cA"); addClipTo(B, "cB"); addClipTo(C, "cC");
+            addClipTo(D, "cD"); addClipTo(E, "cE");
+            const juce::String aId = A->id, bId = B->id, dId = D->id;
+            p.stackBlocks(aId, bId);              // slots: {A,B}=0, C=1, D=2, E=3
+            const int dSlotBefore = slotOf(p, dId);            // 2 = drop location j
+
+            guiDrop(p, aId, dId);
+            bool posOk1 = slotOf(p, aId) == dSlotBefore        // {D,A} sits at j
+                       && slotOf(p, dId) == dSlotBefore
+                       && slotOf(p, bId) == 0                  // mate stays at old slot i
+                       && arrayOrder(p) == "BCDAE"             // A moved next to D, no swap to i
+                       && p.blocks[0]->position == 0 && p.blocks[4]->position == 4;
+
+            // Case 2: X in S dropped onto a block in ANOTHER stack S2 — S2 keeps its slot.
+            Project q;
+            auto* F = q.addBlock("F"); auto* G = q.addBlock("G"); auto* H = q.addBlock("H");
+            auto* I = q.addBlock("I"); auto* J = q.addBlock("J");
+            addClipTo(F, "cF"); addClipTo(G, "cG"); addClipTo(H, "cH");
+            addClipTo(I, "cI"); addClipTo(J, "cJ");
+            const juce::String fId = F->id, gId = G->id, iId = I->id;
+            q.stackBlocks(fId, gId);              // S  = {F,G} slot 0
+            q.stackBlocks(iId, J->id);            // S2 = {I,J} slot 2 (H standalone slot 1)
+            const int s2SlotBefore = slotOf(q, iId);           // 2
+
+            guiDrop(q, fId, iId);
+            bool posOk2 = slotOf(q, fId) == s2SlotBefore       // F joins S2 at S2's slot
+                       && slotOf(q, iId) == s2SlotBefore
+                       && slotOf(q, gId) == 0                  // old mate keeps slot 0
+                       && arrayOrder(q) == "GHIJF";
+
+            // Case 3 (the in-app repro T36 used to miss): STANDALONE dragged block,
+            // RIGHTWARD drop. A..E standalone; drop A(idx 0) onto D(idx 3). The
+            // stack must render at D's slot — after A's own slot compresses away,
+            // that is slot 2 (order BCDAE). The pre-fix dispatch (stackBlocks, no
+            // re-anchor) leaves order ABCDE and anchors {A,D} at A's old slot 0.
+            Project r3;
+            auto* A3 = r3.addBlock("A"); auto* B3 = r3.addBlock("B"); auto* C3 = r3.addBlock("C");
+            auto* D3 = r3.addBlock("D"); auto* E3 = r3.addBlock("E");
+            addClipTo(A3, "cA"); addClipTo(B3, "cB"); addClipTo(C3, "cC");
+            addClipTo(D3, "cD"); addClipTo(E3, "cE");
+            const juce::String a3Id = A3->id, d3Id = D3->id;
+
+            guiDrop(r3, a3Id, d3Id);
+            bool posOk3 = slotOf(r3, a3Id) == 2
+                       && slotOf(r3, d3Id) == 2
+                       && arrayOrder(r3) == "BCDAE";
+
+            // Case 4: STANDALONE dragged block, LEFTWARD mirror. Drop D onto A →
+            // stack renders at A's slot 0. (Pre-fix this direction was only
+            // accidentally correct: anchor = min(index) coincides with the target.)
+            Project r4;
+            auto* A4 = r4.addBlock("A"); auto* B4 = r4.addBlock("B"); auto* C4 = r4.addBlock("C");
+            auto* D4 = r4.addBlock("D"); auto* E4 = r4.addBlock("E");
+            addClipTo(A4, "cA"); addClipTo(B4, "cB"); addClipTo(C4, "cC");
+            addClipTo(D4, "cD"); addClipTo(E4, "cE");
+            const juce::String a4Id = A4->id, d4Id = D4->id;
+
+            guiDrop(r4, d4Id, a4Id);
+            bool posOk4 = slotOf(r4, d4Id) == 0
+                       && slotOf(r4, a4Id) == 0;
+
+            // Case 5: STANDALONE X dropped onto a member of an EXISTING stack to
+            // its right. F..J; {I,J} stacked (slot 3). Drop F onto I → F joins
+            // {I,J} which stays anchored on I/J; with F's slot 0 compressed away
+            // the stack renders at slot 2 (order GHIJF), NOT at F's old slot 0.
+            Project r5;
+            auto* F5 = r5.addBlock("F"); auto* G5 = r5.addBlock("G"); auto* H5 = r5.addBlock("H");
+            auto* I5 = r5.addBlock("I"); auto* J5 = r5.addBlock("J");
+            addClipTo(F5, "cF"); addClipTo(G5, "cG"); addClipTo(H5, "cH");
+            addClipTo(I5, "cI"); addClipTo(J5, "cJ");
+            const juce::String f5Id = F5->id, i5Id = I5->id, j5Id = J5->id;
+            r5.stackBlocks(i5Id, J5->id);          // setup primitive: {I,J} slot 3
+
+            guiDrop(r5, f5Id, i5Id);
+            bool posOk5 = slotOf(r5, f5Id) == 2
+                       && slotOf(r5, i5Id) == 2
+                       && slotOf(r5, j5Id) == 2
+                       && arrayOrder(r5) == "GHIJF";
+
+            verdict("T36 drop position: formed/joined stack anchors at target slot (GUI dispatch)",
+                    posOk1 && posOk2 && posOk3 && posOk4 && posOk5,
+                    "case1 order=" + arrayOrder(p) + " (want BCDAE), {D,A} slot="
+                    + juce::String(slotOf(p, aId)) + " (want " + juce::String(dSlotBefore)
+                    + "); case2 order=" + arrayOrder(q) + " (want GHIJF), S2 slot="
+                    + juce::String(slotOf(q, fId)) + " (want " + juce::String(s2SlotBefore)
+                    + "); case3 STANDALONE rightward order=" + arrayOrder(r3)
+                    + " (want BCDAE), slot=" + juce::String(slotOf(r3, a3Id)) + " (want 2)"
+                    + "; case4 STANDALONE leftward slot=" + juce::String(slotOf(r4, d4Id)) + " (want 0)"
+                    + "; case5 onto-stack-right order=" + arrayOrder(r5)
+                    + " (want GHIJF), slot=" + juce::String(slotOf(r5, f5Id)) + " (want 2)");
+        }
+
+        { // T37 (1d guard): one stack drop records exactly ONE undo entry and undoes
+          // in ONE step. File-backed clips (as T35): undo's resetAndLoad reloads
+          // audio from disk, matching the app's real condition.
+            auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("resolverdiag_t37");
+            tmpDir.createDirectory();
+            Project p;
+            auto* A = p.addBlock("A"); auto* B = p.addBlock("B"); auto* C = p.addBlock("C");
+            addClipWithFile(A, "t37A", 1000, tmpDir);
+            addClipWithFile(B, "t37B", 1200, tmpDir);
+            addClipWithFile(C, "t37C", 1500, tmpDir);
+            const juce::String aId = A->id, cId = C->id;
+            p.stackBlocks(aId, B->id);                       // S = {A,B}
+            p.undoManager.clearUndoHistory();                // ledger starts AFTER setup
+
+            auto snap = [&] { return juce::JSON::toString(p.toJSON()); };
+            const juce::String preState = snap();
+            p.restackBlockOnto(aId, cId);                    // the drop under test
+            const juce::String postState = snap();
+
+            bool oneUndo   = p.undoManager.undo();           // one step...
+            bool restored  = snap() == preState;             // ...fully reverts the drop
+            bool onlyEntry = !p.undoManager.canUndo();       // and there was ONLY one entry
+            bool redoOk    = p.undoManager.redo() && snap() == postState;
+            verdict("T37 stack drop undo: exactly ONE entry, one-step revert, redo exact",
+                    oneUndo && restored && onlyEntry && redoOk,
+                    juce::String("undo=") + (restored ? "exact" : "BAD")
+                    + ", extraEntries=" + (onlyEntry ? "none" : "YES(BUG)")
+                    + ", redo=" + (redoOk ? "exact" : "BAD"));
             tmpDir.deleteRecursively();
         }
 

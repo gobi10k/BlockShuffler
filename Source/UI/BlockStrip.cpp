@@ -427,7 +427,11 @@ void BlockStrip::completePendingMode(const juce::String& targetBlockId) {
     if (pendingMode == PendingMode::Link) {
         project->addLink(pendingBlockId, targetBlockId, 0.5f);
     } else if (pendingMode == PendingMode::Stack) {
-        project->stackBlocks(pendingBlockId, targetBlockId);
+        // Same routing as drag-onto-block drops: the right-clicked block
+        // (pendingBlockId) is the mover, the clicked block is the anchor target,
+        // so the merged stack sits at the CLICKED block's slot (1c ruling) instead
+        // of at whichever of the two has the lower blocks[] index.
+        project->restackBlockOnto(pendingBlockId, targetBlockId);
     }
     cancelPendingMode();
 }
@@ -566,8 +570,16 @@ void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> cent
     }
 
     if (currentDropAction == DropAction::Stack) {
-        // Stack with a different block / stack group.
-        project->stackBlocks(draggedBlock->id, dropTargetComp->getBlock()->id);
+        // Stack with a different block / stack group. restackBlockOnto handles
+        // BOTH dragged states: an already-stacked block is detached first (or the
+        // target gets absorbed into the old stack — third-block absorption), a
+        // standalone one detach-no-ops; either way the dragged block is reinserted
+        // after the target group's last member so the merged stack anchors at the
+        // DROP TARGET's slot (1c ruling). Routing standalone drops to the
+        // anchor-free stackBlocks primitive left rightward drops at the dragged
+        // block's old slot (resized() anchors a stack at its first member in
+        // blocks[] order = min index).
+        project->restackBlockOnto(draggedBlock->id, dropTargetComp->getBlock()->id);
 
     } else if (currentDropAction == DropAction::RearrangeInStack) {
         // Swap the two blocks' positions in project->blocks to change vertical order.
@@ -617,27 +629,11 @@ void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> cent
 
         } else if (draggedBlock->stackGroup >= 0) {
             // No Shift: unstack this block and move it to the new position.
+            // detachBlockFromStack is the single factored detach (also used by
+            // restackBlockOnto); it fires no change/undo — this branch's
+            // applyExternalMutation below does that once for the whole drop.
             auto pre = project->toJSON();
-            int oldGroup = draggedBlock->stackGroup;
-            draggedBlock->stackGroup = -1;
-
-            // If only one member remains in the old stack, dissolve it too.
-            int remaining = 0;
-            Block* lastInStack = nullptr;
-            for (auto* b : project->blocks) {
-                if (b->stackGroup == oldGroup) { ++remaining; lastInStack = b; }
-            }
-            if (remaining == 1 && lastInStack != nullptr) {
-                // FIX H6/H7: reset stack settings when dissolving a solo stack
-                lastInStack->stackGroup = -1;
-                lastInStack->stackPlayCount.values.clearQuick();
-                lastInStack->stackPlayCount.values.add(1);
-                lastInStack->stackPlayCount.weights.clearQuick();
-                lastInStack->stackPlayCount.weights.add(1.0f);
-                lastInStack->stackPlayMode = StackPlayMode::Sequential;
-            } else if (remaining > 1) {
-                project->propagateStackSettings(oldGroup);
-            }
+            project->detachBlockFromStack(*draggedBlock);
 
             // Move to drop position.
             int insertBefore = juce::jlimit(0, project->blocks.size(), dropTargetIndex);

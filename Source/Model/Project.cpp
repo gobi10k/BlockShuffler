@@ -159,6 +159,74 @@ void Project::stackBlocks(const juce::String& blockIdA, const juce::String& bloc
     recordMutation(pre);
 }
 
+void Project::detachBlockFromStack(Block& block) {
+    const int oldGroup = block.stackGroup;
+    if (oldGroup < 0) return;
+    block.stackGroup = -1;
+
+    // If only one member remains in the old stack, dissolve it too.
+    int remaining = 0;
+    Block* lastInStack = nullptr;
+    for (auto* b : blocks) {
+        if (b->stackGroup == oldGroup) { ++remaining; lastInStack = b; }
+    }
+    if (remaining == 1 && lastInStack != nullptr) {
+        // FIX H6/H7: reset stack settings when dissolving a solo stack
+        lastInStack->stackGroup = -1;
+        lastInStack->stackPlayCount.values.clearQuick();
+        lastInStack->stackPlayCount.values.add(1);
+        lastInStack->stackPlayCount.weights.clearQuick();
+        lastInStack->stackPlayCount.weights.add(1.0f);
+        lastInStack->stackPlayMode = StackPlayMode::Sequential;
+    } else if (remaining > 1) {
+        propagateStackSettings(oldGroup);
+    }
+}
+
+void Project::restackBlockOnto(const juce::String& draggedBlockId, const juce::String& targetBlockId) {
+    auto* dragged = getBlockById(draggedBlockId);
+    auto* target  = getBlockById(targetBlockId);
+    if (dragged == nullptr || target == nullptr || dragged == target) return;
+    // Same stack = vertical rearrange, not a restack — handled by the caller.
+    if (dragged->stackGroup >= 0 && dragged->stackGroup == target->stackGroup) return;
+
+    auto pre = toJSON();
+
+    detachBlockFromStack(*dragged);
+
+    // Join the target's stack, or form a fresh two-block stack with it.
+    int group = target->stackGroup;
+    if (group < 0) {
+        int maxGroup = -1;
+        for (auto* b : blocks)
+            maxGroup = juce::jmax(maxGroup, b->stackGroup);
+        group = maxGroup + 1;
+        target->stackGroup = group;
+    }
+    dragged->stackGroup = group;
+
+    // A stack renders at the slot of its FIRST member in blocks[] order
+    // (BlockStrip::resized() scans in array order), so the merged stack must be
+    // anchored on the target: reinsert the dragged block directly after the
+    // target group's last member. Leaving it at its old index would drag the
+    // whole stack back to the dragged block's old slot.
+    int from = blocks.indexOf(dragged);
+    if (from >= 0) {
+        auto* moved = blocks.removeAndReturn(from);
+        int lastOfGroup = -1;
+        for (int i = 0; i < blocks.size(); ++i)
+            if (blocks[i]->stackGroup == group) lastOfGroup = i;
+        blocks.insert(lastOfGroup + 1, moved);
+    }
+    for (int i = 0; i < blocks.size(); ++i)
+        blocks[i]->position = i;
+
+    // Target group's settings win (its first member is the propagation source).
+    propagateStackSettings(group);
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
 BlockLink* Project::addLink(const juce::String& blockA, const juce::String& blockB, float probability, bool sendNotification) {
     // Don't snapshot if link already exists (no-op)
     for (auto* link : links)
