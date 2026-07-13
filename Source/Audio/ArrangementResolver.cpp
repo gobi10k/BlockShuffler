@@ -170,8 +170,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             auto* clip = pickClip(*block, rng);
             if (!clip) continue;
 
-            // Trim buffer to [0, endMark) — preserves lead-in before startMark
-            auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
+            // Snapshot the FULL buffer — lead-in [0,startMark), body, tail [endMark,len)
+            auto trimmed = trimBuffer(*clip->audioBuffer, 0,
+                        (int64_t)clip->audioBuffer->getNumSamples());  // FIX tail-discard 2026-07-13:
+                        // copy the FULL buffer — the tail [endMark, len) must reach the entry
+                        // (mixer/stretch/duration derive tailLen = len - endMark; trimming at
+                        // endMark silenced every tail: T38/T40/T41)
             if (!trimmed) continue;
 
             // Offset cursor so the first clip's lead-in starts at timeline position 0.
@@ -220,7 +224,11 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
 
-                    auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
+                    auto trimmed = trimBuffer(*clip->audioBuffer, 0,
+                        (int64_t)clip->audioBuffer->getNumSamples());  // FIX tail-discard 2026-07-13:
+                        // copy the FULL buffer — the tail [endMark, len) must reach the entry
+                        // (mixer/stretch/duration derive tailLen = len - endMark; trimming at
+                        // endMark silenced every tail: T38/T40/T41)
                     if (!trimmed) continue;
 
                     // Initialise cursor on first ever entry so lead-in starts at t=0.
@@ -275,8 +283,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
 
-                    // Trim buffer to [0, endMark) — preserves lead-in
-                    auto trimmed = trimBuffer(*clip->audioBuffer, 0, clip->endMark);
+                    // Snapshot the FULL buffer — lead-in [0,startMark), body, tail [endMark,len)
+                    auto trimmed = trimBuffer(*clip->audioBuffer, 0,
+                        (int64_t)clip->audioBuffer->getNumSamples());  // FIX tail-discard 2026-07-13:
+                        // copy the FULL buffer — the tail [endMark, len) must reach the entry
+                        // (mixer/stretch/duration derive tailLen = len - endMark; trimming at
+                        // endMark silenced every tail: T38/T40/T41)
                     if (!trimmed) continue;
 
                     // Initialise cursor on first ever entry so lead-in starts at t=0.
