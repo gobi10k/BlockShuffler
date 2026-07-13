@@ -167,6 +167,7 @@ target_sources(ResolverDiag PRIVATE
     Source/Audio/ExportRenderer.cpp
     Source/Audio/PlaybackEngine.cpp
     Source/UI/LookAndFeel_BlockShuffler.cpp
+    Source/UI/BlockLinkOverlay.cpp
 )
 target_include_directories(ResolverDiag PRIVATE Source)
 target_compile_definitions(ResolverDiag PRIVATE

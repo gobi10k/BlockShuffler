@@ -12,6 +12,10 @@
 #include "Audio/ExportRenderer.h"
 #include "Audio/PlaybackEngine.h"
 #include "Audio/StackPicker.h"
+#include "Utils/GridSnap.h"
+#include "UI/BlockLinkOverlay.h"
+#include "UI/LookAndFeel_BlockShuffler.h"
+#include <cmath>
 
 using namespace BlockShuffler;
 
@@ -2118,6 +2122,535 @@ int main(int argc, char* argv[]) {
                     + ", extraEntries=" + (onlyEntry ? "none" : "YES(BUG)")
                     + ", redo=" + (redoOk ? "exact" : "BAD"));
             tmpDir.deleteRecursively();
+        }
+
+
+        { // ═════ MEASURABLE BACKSTOPS T38–T46 (added 2026-07-13) ═════
+          // Convert VALIDATION_PLAN.md judgment rows into harness assertions.
+          // Verdicts print MEASURED values so each test is visibly non-vacuous.
+            std::cout << "--- T38-T46 measurable backstops ---\n";
+
+            // Fill a buffer with a DC value — rendered output then reads as DC × gain,
+            // so gain envelopes can be read directly off the engine output.
+            auto setDC = [](juce::AudioBuffer<float>& b, float v) {
+                for (int ch = 0; ch < b.getNumChannels(); ++ch) {
+                    auto* w = b.getWritePointer(ch);
+                    for (int i = 0; i < b.getNumSamples(); ++i) w[i] = v;
+                }
+            };
+            // renderViaEngine with an explicit output length (margin beyond the
+            // arrangement end for silence-after assertions) — same REAL engine path.
+            auto renderEngineLen = [](const ResolvedArrangement& arr, int blockSize, int64_t outLen) {
+                juce::AudioBuffer<float> out(2, (int)outLen);
+                out.clear();
+                PlaybackEngine eng;
+                eng.prepareToPlay(arr.sampleRate, blockSize);
+                eng.play(arr);
+                juce::AudioBuffer<float> tmp(2, blockSize);
+                for (int64_t pos = 0; pos < outLen; pos += blockSize) {
+                    tmp.clear();
+                    eng.getNextAudioBlock(tmp, blockSize);
+                    int thisLen = (int)juce::jmin((int64_t)blockSize, outLen - pos);
+                    for (int ch = 0; ch < 2; ++ch)
+                        out.copyFrom(ch, (int)pos, tmp, ch, 0, thisLen);
+                }
+                return out;
+            };
+            // Ramp checkers: "decreasing" = no sample-to-sample RISE beyond eps AND a
+            // total drop > half the start value. A FLAT segment fails the drop clause —
+            // that rejection is T38's negative control (proves the assertion bites).
+            auto monoDec = [](const juce::AudioBuffer<float>& b, int from, int to) {
+                const float* p = b.getReadPointer(0);
+                float maxRise = 0.0f;
+                for (int i = from + 1; i < to; ++i) maxRise = juce::jmax(maxRise, p[i] - p[i - 1]);
+                return maxRise <= 1e-4f && (p[from] - p[to - 1]) > 0.5f * std::abs(p[from]);
+            };
+            auto monoInc = [](const juce::AudioBuffer<float>& b, int from, int to) {
+                const float* p = b.getReadPointer(0);
+                float maxFall = 0.0f;
+                for (int i = from + 1; i < to; ++i) maxFall = juce::jmax(maxFall, p[i - 1] - p[i]);
+                return maxFall <= 1e-4f && (p[to - 1] - p[from]) > 0.5f * std::abs(p[to - 1]);
+            };
+
+            { // T38 (3.1/3.3): crossfade gain envelope measured off the real engine.
+                const double sr = 44100.0;
+                const int L = 4410, body = 17640;
+                Project p; p.sampleRate = sr;
+                auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+                addClipTo(A, "cA", L + body + L);   // lead-in + body + tail
+                addClipTo(B, "cB", L + body);       // lead-in + body
+                A->clips[0]->startMark = L; A->clips[0]->endMark = L + body;
+                B->clips[0]->startMark = L; B->clips[0]->endMark = L + body;
+                // Entries snapshot (trim-copy) the source buffers AT RESOLVE TIME,
+                // so each isolation variant sets its DC values BEFORE its own
+                // resolve. One clip per block -> resolution is deterministic.
+                ArrangementResolver res;
+                auto resolveWith = [&](float dcA, float dcB) {
+                    setDC(*A->clips[0]->audioBuffer, dcA);
+                    setDC(*B->clips[0]->audioBuffer, dcB);
+                    juce::Random r(3800);
+                    auto a = res.resolve(p, r); a.sampleRate = sr;
+                    return a;
+                };
+                auto arr1 = resolveWith(1.0f, 0.0f);                 // A alone
+                auto arr2 = resolveWith(0.0f, 1.0f);                 // B alone
+                auto arr3 = resolveWith(0.4f, 0.4f);                 // both live
+                bool twoEntries = arr1.entries.size() == 2;
+                int64_t bodyEndA = twoEntries ? arr1.entries[0].timelinePos + body : 0;
+                bool aligned = twoEntries && arr1.entries[1].timelinePos == bodyEndA;
+                auto r1 = renderEngineLen(arr1, 512, arr1.totalDurationSamples);
+                auto r2 = renderEngineLen(arr2, 512, arr2.totalDurationSamples);
+                auto r3 = renderEngineLen(arr3, 512, arr3.totalDurationSamples);
+
+                // (a) entry-0 lead-in FULL gain from t=0 — flat 1.0, no ramp, exact.
+                float headDev = 0.0f;
+                for (int i = 0; i < L; ++i)
+                    headDev = juce::jmax(headDev, std::abs(r1.getSample(0, i) - 1.0f));
+                // (b) recovered envelopes: A tail ramps down over [bodyEndA, +L);
+                //     B lead-in ramps up over [bodyEndA - L, bodyEndA).
+                int w1a = (int)bodyEndA - L, w1b = (int)bodyEndA;
+                int w2a = (int)bodyEndA,     w2b = (int)bodyEndA + L;
+                bool tailDown = monoDec(r1, w2a, w2b);
+                bool leadUp   = monoInc(r2, w1a, w1b);
+                // (c) continuity with both sources live across the whole join.
+                float maxStep = 0.0f;
+                for (int i = w1a - 99; i < w2b + 100 && i < (int)arr3.totalDurationSamples; ++i)
+                    maxStep = juce::jmax(maxStep, std::abs(r3.getSample(0, i) - r3.getSample(0, i - 1)));
+                // NEGATIVE CONTROL: checker must REJECT a flat segment (A body ≡ 1.0).
+                bool flatRejected = !monoDec(r1, L + 1000, L + 3000);
+
+                verdict("T38 crossfade envelope: head flat@1.0, tail down, lead-in up, no step; neg-control bites",
+                        twoEntries && aligned && headDev < 1e-6f && tailDown && leadUp
+                            && maxStep < 0.01f && flatRejected,
+                        juce::String("headDev=") + juce::String(headDev, 8)
+                        + ", tailEnv[" + juce::String(r1.getSample(0, w2a), 3) + "->"
+                        + juce::String(r1.getSample(0, w2b - 1), 4) + "]"
+                        + ", leadEnv[" + juce::String(r2.getSample(0, w1a), 4) + "->"
+                        + juce::String(r2.getSample(0, w1b - 1), 3) + "]"
+                        + ", maxStep=" + juce::String(maxStep, 6)
+                        + ", flatRejected=" + (flatRejected ? "y" : "NO(test broken)"));
+            }
+
+            { // T38b (invariant sweep): sequential timeline WITH tails — dump +
+              // numeric adjacency. Tails overlap the NEXT body region by design but
+              // must never move bodies apart nor overlap them.
+                const double sr = 44100.0;
+                Project p; p.sampleRate = sr;
+                const int L = 2205, body = 8820, tail = 3308;
+                juce::Array<int64_t> bodyLens;
+                for (auto n : { "A", "B", "C" }) {
+                    auto* blk = p.addBlock(n);
+                    addClipTo(blk, juce::String("c") + n, L + body + tail);
+                    blk->clips[0]->startMark = L;
+                    blk->clips[0]->endMark   = L + body;
+                }
+                juce::Random r(3850); ArrangementResolver res;
+                auto arr = res.resolve(p, r); arr.sampleRate = sr;
+                bool adjacency = arr.entries.size() == 3;
+                std::cout << "T38b resolved timeline dump (3 entries, L=" << L
+                          << " body=" << body << " tail=" << tail << "):\n";
+                for (int i = 0; i < arr.entries.size(); ++i) {
+                    const auto& e = arr.entries.getReference(i);
+                    int64_t bLen = e.endMark - e.startMark;
+                    int64_t tLen = (int64_t)e.audioBuffer->getNumSamples() - e.endMark;
+                    std::cout << "  entry[" << i << "] " << e.clipName
+                              << ": timelinePos=" << e.timelinePos
+                              << " leadInLen=" << e.startMark
+                              << " bodyLen=" << bLen
+                              << " tailLen=" << tLen << "\n";
+                    if (i > 0) {
+                        const auto& prev = arr.entries.getReference(i - 1);
+                        int64_t prevBodyLen = prev.endMark - prev.startMark;
+                        adjacency = adjacency
+                            && e.timelinePos == prev.timelinePos + prevBodyLen;
+                    }
+                }
+                int64_t lastBodyEnd = arr.entries.getLast().timelinePos
+                                    + (arr.entries.getLast().endMark - arr.entries.getLast().startMark);
+                bool totalOk = arr.totalDurationSamples == lastBodyEnd + tail;
+                verdict("T38b timeline with tails: bodies zero-gap zero-overlap, total = lastBodyEnd + tail",
+                        adjacency && totalOk,
+                        "adjacency=" + juce::String(adjacency ? "exact" : "BROKEN")
+                        + ", total=" + juce::String(arr.totalDurationSamples)
+                        + " (want " + juce::String(lastBodyEnd + tail) + ")");
+            }
+
+            { // T39 (3.4): pitch through the WSOLA-stretched LEAD-IN — 440 Hz stays
+              // 440 Hz. (The lead-in is the stretch path that actually renders; the
+              // TAIL path is covered — and currently FAILED — by T38/T40/T41: the
+              // resolver's trimBuffer(0, endMark) discards tails entirely.)
+                const double sr = 44100.0;
+                Project p; p.sampleRate = sr;
+                auto* intro = p.addBlock("Intro"); auto* verse = p.addBlock("Verse");
+                addClipTo(intro, "intro", (int)(0.8 * sr));          // SILENT: isolates the lead-in
+                intro->clips[0]->endMark = (int64_t)(0.8 * sr);
+                intro->clips[0]->tempo   = 120.0;
+                auto verseBuf = makeTone((int)(1.2 * sr), 440.0, sr);
+                addClipTo(verse, "verse", verseBuf->getNumSamples());
+                verse->clips[0]->audioBuffer = verseBuf;
+                verse->clips[0]->startMark = (int64_t)(0.4 * sr);    // 0.4 s lead-in
+                verse->clips[0]->endMark   = (int64_t)(1.2 * sr);
+                verse->clips[0]->tempo     = 160.0;
+                juce::Random r(3900); ArrangementResolver res;
+                auto arr = res.resolve(p, r); arr.sampleRate = sr;
+                float ratio = arr.entries[1].leadInStretchRatio;      // 160/120 = 1.333
+                int stLen = arr.entries[1].stretchedLeadIn
+                                ? arr.entries[1].stretchedLeadIn->getNumSamples()
+                                : (int)(0.4 * sr * ratio + 0.5);
+                int64_t bodyStartB = arr.entries[1].timelinePos;
+                int64_t liStart = bodyStartB - stLen;
+                auto out = renderEngineLen(arr, 512, arr.totalDurationSamples);
+                auto peakOf = [&](int from, int len) {
+                    double best = 0.0, bf = 0.0;
+                    for (double f = 380.0; f <= 500.0; f += 0.25) {
+                        double w = 2.0 * juce::MathConstants<double>::pi * f / sr, cw = 2.0 * std::cos(w);
+                        double s1 = 0.0, s2 = 0.0;
+                        const float* q = out.getReadPointer(0);
+                        for (int i = 0; i < len; ++i) { double s0 = q[from + i] + cw * s1 - s2; s2 = s1; s1 = s0; }
+                        double mag = std::sqrt(juce::jmax(0.0, s1 * s1 + s2 * s2 - cw * s1 * s2));
+                        if (mag > best) { best = mag; bf = f; }
+                    }
+                    return bf;
+                };
+                int skip = stLen / 10;
+                double fLead = peakOf((int)liStart + skip, stLen - 2 * skip);
+                double fBody = peakOf((int)bodyStartB + 2000, 30000);  // analyzer sanity, unstretched
+                double centsLead = 1200.0 * std::log2(fLead / 440.0);
+                double centsBody = 1200.0 * std::log2(fBody / 440.0);
+                verdict("T39 pitch through stretched lead-in: 440 Hz within 10 cents",
+                        std::abs(ratio - 4.0f / 3.0f) < 0.01f
+                            && arr.entries[1].stretchedLeadIn != nullptr
+                            && std::abs(centsLead) <= 10.0 && std::abs(centsBody) <= 5.0,
+                        "ratio=" + juce::String(ratio, 3) + " (want 1.333), stretchedBuf="
+                        + (arr.entries[1].stretchedLeadIn ? "y" : "NULL")
+                        + ", leadPeak=" + juce::String(fLead, 2) + "Hz (" + juce::String(centsLead, 1) + " cents)"
+                        + ", bodyPeak=" + juce::String(fBody, 2) + "Hz (" + juce::String(centsBody, 1) + " cents)");
+            }
+
+            { // T40 (3.5): retain-tail flag — rendered tail length, measured in samples.
+                const double sr = 44100.0;
+                int lens[2] = { -1, -1 }; int64_t totals[2] = { 0, 0 };
+                for (int pass = 0; pass < 2; ++pass) {
+                    const bool retain = (pass == 1);
+                    Project p; p.sampleRate = sr;
+                    auto* intro = p.addBlock("Intro"); auto* verse = p.addBlock("Verse");
+                    auto introBuf = makeTone((int)(1.2 * sr), 440.0, sr);
+                    addClipTo(intro, "intro", introBuf->getNumSamples());
+                    intro->clips[0]->audioBuffer = introBuf;
+                    intro->clips[0]->endMark = (int64_t)(0.8 * sr);
+                    intro->clips[0]->tempo   = 120.0;
+                    intro->clips[0]->retainTailTempo = retain;
+                    addClipTo(verse, "verse", (int)(1.2 * sr));      // silent
+                    verse->clips[0]->startMark = (int64_t)(0.4 * sr);
+                    verse->clips[0]->endMark   = (int64_t)(1.2 * sr);
+                    verse->clips[0]->tempo     = 160.0;
+                    juce::Random r(4000 + pass); ArrangementResolver res;
+                    auto arr = res.resolve(p, r); arr.sampleRate = sr;
+                    int64_t bodyEnd = arr.entries[0].timelinePos + intro->clips[0]->endMark;
+                    int64_t outLen  = arr.totalDurationSamples + 2205;
+                    auto out = renderEngineLen(arr, 512, outLen);
+                    int lastLoud = -1;
+                    for (int i = (int)bodyEnd; i < (int)outLen; ++i)
+                        if (std::abs(out.getSample(0, i)) > 1e-4f) lastLoud = i;
+                    lens[pass] = lastLoud - (int)bodyEnd + 1;
+                    totals[pass] = arr.totalDurationSamples;
+                }
+                const int expOff = (int)(0.4 * sr * 0.75 + 0.5);     // 13230 (ratio 120/160)
+                const int expOn  = (int)(0.4 * sr);                  // 17640 (original speed)
+                verdict("T40 retain-tail: OFF -> stretched length, ON -> original length",
+                        std::abs(lens[0] - expOff) <= 64 && std::abs(lens[1] - expOn) <= 64,
+                        "tailLen OFF=" + juce::String(lens[0]) + " (want ~" + juce::String(expOff) + ")"
+                        + ", ON=" + juce::String(lens[1]) + " (want ~" + juce::String(expOn) + ")"
+                        + ", totals=" + juce::String(totals[0]) + "/" + juce::String(totals[1]));
+            }
+
+            { // T41 (8.1): song ender truncates after its tail; beyond it EXACT silence.
+                const double sr = 44100.0;
+                Project p; p.sampleRate = sr;
+                auto* A = p.addBlock("A"); auto* B = p.addBlock("B"); auto* C = p.addBlock("C");
+                addClipTo(A, "cA", 8820);  A->clips[0]->audioBuffer = makeTone(8820, 330.0, sr);
+                addClipTo(B, "cB", 13230); B->clips[0]->audioBuffer = makeTone(13230, 550.0, sr);
+                B->clips[0]->endMark = 8820;                          // 4410-sample tail
+                B->clips[0]->isSongEnder = true;
+                addClipTo(C, "cC", 8820);  C->clips[0]->audioBuffer = makeTone(8820, 700.0, sr);
+                juce::Random r(4100); ArrangementResolver res;
+                auto arr = res.resolve(p, r); arr.sampleRate = sr;
+                bool truncated = arr.entries.size() == 2;
+                int64_t expTotal = truncated ? arr.entries[1].timelinePos + 8820 + 4410 : -1;
+                auto out = renderEngineLen(arr, 512, expTotal + 4410);
+                float tailPeak = 0.0f, beyondPeak = 0.0f;
+                for (int i = (int)expTotal - 4410; i < (int)expTotal; ++i)
+                    tailPeak = juce::jmax(tailPeak, std::abs(out.getSample(0, i)));
+                for (int i = (int)expTotal; i < (int)expTotal + 4410; ++i)
+                    beyondPeak = juce::jmax(beyondPeak, std::abs(out.getSample(0, i)));
+                verdict("T41 song ender: entries truncated, total==enderEnd+tail, beyond EXACTLY silent",
+                        truncated && arr.totalDurationSamples == expTotal
+                            && tailPeak > 0.05f && beyondPeak == 0.0f,
+                        "entries=" + juce::String(arr.entries.size()) + " (want 2)"
+                        + ", total=" + juce::String(arr.totalDurationSamples)
+                        + " (want " + juce::String(expTotal) + ")"
+                        + ", tailPeak=" + juce::String(tailPeak, 3)
+                        + ", beyondPeak=" + juce::String(beyondPeak, 8));
+            }
+
+            { // T42 (9.1): tempo changes touch the GRID only — audio buffer untouched.
+                Project p;
+                auto* A = p.addBlock("A");
+                addClipTo(A, "cA", 1000);
+                A->clips[0]->audioBuffer = makeTone(44100, 440.0, 44100.0);
+                auto* before = A->clips[0]->audioBuffer.get();
+                auto hash = [](const juce::AudioBuffer<float>& b) {
+                    double acc = 0.0;
+                    for (int ch = 0; ch < b.getNumChannels(); ++ch)
+                        for (int i = 0; i < b.getNumSamples(); ++i)
+                            acc += std::abs(b.getSample(ch, i)) * (1.0 + (i % 7));
+                    return acc;
+                };
+                const double h0 = hash(*A->clips[0]->audioBuffer);
+                A->tempo = 93.0;                     // block tempo
+                A->clips[0]->tempo = 171.0;          // per-clip override
+                p.defaultClipTempo = 80.0;           // project default
+                const double h1 = hash(*A->clips[0]->audioBuffer);
+                bool samePtr = A->clips[0]->audioBuffer.get() == before;
+                verdict("T42 tempo-only-grid: buffer pointer + contents identical after 3 tempo changes",
+                        samePtr && h0 == h1,
+                        juce::String("ptrSame=") + (samePtr ? "y" : "NO")
+                        + ", hashBefore=" + juce::String(h0, 2)
+                        + ", hashAfter=" + juce::String(h1, 2));
+            }
+
+            { // T43 (1.5): gap-drop (Reorder) positioning — mirror of the OTHER
+              // blockDropped branch (T36 pinned only DropAction::Stack).
+              // GUI-DISPATCH MIRROR: must stay byte-equivalent to the plain-reorder
+              // else-branch of BlockStrip::blockDropped (insertBefore/dest math).
+                auto gapDrop = [](Project& p, int fromIndex, int dropTargetIndex) {
+                    int insertBefore = juce::jlimit(0, p.blocks.size(), dropTargetIndex);
+                    int dest;
+                    if (insertBefore >= p.blocks.size())
+                        dest = p.blocks.size() - 1;
+                    else if (fromIndex < insertBefore)
+                        dest = insertBefore - 1;
+                    else
+                        dest = insertBefore;
+                    dest = juce::jlimit(0, p.blocks.size() - 1, dest);
+                    if (fromIndex != dest) p.moveBlock(fromIndex, dest);
+                };
+                auto build = [](Project& p) {
+                    for (auto n : { "A", "B", "C", "D", "E" })
+                        addClipTo(p.addBlock(n), juce::String("c") + n);
+                };
+                auto order = [](Project& p) {
+                    juce::String s;
+                    for (auto* b : p.blocks) s << b->name;
+                    return s;
+                };
+                Project p1; build(p1); gapDrop(p1, 0, 3);            // A right: gap before D
+                Project p2; build(p2); gapDrop(p2, 0, 5);            // A to far-right end
+                Project p3; build(p3); gapDrop(p3, 4, 1);            // E left: gap before B
+                bool posOk = true;
+                for (int i = 0; i < p1.blocks.size(); ++i)
+                    posOk = posOk && p1.blocks[i]->position == i;
+                // Stacked dragged block into a gap: MIRROR of the unstack branch
+                // (detachBlockFromStack + move + renumber + one applyExternalMutation).
+                Project p4; build(p4);
+                p4.stackBlocks(p4.blocks[0]->id, p4.blocks[1]->id);  // {A,B}
+                {
+                    auto* dragged = p4.blocks[0];
+                    int fromIndex = 0, dropTargetIndex = 4;
+                    auto pre = p4.toJSON();
+                    p4.detachBlockFromStack(*dragged);
+                    int insertBefore = juce::jlimit(0, p4.blocks.size(), dropTargetIndex);
+                    int dest;
+                    if (insertBefore >= p4.blocks.size())      dest = p4.blocks.size() - 1;
+                    else if (fromIndex < insertBefore)         dest = insertBefore - 1;
+                    else                                       dest = insertBefore;
+                    dest = juce::jlimit(0, p4.blocks.size() - 1, dest);
+                    if (fromIndex != dest) p4.blocks.move(fromIndex, dest);
+                    for (int i = 0; i < p4.blocks.size(); ++i) p4.blocks[i]->position = i;
+                    p4.applyExternalMutation(pre);
+                }
+                bool unstacked = p4.getBlockById(p4.blocks[2]->id) != nullptr;   // placeholder true
+                bool sgOk = true;
+                for (auto* b : p4.blocks) sgOk = sgOk && b->stackGroup == -1;    // mate auto-unstacked too
+                verdict("T43 gap-drop reorder: right/end/left + stacked-unstack land at the gap",
+                        order(p1) == "BCADE" && order(p2) == "BCDEA" && order(p3) == "AEBCD"
+                            && posOk && order(p4) == "BCDAE" && sgOk && unstacked,
+                        "right=" + order(p1) + " (want BCADE), end=" + order(p2)
+                        + " (want BCDEA), left=" + order(p3) + " (want AEBCD)"
+                        + ", unstackGap=" + order(p4) + " (want BCDAE), allSg=-1: "
+                        + (sgOk ? "y" : "NO"));
+            }
+
+            { // T44 (2.8): grid snap lands ON the grid; bypass keeps a non-multiple.
+                const double sr = 44100.0;
+                const double u120 = gridUnitSamples(120.0, sr, 1);            // 22050 exact
+                const int64_t s1  = snapToGrid(30000, 120.0, sr, 1);
+                const double rem1 = std::fmod((double)s1, u120);
+                const double u170 = gridUnitSamples(170.0, sr, 1);            // 15564.71…
+                const int64_t s2  = snapToGrid(20000, 170.0, sr, 1);
+                const double dist2 = std::abs((double)s2 - std::round((double)s2 / u170) * u170);
+                // Shift bypass = snap simply not applied; raw value stays off-grid.
+                const int64_t raw = 20001;
+                const double distRaw = std::abs((double)raw - std::round((double)raw / u170) * u170);
+                verdict("T44 grid snap: snapped on-grid (<=1 sample), bypassed value stays off-grid",
+                        rem1 == 0.0 && s1 == 22050 && dist2 <= 1.0 && distRaw > 1.0,
+                        "snap(30000@120)=" + juce::String(s1) + " rem=" + juce::String(rem1, 3)
+                        + "; snap(20000@170)=" + juce::String(s2) + " dist=" + juce::String(dist2, 3)
+                        + "; bypass raw=" + juce::String(raw) + " dist=" + juce::String(distRaw, 1));
+            }
+
+            { // T45 (13.1): identity-colour compositing keeps hue dominant + saturated.
+              // Constants MUST MATCH BlockComponent.cpp (neutralBodyBase, 0.85).
+                struct Hue { const char* n; juce::uint32 v; };
+                const Hue hues[8] = {
+                    { "Red",    LookAndFeel_BlockShuffler::paletteRed },
+                    { "Orange", LookAndFeel_BlockShuffler::paletteOrange },
+                    { "Yellow", LookAndFeel_BlockShuffler::paletteYellow },
+                    { "Green",  LookAndFeel_BlockShuffler::paletteGreen },
+                    { "Cyan",   LookAndFeel_BlockShuffler::paletteCyan },
+                    { "Blue",   LookAndFeel_BlockShuffler::paletteBlue },
+                    { "Purple", LookAndFeel_BlockShuffler::palettePurple },
+                    { "Pink",   LookAndFeel_BlockShuffler::palettePink },
+                };
+                const juce::Colour base(0xFF3A3A3A);
+                auto dom = [](juce::Colour c) {
+                    int r = c.getRed(), g = c.getGreen(), b = c.getBlue();
+                    return (r >= g && r >= b) ? 0 : (g >= b ? 1 : 2);
+                };
+                auto hueDeltaDeg = [](juce::Colour a, juce::Colour b) {
+                    float d = std::abs(a.getHue() - b.getHue());
+                    return juce::jmin(d, 1.0f - d) * 360.0f;
+                };
+                bool allOk = true; int oldFails = 0; bool oldYellowFails = false;
+                juce::String detail;
+                for (auto& h : hues) {
+                    juce::Colour pal(h.v);
+                    juce::Colour comp = base.interpolatedWith(pal, 0.85f);
+                    bool domOk = dom(pal) == dom(comp);
+                    bool satOk = comp.getSaturation() >= 0.5f * pal.getSaturation();
+                    bool hueOk = hueDeltaDeg(pal, comp) <= 10.0f;
+                    // NEGATIVE CONTROL: the pre-13.1 formula (10% colour over the
+                    // panel base) must fail sat-retention OR shift hue >10 deg —
+                    // "yellow reads as green" was a HUE defect, so Yellow must fail.
+                    juce::Colour old = juce::Colour(LookAndFeel_BlockShuffler::bgMedium)
+                                           .overlaidWith(pal.withAlpha(0.10f));
+                    bool oldBad = old.getSaturation() < 0.5f * pal.getSaturation()
+                               || hueDeltaDeg(pal, old) > 10.0f;
+                    if (oldBad) ++oldFails;
+                    if (oldBad && juce::String(h.n) == "Yellow") oldYellowFails = true;
+                    allOk = allOk && domOk && satOk && hueOk;
+                    detail << h.n << " s" << juce::String(pal.getSaturation(), 2)
+                           << "->" << juce::String(comp.getSaturation(), 2)
+                           << " h" << juce::String(hueDeltaDeg(pal, comp), 1)
+                           << (domOk && satOk && hueOk ? " " : " BAD ");
+                }
+                verdict("T45 colour: dominant+sat+hue kept 8/8; old formula rejected (incl. Yellow)",
+                        allOk && oldYellowFails && oldFails >= 4,
+                        detail + "| oldFormulaFails=" + juce::String(oldFails)
+                        + "/8 (want >=4 incl. Yellow: " + (oldYellowFails ? "y)" : "NO)"));
+            }
+
+            { // T46 (4.2): link-label collision avoidance — GROUND TRUTH from the real
+              // BlockLinkOverlay::paint into an offscreen image. Pills are detected as
+              // connected components of the pill fill colour; each label box is the
+              // pill's bbox plus the fixed name row above it (nameRowH+rowGap = 16).
+                Project p;
+                auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+                auto* C = p.addBlock("C"); auto* D = p.addBlock("D");
+                for (auto* blk : { A, B, C, D }) addClipTo(blk, "c" + blk->name);
+                p.addLink(A->id, B->id, 1.0f); p.addLink(C->id, D->id, 1.0f);
+                p.addLink(A->id, C->id, 1.0f); p.addLink(B->id, D->id, 1.0f);
+                BlockLinkOverlay ov;
+                ov.setProject(&p);
+                ov.setBounds(0, 0, 600, 600);
+                juce::HashMap<juce::String, int> pos;   // clustered centres force collisions
+                pos.set(A->id, 280); pos.set(B->id, 300); pos.set(C->id, 320); pos.set(D->id, 340);
+                ov.setBlockPositions(pos);
+                juce::Image img(juce::Image::RGB, 600, 600, true);
+                { juce::Graphics g(img); g.fillAll(juce::Colours::black); ov.paint(g); }
+                // Pill fill = bgLight @ alpha 0.88 over black.
+                const juce::Colour pl(LookAndFeel_BlockShuffler::bgLight);
+                const int er = (int)std::round(0.88 * pl.getRed());
+                const int eg = (int)std::round(0.88 * pl.getGreen());
+                const int eb = (int)std::round(0.88 * pl.getBlue());
+                auto isPill = [&](int x, int y) {
+                    auto c = img.getPixelAt(x, y);
+                    return std::abs((int)c.getRed() - er) <= 5
+                        && std::abs((int)c.getGreen() - eg) <= 5
+                        && std::abs((int)c.getBlue() - eb) <= 5;
+                };
+                std::vector<int> comp(600 * 600, -1);
+                juce::Array<juce::Rectangle<int>> boxes;
+                for (int y = 0; y < 600; ++y) for (int x = 0; x < 600; ++x) {
+                    if (comp[y * 600 + x] != -1 || !isPill(x, y)) continue;
+                    int id = boxes.size(); int minX = x, maxX = x, minY = y, maxY = y, count = 0;
+                    std::vector<std::pair<int,int>> stack{{x, y}};
+                    comp[y * 600 + x] = id;
+                    while (!stack.empty()) {
+                        auto [cx, cy] = stack.back(); stack.pop_back(); ++count;
+                        minX = juce::jmin(minX, cx); maxX = juce::jmax(maxX, cx);
+                        minY = juce::jmin(minY, cy); maxY = juce::jmax(maxY, cy);
+                        const int dx[4] = {1,-1,0,0}, dy[4] = {0,0,1,-1};
+                        for (int d = 0; d < 4; ++d) {
+                            int nx = cx + dx[d], ny = cy + dy[d];
+                            if (nx < 0 || ny < 0 || nx >= 600 || ny >= 600) continue;
+                            if (comp[ny * 600 + nx] != -1 || !isPill(nx, ny)) continue;
+                            comp[ny * 600 + nx] = id;
+                            stack.push_back({nx, ny});
+                        }
+                    }
+                    if (count >= 30)
+                        boxes.add(juce::Rectangle<int>(minX, minY, maxX - minX + 1, maxY - minY + 1));
+                    else
+                        boxes.add(juce::Rectangle<int>());   // too small: ignore but keep ids stable
+                }
+                juce::Array<juce::Rectangle<int>> pills;
+                for (auto& b : boxes) if (!b.isEmpty()) pills.add(b);
+                // Later links' arcs are drawn OVER earlier pills and can split one
+                // pill into fragments — merge components within 6 px of each other.
+                // (Genuinely separate label rows are ~40 px apart, so no false merge;
+                // truly overlapping labels would merge to <4 and fail the count.)
+                for (bool changed = true; changed;) {
+                    changed = false;
+                    for (int i = 0; i < pills.size() && !changed; ++i)
+                        for (int j = i + 1; j < pills.size() && !changed; ++j)
+                            if (pills[i].expanded(6).intersects(pills[j].expanded(6))) {
+                                pills.set(i, pills[i].getUnion(pills[j]));
+                                pills.remove(j);
+                                changed = true;
+                            }
+                }
+                // Reconstruct full label boxes: name row (16 px) sits directly above
+                // the pill; width = max(nameW, pillW) centred on the pill.
+                float labelWMax = 0.0f;
+                for (auto* link : p.links) {
+                    auto* ba = p.getBlockById(link->blockA); auto* bb = p.getBlockById(link->blockB);
+                    labelWMax = juce::jmax(labelWMax,
+                        LookAndFeel_BlockShuffler::measureTextWidth(
+                            LookAndFeel_BlockShuffler::uiFont(10.0f),
+                            ba->name + " <-> " + bb->name) + 10.0f);
+                }
+                juce::Array<juce::Rectangle<float>> labels;
+                for (auto& pb : pills) {
+                    float w = juce::jmax((float)pb.getWidth(), labelWMax);
+                    labels.add(juce::Rectangle<float>((float)pb.getCentreX() - w * 0.5f,
+                                                      (float)pb.getY() - 16.0f,
+                                                      w, 16.0f + (float)pb.getHeight()));
+                }
+                bool disjoint = true; juce::String boxTxt;
+                for (int i = 0; i < labels.size(); ++i) {
+                    for (int j = i + 1; j < labels.size(); ++j)
+                        disjoint = disjoint && !labels[i].intersects(labels[j]);
+                    boxTxt << "(" << juce::String((int)labels[i].getX()) << ","
+                           << juce::String((int)labels[i].getY()) << " "
+                           << juce::String((int)labels[i].getWidth()) << "x"
+                           << juce::String((int)labels[i].getHeight()) << ") ";
+                }
+                verdict("T46 link labels: 4 links, clustered midpoints -> 4 pills found, label boxes pairwise disjoint",
+                        pills.size() == 4 && disjoint,
+                        "pills=" + juce::String(pills.size()) + " (want 4), boxes: " + boxTxt
+                        + (disjoint ? "DISJOINT" : "OVERLAP(BUG)"));
+            }
         }
 
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
