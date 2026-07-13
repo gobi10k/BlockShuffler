@@ -3,6 +3,19 @@
 
 namespace BlockShuffler {
 
+// Issue-2 fix (stacked name obscured): on a non-tiny tile the below-header name
+// area is compH - 44 px (4px border insets + 20px header + 16px bottom readout),
+// so it shrinks as stack tiles shrink. Once it can't hold ONE legible 12pt-bold
+// line plus label padding (~28px — about the header's own 20px text band plus
+// insets), the name renders INSIDE the header band instead. Measured ground
+// truth: nameH=24 (comp 68) already clips; nameH=43 (comp 87) is legible —
+// 28 splits those with margin on both sides.
+static constexpr int belowHeaderNameMinH = 28;
+
+static inline bool nameGoesInHeader(int compH) noexcept {
+    return compH > 26 && (compH - 44) < belowHeaderNameMinH;   // non-tiny && squeezed
+}
+
 BlockComponent::BlockComponent(Block& block_,
                                std::function<void(Block*)>              onSelected_,
                                std::function<void(const juce::String&)> onDeleteRequested_,
@@ -85,9 +98,17 @@ void BlockComponent::paint(juce::Graphics& g) {
                                                        : juce::Colours::white;
     // Tiny (stacked) tiles keep the existing textPrimary name colour; only the
     // large-body path adopts the luminance-based colour.
-    const juce::Colour nameCol = tinyTile
+    juce::Colour nameCol = tinyTile
         ? juce::Colour(LookAndFeel_BlockShuffler::textPrimary)
         : bodyTextCol;
+    if (!tinyTile && nameGoesInHeader(full.getHeight())) {
+        // Issue-2 fix: in header mode the name sits on the SOLID block colour of
+        // the header band — follow the header's luminance, not the body's.
+        const float hdrLum = block->color.getFloatRed()   * 0.299f
+                           + block->color.getFloatGreen() * 0.587f
+                           + block->color.getFloatBlue()  * 0.114f;
+        nameCol = (hdrLum > 0.55f) ? juce::Colours::black : juce::Colours::white;
+    }
     if (nameLabel.findColour(juce::Label::textColourId) != nameCol)
         nameLabel.setColour(juce::Label::textColourId, nameCol);
 
@@ -199,9 +220,19 @@ void BlockComponent::paint(juce::Graphics& g) {
 void BlockComponent::resized() {
     if (getHeight() <= 26) {
         nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(9.0f));
+        nameLabel.setMinimumHorizontalScale(0.0f);   // JUCE default (squish to 0.7)
         nameLabel.setBounds(getLocalBounds().reduced(2));
+    } else if (nameGoesInHeader(getHeight())) {
+        // Issue-2 fix: below-header area too short for a legible line — put the
+        // name INSIDE the 20px header band, between the block-number indicator
+        // (left, ends x=23) and the stack badge / clip count (right, starts
+        // x = w-22). Scale 1.0 = truncate with ellipsis, never squish.
+        nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(11.0f));
+        nameLabel.setMinimumHorizontalScale(1.0f);
+        nameLabel.setBounds(juce::Rectangle<int>(24, 1, juce::jmax(0, getWidth() - 48), 20));
     } else {
         nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(12.0f));
+        nameLabel.setMinimumHorizontalScale(0.0f);   // JUCE default (squish to 0.7)
         nameLabel.setBounds(getLocalBounds().reduced(4).withTrimmedTop(20).withTrimmedBottom(16));
     }
 }
