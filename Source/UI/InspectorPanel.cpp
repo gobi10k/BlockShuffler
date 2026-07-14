@@ -176,10 +176,10 @@ InspectorPanel::InspectorPanel()
     probSlider     .setTooltip("Relative weight for clip selection within a block.");
     tempoField     .setTooltip("BPM of this clip - sets the tempo grid for the waveform editor");
     songEnderToggle.setTooltip("If this clip plays, the arrangement stops after it ends");
-    clipDoneToggle .setTooltip("Mark this clip as done (visual flag only — does not affect playback or export)");
+    clipDoneToggle .setTooltip("Mark this clip as done (visual flag only - does not affect playback or export)");
     retainLeadIn   .setTooltip("Play the lead-in at its original speed instead of stretching");
     retainTail     .setTooltip("Play the tail at its original speed instead of stretching");
-    blockDoneToggle.setTooltip("Mark this block as done (visual flag only — does not affect playback or export)");
+    blockDoneToggle.setTooltip("Mark this block as done (visual flag only - does not affect playback or export)");
     playChanceSlider.setTooltip("Chance (%) this block is included in the arrangement.");
     playModeCombo  .setTooltip("Sequential: play chosen blocks one after another. Simultaneous: layer them.");
     alwaysPlayBaseToggle.setTooltip("The stack's base block (first in the stack) always plays; the remaining picks come from the other blocks.");
@@ -406,7 +406,7 @@ void InspectorPanel::rebuildStackBlockLabels() {
             text += " (base)";
             baseLabelled = true;
         }
-        if (isThis) text += "  \xe2\x86\x90";
+        if (isThis) text += juce::String(juce::CharPointer_UTF8("  \xe2\x86\x90"));  // U+2190 arrow: must be UTF-8-decoded, plain char* mojibakes
         row->nameLabel.setText(text, juce::dontSendNotification);
         row->nameLabel.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
         row->nameLabel.setColour(juce::Label::textColourId,
@@ -606,7 +606,8 @@ void InspectorPanel::updateFromModel() {
             for (auto* b : project->blocks)
                 if (b->stackGroup == selectedBlock->stackGroup) ++memberCount;
         stackInfoLabel.setText("Group " + juce::String(selectedBlock->stackGroup + 1)
-                               + "  \xc2\xb7  " + juce::String(memberCount) + " blocks",
+                               + juce::String(juce::CharPointer_UTF8("  \xc2\xb7  "))  // U+00B7 dot: must be UTF-8-decoded, plain char* mojibakes
+                               + juce::String(memberCount) + " blocks",
                                juce::dontSendNotification);
 
         // Play mode combo

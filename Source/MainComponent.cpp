@@ -531,7 +531,7 @@ void MainComponent::loadProject(const juce::File& file) {
 
 void MainComponent::updateWindowTitle(const juce::String& projectName) {
     if (auto* dw = dynamic_cast<juce::DocumentWindow*>(getTopLevelComponent()))
-        dw->setName("BlockShuffler — " + projectName);
+        dw->setName("BlockShuffler - " + projectName);  // ASCII separator: raw UTF-8 em-dash in a char* literal mojibakes in the title bar (acceptance 11.1)
 }
 
 void MainComponent::updateTimeDisplay() {
