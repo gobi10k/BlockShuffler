@@ -555,7 +555,7 @@ void InspectorPanel::updateFromModel() {
             total += c->probability;
         float eff = (total > 0.0f)
                   ? (selectedClip->probability / total) * 100.0f
-                  : 100.0f / (float)selectedBlock->clips.size();
+                  : 0.0f;  // Carter 2.7: all-0% -> 0% effective (block is skipped)
         effectiveProbLabel.setText(juce::String(eff, 1) + "% effective",
                                    juce::dontSendNotification);
         effectiveProbLabel.setVisible(true);
@@ -708,7 +708,7 @@ void InspectorPanel::sliderValueChanged(juce::Slider* slider) {
                 total += c->probability;
             float eff = (total > 0.0f)
                       ? (selectedClip->probability / total) * 100.0f
-                      : 100.0f / (float)selectedBlock->clips.size();
+                      : 0.0f;  // Carter 2.7: all-0% -> 0% effective (block is skipped)
             effectiveProbLabel.setText(juce::String(eff, 1) + "% effective",
                                        juce::dontSendNotification);
         }

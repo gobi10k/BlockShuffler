@@ -1111,20 +1111,52 @@ int main(int argc, char* argv[]) {
                     "heavy=" + juce::String(pctH, 1) + "% mid=" + juce::String(pctM, 1)
                     + "% low=" + juce::String(pctL, 1) + "%");
         }
-        { // T17 (2.7): single clip at 0% weight -> uniform fallback -> plays every time
+        { // T17 (2.7, Carter-corrected 2026-07-15): a clip at 0% weight is
+          // NEVER selected; a block whose only clip is at 0% is SKIPPED
+          // entirely (zero entries). Inverts the pre-correction assertion.
             Project p;
             auto* blk = p.addBlock("A");
             addClipTo(blk, "only", 1000);
             blk->clips[0]->probability = 0.0f;
-            const juce::String clipId = blk->clips[0]->id;
 
             juce::Random r(617); ArrangementResolver res;
             int ok = 0;
             for (int i = 0; i < 20; ++i) {
                 auto arr = res.resolve(p, r);
-                ok += (arr.entries.size() == 1 && arr.entries[0].clipId == clipId);
+                ok += (arr.entries.size() == 0);
             }
-            verdict("T17 single clip @0%: plays every time", ok == 20, juce::String(ok) + "/20");
+            verdict("T17 single clip @0%: block skipped, zero entries", ok == 20,
+                    juce::String(ok) + "/20");
+        }
+        { // T17b (2.7): mixed weights 50/50/0 -> the 0-weight clip appears 0x
+          // across 50 resolves; both positive-weight clips DO appear.
+            Project p;
+            auto* blk = p.addBlock("A");
+            addClipTo(blk, "c50a", 1000);
+            addClipTo(blk, "c50b", 1000);
+            addClipTo(blk, "c0",   1000);
+            blk->clips[0]->probability = 0.5f;
+            blk->clips[1]->probability = 0.5f;
+            blk->clips[2]->probability = 0.0f;
+            const juce::String idA = blk->clips[0]->id;
+            const juce::String idB = blk->clips[1]->id;
+            const juce::String id0 = blk->clips[2]->id;
+
+            juce::Random r(6171); ArrangementResolver res;
+            int zeroCount = 0, aCount = 0, bCount = 0, entriesOk = 0;
+            for (int i = 0; i < 50; ++i) {
+                auto arr = res.resolve(p, r);
+                if (arr.entries.size() == 1) {
+                    ++entriesOk;
+                    if (arr.entries[0].clipId == id0) ++zeroCount;
+                    if (arr.entries[0].clipId == idA) ++aCount;
+                    if (arr.entries[0].clipId == idB) ++bCount;
+                }
+            }
+            verdict("T17b weights 50/50/0: 0-weight clip never selected",
+                    entriesOk == 50 && zeroCount == 0 && aCount > 0 && bCount > 0,
+                    "zero=" + juce::String(zeroCount) + "/50, a=" + juce::String(aCount)
+                    + ", b=" + juce::String(bCount));
         }
         { // T18 (5.3): SEQ pc=3 -> all three back-to-back gapless, THEN follower D
           // plays (song continues; nothing swallowed after the stack).

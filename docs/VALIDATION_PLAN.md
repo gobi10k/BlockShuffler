@@ -32,7 +32,7 @@ Expected on BOTH platforms: `STEP6 RESULT: ALL PASS` (T1–T46).
 | 2.4 | Clip rename / colour / remove | MAN | All three context-menu items function | PASS (MAN, 2026-07-14) | |
 | 2.5 | Weight slider independence | MAN | Dragging one clip's slider leaves every other clip's value numerically unchanged | PASS (MAN, 2026-07-14) | |
 | 2.6 | 80/15/5 weights drive selection | T16 | 200 resolves ≈ 81.5/12.0/6.5 (within T16 tolerance) | PASS (T16, 2026-07-14) | |
-| 2.7 | Single clip at 0% → 100% effective | T17 | Effective shows 100%; plays 20/20 | PASS (T17, 2026-07-14) | |
+| 2.7 | Clip at 0% weight: 0% effective, never selected (Carter correction 2026-07-15) | T17 (inverted) + T17b | 0% shows 0.0% effective and never plays; a block with ALL clips at 0% is SKIPPED entirely (silent) — semantics flagged for Carter | PASS (T17+T17b, 2026-07-15) | |
 | 2.8 | Marker snap + Shift bypass | T44 + MAN | Drag lands ON a grid line; Shift-drag lands off-grid at pointer | PASS (T44 + MAN, 2026-07-14) | |
 | 2.9 | Clip drag between blocks; strip does NOT scroll to start | MAN | After drop into a later block, strip scroll position unchanged | PASS (MAN, 2026-07-14) | |
 

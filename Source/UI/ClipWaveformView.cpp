@@ -513,7 +513,7 @@ void ClipWaveformView::rebuildRows() {
         float rawPct = clipPtr->probability * 100.0f;
         float effPct = (totalWeight > 0.0f)
                      ? (clipPtr->probability / totalWeight) * 100.0f
-                     : 100.0f / (float)currentBlock->clips.size();
+                     : 0.0f;  // Carter 2.7: all-0% -> 0% effective (block is skipped)
         row->setTooltip(clipPtr->name
             + " | Weight: " + juce::String((int)rawPct) + "%"
             + " | Effective: " + juce::String(effPct, 1) + "%");

@@ -445,22 +445,27 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 Clip* ArrangementResolver::pickClip(const Block& block, juce::Random& rng) {
     if (block.clips.isEmpty()) return nullptr;
 
+    // Carter 2.7 (2026-07-15): a clip at 0% weight is NEVER selected — only
+    // positive-weight clips are eligible. A block whose clips are ALL at 0%
+    // yields nullptr; every caller `continue`s, so the block is SKIPPED for
+    // that pass (plays nothing). The filter runs before the single-clip
+    // shortcut so one 0% clip can no longer bypass it.
     juce::Array<Clip*> available;
     for (auto* c : block.clips)
-        available.add(c);
+        if (c->probability > 0.0f)
+            available.add(c);
     if (available.isEmpty()) return nullptr;
     if (available.size() == 1) return available[0];
 
     float total = 0.0f;
     for (auto* c : available) total += c->probability;
-    if (total <= 0.0f)
-        return available[rng.nextInt(available.size())];
 
     float roll = rng.nextFloat() * total;
     float cum  = 0.0f;
     for (auto* c : available) {
         cum += c->probability;
-        if (roll <= cum) return c;
+        if (roll < cum) return c;  // strict '<': a boundary roll can never land
+                                   // on a zero-width cumulative segment
     }
     return available.getLast();
 }
