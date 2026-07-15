@@ -1682,34 +1682,37 @@ int main(int argc, char* argv[]) {
                     + " (0 = grid suppressed)");
         }
 
-        { // T28 (13.4): zoom maximum scales with clip length. Mirrors
-          // ClipWaveformView::computeMaxZoom (ClipWaveformView.cpp:791-796):
-          // maxZoom = jlimit(1, 256, durationSeconds / 0.5). Longer clips get a
-          // larger zoom factor; the finest view is ~0.5s for any un-clamped length.
-          // Guarded: 13.4 zoom max scales with clip length.
+        { // T28 (13.4, Carter-corrected 2026-07-15): the DEEPEST zoom window is
+          // a CONSTANT ~0.5 s regardless of clip length. Mirrors
+          // ClipWaveformView::computeMaxZoom: maxZoom = jlimit(1, 65536, dur/0.5).
+          // The old 256 cap (asserted by the pre-correction T28) left clips over
+          // 128 s unable to reach the beat window; the cap is now 65536, an
+          // arithmetic-safety bound only (0.5 s window preserved up to ~9 h).
             auto maxZoom = [](double durSecs) {
                 if (durSecs < 0.001) return 32.0;                 // empty/tiny fallback
                 double z = durSecs / 0.5;
                 z = juce::jmax(z, 1.0);
-                z = juce::jmin(z, 256.0);
+                z = juce::jmin(z, 65536.0);
                 return z;
             };
-            double z1   = maxZoom(1.0);    // → 2.0
-            double z10  = maxZoom(10.0);   // → 20.0
-            double z100 = maxZoom(100.0);  // → 200.0
-            double zTiny = maxZoom(0.3);   // → clamped up to 1.0
-            double zHuge = maxZoom(1000.0);// → clamped to 256.0
-            // Longer → strictly larger factor (until the 256 clamp); un-clamped
-            // values reveal a ~0.5s window (dur / z == 0.5).
-            bool monotonic = z1 < z10 && z10 < z100;
-            bool window    = std::abs(1.0 / z1 - 0.5) < 1e-6
-                          && std::abs(100.0 / z100 - 0.5) < 1e-6;
-            bool clamps    = zTiny == 1.0 && zHuge == 256.0;
-            verdict("T28 zoom max scales with length: longer clip zooms further",
-                    monotonic && window && clamps,
-                    "z(1s)=" + juce::String(z1, 1) + " z(10s)=" + juce::String(z10, 1)
-                    + " z(100s)=" + juce::String(z100, 1) + " z(0.3s)=" + juce::String(zTiny, 1)
-                    + " z(1000s)=" + juce::String(zHuge, 1));
+            // Constant-window property: dur / maxZoom(dur) == 0.5 +/- eps for
+            // short AND long clips (2 s / 30 s / 300 s / 3000 s).
+            bool window = true;
+            juce::String ev;
+            for (double dur : { 2.0, 30.0, 300.0, 3000.0 }) {
+                double w = dur / maxZoom(dur);
+                window = window && std::abs(w - 0.5) < 1e-6;
+                ev << "win(" << juce::String(dur, 0) << "s)=" << juce::String(w, 4) << " ";
+            }
+            // Tiny-clip lower clamp unchanged: a 0.3 s clip pins at zoom 1 and
+            // just shows itself whole; safety cap engages only at 65536.
+            double zTiny = maxZoom(0.3);
+            double zVast = maxZoom(100000.0);
+            bool clamps  = zTiny == 1.0 && zVast == 65536.0;
+            verdict("T28 zoom-in window constant ~0.5s at any clip length",
+                    window && clamps,
+                    ev + "z(0.3s)=" + juce::String(zTiny, 1)
+                    + " z(100000s)=" + juce::String(zVast, 1));
         }
 
         { // T29 (6.3): the "DONE" badge must not cover the block name. Mirrors the

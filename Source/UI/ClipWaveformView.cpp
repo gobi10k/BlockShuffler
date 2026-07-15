@@ -790,9 +790,14 @@ float ClipWaveformView::computeMaxZoom() const {
 
     if (maxDurationSeconds < 0.001) return 32.0f; // fallback for empty/tiny clips
 
+    // Carter 13.4 (2026-07-15): the deepest zoom window must be ~0.5 s for
+    // ANY clip length — the old 256 cap left clips over 128 s stuck shallower
+    // than the beat (300 s bottomed out at a 1.17 s window). Cap only at 65536
+    // for arithmetic safety (content width = viewW * zoom stays far below
+    // INT_MAX; 65536 preserves the 0.5 s window up to ~9 h of audio).
     double maxZoom = maxDurationSeconds / 0.5;     // shows ~0.5 s at full zoom
     maxZoom = juce::jmax(maxZoom, 1.0);
-    maxZoom = juce::jmin(maxZoom, 256.0);
+    maxZoom = juce::jmin(maxZoom, 65536.0);
     return (float)maxZoom;
 }
 
