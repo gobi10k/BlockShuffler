@@ -140,15 +140,16 @@ void TransportBar::resized() {
     saveAsBtn.setBounds(area.removeFromRight(68).withSizeKeepingCentre(68, btnH));
     area.removeFromRight(12);  // gap between Save As and logo
 
-    // Logo: scale to fill the full bar height, preserve aspect ratio
-    // Sit immediately left of the Save As button
-    const int logoH = area.getHeight();
+    // Logo: client spec 12.3 — drawn at ~2/3 of the FULL bar height (not the
+    // inset area), centred vertically, immediately left of the Save As button
+    const int logoH = juce::roundToInt((float)getLocalBounds().getHeight() * 2.0f / 3.0f);
     int logoW = 0;
     if (logoImage.isValid() && logoImage.getHeight() > 0)
         logoW = juce::roundToInt((float)logoH * (float)logoImage.getWidth()
                                               / (float)logoImage.getHeight());
     logoW = juce::jlimit(0, 180, logoW);
-    brandingArea = (logoW > 0) ? area.removeFromRight(logoW) : juce::Rectangle<int>();
+    brandingArea = (logoW > 0) ? area.removeFromRight(logoW).withSizeKeepingCentre(logoW, logoH)
+                               : juce::Rectangle<int>();
 
     // Remaining centre strip = time display
     area.removeFromLeft(gap * 2);
