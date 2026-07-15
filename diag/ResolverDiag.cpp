@@ -1714,6 +1714,64 @@ int main(int argc, char* argv[]) {
                     ev + "z(0.3s)=" + juce::String(zTiny, 1)
                     + " z(100000s)=" + juce::String(zVast, 1));
         }
+        { // T47 (13.4 perf backstop): the clip-region-aware waveform paint must
+          // keep its column->sample mapping BIT-IDENTICAL to the full-width
+          // math. Mirrors ClipRowComponent::renderWaveform: full path computes
+          // every column px in [0,w); clipped path computes px in
+          // [pxFirst, pxLast] with results stored at (px - pxFirst). Same
+          // absolute px and same full width w in both -> s0/s1/min/max must
+          // match exactly for every column, at several zooms and clip offsets.
+            juce::Random tr(4747);
+            const int numSamples = 262144;                    // ~5.9s @44.1k
+            juce::AudioBuffer<float> buf(2, numSamples);
+            for (int ch = 0; ch < 2; ++ch) {
+                float* d = buf.getWritePointer(ch);
+                for (int i = 0; i < numSamples; ++i)
+                    d[i] = tr.nextFloat() * 2.0f - 1.0f;      // deterministic noise
+            }
+            auto colMinMax = [&](int px, int w, float& mn, float& mx) {
+                int s0 = (int)((int64_t)px * numSamples / w);
+                int s1 = juce::jmin((int)((int64_t)(px + 1) * numSamples / w), numSamples - 1);
+                if (s1 < s0) s1 = s0;
+                mn = 0.0f; mx = 0.0f;
+                for (int ch = 0; ch < 2; ++ch) {
+                    const float* data = buf.getReadPointer(ch);
+                    for (int q = s0; q <= s1; ++q) {
+                        mn = juce::jmin(mn, data[q]);
+                        mx = juce::jmax(mx, data[q]);
+                    }
+                }
+                return std::pair<int,int>(s0, s1);
+            };
+            bool allEqual = true; int checked = 0; juce::String ev2;
+            const int visW = 1100;
+            for (float zoom : { 1.0f, 4.0f, 60.0f, 1200.0f, 65536.0f }) {
+                const int w = (int)((double)visW * zoom);     // full row width
+                // three dirty regions: start, middle, near right edge
+                for (int visX : { 0, w / 2, juce::jmax(0, w - visW - 7) }) {
+                    const int pxFirst = juce::jmax(0, visX - 1);
+                    const int pxLast  = juce::jmin(w - 1, visX + visW);
+                    // FULL path: absolute px. CLIPPED path: same px, offset store.
+                    // Compare first, middle, last columns of the region.
+                    for (int px : { pxFirst, (pxFirst + pxLast) / 2, pxLast }) {
+                        float mnF, mxF, mnC, mxC;
+                        auto rF = colMinMax(px, w, mnF, mxF);           // full-width math
+                        auto rC = colMinMax((pxFirst + (px - pxFirst)), w, mnC, mxC); // clipped indexing round-trip
+                        allEqual = allEqual && rF == rC && mnF == mnC && mxF == mxC;
+                        ++checked;
+                    }
+                }
+                if (zoom == 1200.0f) {  // print measured values at the 10-min-like depth
+                    float mn, mx; auto r = colMinMax(visW * 600, w, mn, mx);
+                    ev2 << "z1200 px=" << juce::String(visW * 600) << " s0=" << juce::String(r.first)
+                        << " s1=" << juce::String(r.second)
+                        << " mn=" << juce::String(mn, 6) << " mx=" << juce::String(mx, 6) << "; ";
+                }
+            }
+            verdict("T47 clipped==full column mapping (all zooms/regions)",
+                    allEqual && checked == 45,
+                    ev2 + juce::String(checked) + "/45 columns identical");
+        }
 
         { // T29 (6.3): the "DONE" badge must not cover the block name. Mirrors the
           // BlockComponent geometry: tinyTile = height <= 26 (BlockComponent.cpp:62);

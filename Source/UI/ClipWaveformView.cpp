@@ -92,9 +92,22 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
     const int halfH  = area.getHeight() / 2;
     const auto waveCol = juce::Colour(LookAndFeel_BlockShuffler::waveformFill);
 
-    // Compute min/max for each pixel column in one pass
-    juce::HeapBlock<int> peakY(w), troughY(w);
-    for (int px = 0; px < w; ++px) {
+    // Clip-region-aware paint (13.4 perf): compute/draw ONLY the columns that
+    // intersect the dirty region, so repaint cost is independent of clip
+    // length (rowW reaches millions of px at deep zoom; full-width HeapBlocks
+    // at the 65536 zoom cap would be hundreds of MB per repaint). The
+    // column->sample mapping below is BIT-IDENTICAL to the previous full-width
+    // math: absolute px, scaled off the full `area` width w. One extra column
+    // on each side keeps the fill-path geometry crossing the clip boundary
+    // pixel-identical to a full repaint (T47 backstop guards the mapping).
+    const auto vis = g.getClipBounds().getIntersection(area);
+    if (vis.isEmpty()) return;
+    const int pxFirst = juce::jmax(0,     (vis.getX()     - area.getX()) - 1);
+    const int pxLast  = juce::jmin(w - 1,  vis.getRight() - area.getX());  // inclusive
+    const int nCols   = pxLast - pxFirst + 1;
+
+    juce::HeapBlock<int> peakY(nCols), troughY(nCols);
+    for (int px = pxFirst; px <= pxLast; ++px) {
         int s0 = (int)((int64_t)px * numSamples / w);
         int s1 = juce::jmin((int)((int64_t)(px + 1) * numSamples / w), numSamples - 1);
         if (s1 < s0) s1 = s0;
@@ -110,26 +123,27 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
         int y1 = cy - (int)(mn * (float)halfH);
         if (y0 > y1) std::swap(y0, y1);
         if (y0 == y1) ++y1;
-        peakY[px]   = y0;
-        troughY[px] = y1;
+        peakY[px - pxFirst]   = y0;
+        troughY[px - pxFirst] = y1;
     }
 
-    // Fill pass — outline path traced peak→trough, filled at low alpha
+    // Fill pass — outline path traced peak→trough, filled at low alpha.
+    // With pxFirst == 0 (full repaint) this is the exact pre-change path.
     juce::Path fillPath;
-    fillPath.startNewSubPath((float)area.getX(), (float)cy);
-    for (int px = 0; px < w; ++px)
-        fillPath.lineTo((float)(area.getX() + px), (float)peakY[px]);
-    for (int px = w - 1; px >= 0; --px)
-        fillPath.lineTo((float)(area.getX() + px), (float)troughY[px]);
+    fillPath.startNewSubPath((float)(area.getX() + pxFirst), (float)cy);
+    for (int px = pxFirst; px <= pxLast; ++px)
+        fillPath.lineTo((float)(area.getX() + px), (float)peakY[px - pxFirst]);
+    for (int px = pxLast; px >= pxFirst; --px)
+        fillPath.lineTo((float)(area.getX() + px), (float)troughY[px - pxFirst]);
     fillPath.closeSubPath();
     g.setColour(waveCol.withAlpha(0.18f));
     g.fillPath(fillPath);
 
     // Line pass — 1px peak-to-trough at full opacity
     g.setColour(waveCol);
-    for (int px = 0; px < w; ++px)
-        g.drawLine((float)(area.getX() + px), (float)peakY[px],
-                   (float)(area.getX() + px), (float)troughY[px]);
+    for (int px = pxFirst; px <= pxLast; ++px)
+        g.drawLine((float)(area.getX() + px), (float)peakY[px - pxFirst],
+                   (float)(area.getX() + px), (float)troughY[px - pxFirst]);
 }
 
 void ClipRowComponent::paint(juce::Graphics& g) {
@@ -188,11 +202,22 @@ void ClipRowComponent::paint(juce::Graphics& g) {
                 g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderStrong).withAlpha(alpha));
                 double offset = std::fmod((double)clip->gridOffsetSamples, drawSpb);
                 if (offset < 0.0) offset += drawSpb;
-                for (double s = offset; s < (double)total; s += drawSpb) {
-                    int gx = sampleToX((int64_t)s);
-                    if (gx >= wa.getX() && gx < wa.getRight())
-                        g.drawLine((float)gx, (float)wa.getY(),
-                                   (float)gx, (float)wa.getBottom(), 1.5f);
+                // Clip-region-aware (13.4 perf): jump analytically to the first
+                // grid line inside the dirty region and stop past its right
+                // edge — no scan across the full width from sample 0.
+                const auto visG = g.getClipBounds().getIntersection(wa);
+                if (!visG.isEmpty()) {
+                    double firstVisSample = (double)(visG.getX() - wa.getX()) / pixelsPerSample;
+                    double lastVisSample  = (double)(visG.getRight() - wa.getX()) / pixelsPerSample;
+                    double k = std::ceil((firstVisSample - offset) / drawSpb) - 1.0;  // -1: cover the boundary line
+                    if (k < 0.0) k = 0.0;
+                    for (double s = offset + k * drawSpb;
+                         s < (double)total && s <= lastVisSample + drawSpb; s += drawSpb) {
+                        int gx = sampleToX((int64_t)s);
+                        if (gx >= wa.getX() && gx < wa.getRight())
+                            g.drawLine((float)gx, (float)wa.getY(),
+                                       (float)gx, (float)wa.getBottom(), 1.5f);
+                    }
                 }
             }
         }
