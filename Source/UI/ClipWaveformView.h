@@ -164,6 +164,11 @@ private:
     void removeClip(Clip* clip);
     void browseForClip();
     float computeMaxZoom() const;
+    /** Change zoom keeping the time under the view CENTRE fixed (13.4 UX:
+     *  without anchoring, the kept pixel-x drifts the view to the clip start
+     *  on every zoom step). Captures the centre time-fraction BEFORE the zoom
+     *  changes, restores it after the deferred re-layout, clamped. */
+    void setZoomAnchored(float newFactor);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipWaveformView)
 };

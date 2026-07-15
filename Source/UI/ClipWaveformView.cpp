@@ -443,12 +443,7 @@ ClipWaveformView::ClipWaveformView() {
     // Route Cmd+scroll from the viewport subclass to our zoom logic.
     viewport.onZoomScroll = [this](float deltaY) {
         float delta = deltaY > 0 ? 1.25f : 0.8f;
-        zoomFactor  = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor * delta);
-        juce::Component::SafePointer<ClipWaveformView> safeThis(this);
-        juce::MessageManager::callAsync(
-            [safeThis] {
-                if (safeThis) safeThis->resized();
-            });
+        setZoomAnchored(zoomFactor * delta);
     };
     addAndMakeVisible(viewport);
 
@@ -462,9 +457,9 @@ ClipWaveformView::ClipWaveformView() {
                 if (safe) safe->resized();
             });
     };
-    zoomInBtn .onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor * 1.5f); applyZoom(); };
-    zoomOutBtn.onClick = [this, applyZoom] { zoomFactor = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor / 1.5f); applyZoom(); };
-    zoomFitBtn.onClick = [this, applyZoom] { zoomFactor = 1.0f; applyZoom(); };
+    zoomInBtn .onClick = [this] { setZoomAnchored(zoomFactor * 1.5f); };
+    zoomOutBtn.onClick = [this] { setZoomAnchored(zoomFactor / 1.5f); };
+    zoomFitBtn.onClick = [this, applyZoom] { zoomFactor = 1.0f; applyZoom(); };  // fit: x clamps to 0 naturally
     zoomInBtn .setTooltip("Zoom in  [Cmd+scroll]");
     zoomOutBtn.setTooltip("Zoom out  [Cmd+scroll]");
     zoomFitBtn.setTooltip("Reset zoom to fit");
@@ -783,11 +778,7 @@ void ClipWaveformView::mouseWheelMove(const juce::MouseEvent& e,
     // delegate zoom to shared logic, or scroll the viewport manually.
     if (e.mods.isCommandDown()) {
         float delta = w.deltaY > 0 ? 1.25f : 0.8f;
-        zoomFactor  = juce::jlimit(1.0f, computeMaxZoom(), zoomFactor * delta);
-        juce::MessageManager::callAsync(
-            [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
-                if (safe) safe->resized();
-            });
+        setZoomAnchored(zoomFactor * delta);
     } else {
         auto pos = viewport.getViewPosition();
         int newY = juce::jlimit(
@@ -824,6 +815,30 @@ float ClipWaveformView::computeMaxZoom() const {
     maxZoom = juce::jmax(maxZoom, 1.0);
     maxZoom = juce::jmin(maxZoom, 65536.0);
     return (float)maxZoom;
+}
+
+void ClipWaveformView::setZoomAnchored(float newFactor) {
+    // Anchor = the time fraction at the view centre, captured BEFORE the zoom
+    // factor changes (contentArea still has the old width here).
+    const auto pos  = viewport.getViewPosition();
+    const int  visW = juce::jmax(1, viewport.getMaximumVisibleWidth());
+    const double anchorFrac = ((double)pos.x + (double)visW * 0.5)
+                            / (double)juce::jmax(1, contentArea.getWidth());
+
+    zoomFactor = juce::jlimit(1.0f, computeMaxZoom(), newFactor);
+
+    // Deferred re-layout kept from the original zoom paths (never resize the
+    // viewport content mid-wheel-event), then restore the anchored centre.
+    juce::MessageManager::callAsync(
+        [safe = juce::Component::SafePointer<ClipWaveformView>(this), anchorFrac, visW] {
+            if (!safe) return;
+            safe->resized();
+            const int contentW = safe->contentArea.getWidth();
+            const int newX = juce::jlimit(0, juce::jmax(0, contentW - visW),
+                juce::roundToInt(anchorFrac * (double)contentW - (double)visW * 0.5));
+            const auto p = safe->viewport.getViewPosition();
+            safe->viewport.setViewPosition(newX, p.y);
+        });
 }
 
 } // namespace BlockShuffler
