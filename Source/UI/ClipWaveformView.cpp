@@ -441,9 +441,10 @@ ClipWaveformView::ClipWaveformView() {
     // immediately reclaims focus and consumes arrow keys for scrolling instead of nudging.
     viewport.setWantsKeyboardFocus(false);
     // Route Cmd+scroll from the viewport subclass to our zoom logic.
-    viewport.onZoomScroll = [this](float deltaY) {
+    viewport.onZoomScroll = [this](float deltaY, int mouseX) {
+        // mouseX is viewport-local (visible) x — anchor the zoom on the cursor.
         float delta = deltaY > 0 ? 1.25f : 0.8f;
-        setZoomAnchored(zoomFactor * delta);
+        setZoomAnchored(zoomFactor * delta, (double)mouseX);
     };
     addAndMakeVisible(viewport);
 
@@ -457,8 +458,8 @@ ClipWaveformView::ClipWaveformView() {
                 if (safe) safe->resized();
             });
     };
-    zoomInBtn .onClick = [this] { setZoomAnchored(zoomFactor * 1.5f); };
-    zoomOutBtn.onClick = [this] { setZoomAnchored(zoomFactor / 1.5f); };
+    zoomInBtn .onClick = [this] { setZoomAnchored(zoomFactor * 1.5f, viewport.getMaximumVisibleWidth() * 0.5); };
+    zoomOutBtn.onClick = [this] { setZoomAnchored(zoomFactor / 1.5f, viewport.getMaximumVisibleWidth() * 0.5); };
     zoomFitBtn.onClick = [this, applyZoom] { zoomFactor = 1.0f; applyZoom(); };  // fit: x clamps to 0 naturally
     zoomInBtn .setTooltip("Zoom in  [Cmd+scroll]");
     zoomOutBtn.setTooltip("Zoom out  [Cmd+scroll]");
@@ -777,8 +778,12 @@ void ClipWaveformView::mouseWheelMove(const juce::MouseEvent& e,
     // Events that land directly on ClipWaveformView (outside the viewport area):
     // delegate zoom to shared logic, or scroll the viewport manually.
     if (e.mods.isCommandDown()) {
+        // e is in ClipWaveformView coords (this handler catches events landing
+        // outside the viewport, e.g. the zoom bar) — convert to viewport-local
+        // visible x; setZoomAnchored clamps it into [0, visW].
         float delta = w.deltaY > 0 ? 1.25f : 0.8f;
-        setZoomAnchored(zoomFactor * delta);
+        const int mx = viewport.getLocalPoint(this, e.getPosition()).x;
+        setZoomAnchored(zoomFactor * delta, (double)mx);
     } else {
         auto pos = viewport.getViewPosition();
         int newY = juce::jlimit(
@@ -817,25 +822,28 @@ float ClipWaveformView::computeMaxZoom() const {
     return (float)maxZoom;
 }
 
-void ClipWaveformView::setZoomAnchored(float newFactor) {
-    // Anchor = the time fraction at the view centre, captured BEFORE the zoom
-    // factor changes (contentArea still has the old width here).
+void ClipWaveformView::setZoomAnchored(float newFactor, double anchorXinVisible) {
+    // Anchor = the time fraction at anchorXinVisible (viewport visible coord),
+    // captured BEFORE the zoom factor changes (contentArea still has the old
+    // width here). anchorXinVisible = visW/2 gives centre anchoring (buttons);
+    // wheel paths pass the cursor x so the sample under the cursor stays put.
     const auto pos  = viewport.getViewPosition();
     const int  visW = juce::jmax(1, viewport.getMaximumVisibleWidth());
-    const double anchorFrac = ((double)pos.x + (double)visW * 0.5)
+    const double anchorX    = juce::jlimit(0.0, (double)visW, anchorXinVisible);
+    const double anchorFrac = ((double)pos.x + anchorX)
                             / (double)juce::jmax(1, contentArea.getWidth());
 
     zoomFactor = juce::jlimit(1.0f, computeMaxZoom(), newFactor);
 
     // Deferred re-layout kept from the original zoom paths (never resize the
-    // viewport content mid-wheel-event), then restore the anchored centre.
+    // viewport content mid-wheel-event), then restore the anchored point.
     juce::MessageManager::callAsync(
-        [safe = juce::Component::SafePointer<ClipWaveformView>(this), anchorFrac, visW] {
+        [safe = juce::Component::SafePointer<ClipWaveformView>(this), anchorFrac, anchorX, visW] {
             if (!safe) return;
             safe->resized();
             const int contentW = safe->contentArea.getWidth();
             const int newX = juce::jlimit(0, juce::jmax(0, contentW - visW),
-                juce::roundToInt(anchorFrac * (double)contentW - (double)visW * 0.5));
+                juce::roundToInt(anchorFrac * (double)contentW - anchorX));
             const auto p = safe->viewport.getViewPosition();
             safe->viewport.setViewPosition(newX, p.y);
         });

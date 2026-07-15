@@ -73,7 +73,10 @@ private:
 /** Viewport subclass that routes Cmd+scroll to a zoom callback instead of scrolling. */
 class ZoomableViewport : public juce::Viewport {
 public:
-    std::function<void(float deltaY)> onZoomScroll;
+    // deltaY + the mouse x in VIEWPORT-LOCAL (visible) coordinates. JUCE
+    // bubbles child wheel events via getEventRelativeTo(parent), so e here is
+    // already viewport-local: x==0 is the visible left edge.
+    std::function<void(float deltaY, int mouseXinViewport)> onZoomScroll;
 
     void paint(juce::Graphics& g) override {
         g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
@@ -81,7 +84,7 @@ public:
 
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override {
         if (e.mods.isCommandDown() && onZoomScroll) {
-            onZoomScroll(w.deltaY);
+            onZoomScroll(w.deltaY, e.getPosition().x);
         } else {
             juce::Viewport::mouseWheelMove(e, w);
         }
@@ -164,11 +167,14 @@ private:
     void removeClip(Clip* clip);
     void browseForClip();
     float computeMaxZoom() const;
-    /** Change zoom keeping the time under the view CENTRE fixed (13.4 UX:
-     *  without anchoring, the kept pixel-x drifts the view to the clip start
-     *  on every zoom step). Captures the centre time-fraction BEFORE the zoom
-     *  changes, restores it after the deferred re-layout, clamped. */
-    void setZoomAnchored(float newFactor);
+    /** Change zoom keeping the time under `anchorXinVisible` fixed on screen
+     *  (13.4 UX: without anchoring, the kept pixel-x drifts the view to the
+     *  clip start on every zoom step). anchorXinVisible is in the viewport's
+     *  VISIBLE coordinate: 0 = left edge on screen, visW = right edge. Wheel
+     *  paths pass the cursor x; buttons pass visW/2 (centre). Captures the
+     *  anchor time-fraction BEFORE the zoom changes, restores it after the
+     *  deferred re-layout, clamped to [0, contentW - visW]. */
+    void setZoomAnchored(float newFactor, double anchorXinVisible);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipWaveformView)
 };
