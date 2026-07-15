@@ -1,6 +1,6 @@
 # BlockShuffler — ACCEPTANCE_TESTS.md (Client Measure of Success, rev 2026-07-06)
 
-Derived 1:1 from the client's final feature list (2026-07-03) and clarifications. ALL tests must PASS before delivery. Run top to bottom. Any FAIL blocks delivery. After any code change, re-run the affected group AND groups 4–5 (highest regression risk).
+Derived from the client's final feature list (2026-07-03) and clarifications. 
 
 ## Group 1 — Blocks
 - [ ] 1.1 "+" button adds a block with palette colour
@@ -17,7 +17,7 @@ Derived 1:1 from the client's final feature list (2026-07-03) and clarifications
 - [ ] 2.4 Right-click clip → rename, colour, remove all work
 - [ ] 2.5 Per-clip weight slider: changing one clip never changes another clip's value
 - [ ] 2.6 Weights drive selection: 80/15/5 over 30 plays roughly matches
-- [ ] 2.7 Single clip at 0% weight → shows 100% effective → always plays
+- [ ] 2.7 Clip at 0% weight → shows 0% effective → never selected; a block whose clips are ALL at 0% is skipped (plays nothing) [Carter correction 2026-07-15]
 - [ ] 2.8 Start/end markers draggable; snap to grid; Shift bypasses snap
 - [ ] 2.9 Drag an existing clip from one block into a later block → clip moves; block strip does NOT scroll back to the start
 
@@ -28,16 +28,16 @@ Derived 1:1 from the client's final feature list (2026-07-03) and clarifications
 - [ ] 3.4 Different tempos: lead-in/tail time-stretch to adjacent tempo by default; pitch preserved
 - [ ] 3.5 Retain Lead-In Tempo → lead-in plays original speed; Retain Tail Tempo → tail original speed; both flags together → no stretching at the join
 
-## Group 4 — Links (HIGH REGRESSION AREA)
+## Group 4 — Links
 - [ ] 4.1 Right-click → Link to → click target creates a link with an arc + readable label (block names + %)
 - [ ] 4.2 Multiple link labels never overlap
 - [ ] 4.3 Link at 100%: the two SPECIFIC linked blocks swap positions EVERY play — deterministic, same order every time
 - [ ] 4.4 Blocks 1 & 3 linked at 100% with block 2 between: order is 3, 2, 1 every play; block 2 never moves; nothing is dropped
 - [ ] 4.5 Link at 0%: never swaps. Link at 50%: swaps about half of 20 plays
-- [ ] 4.6 Link to a block inside a stack swaps THAT block only (never a random stack member)
+- [ ] 4.6 Link to a block inside a stack swaps THAT block only — EXCEPT a link to the stack's BASE block, which swaps the WHOLE stack [Carter correction 2026-07-15]
 - [ ] 4.7 Remove Link works; undo restores it
 
-## Group 5 — Stacks (HIGH REGRESSION AREA — client's #1 complaint)
+## Group 5 — Stacks 
 - [ ] 5.1 Stack of 3, SEQUENTIAL, How Many to Play = 1 → EXACTLY ONE block plays (repeat 10×: always exactly one, weighted-random which)
 - [ ] 5.2 Stack of 3, SEQUENTIAL, play 2 → exactly two play, one after another, random order
 - [ ] 5.3 Stack of 3, SEQUENTIAL, play 3 → all three play back-to-back, random order, then the song continues
@@ -97,11 +97,11 @@ Derived 1:1 from the client's final feature list (2026-07-03) and clarifications
 - [ ] 12.2 Windows build: same behavior as macOS for groups 1–11; logo and app icon appear (BinaryData-embedded)
 - [ ] 12.3 Logo: background matches transport bar exactly, sized ~2/3 bar height, sits just left of Save As
 
-## Group 13 — UI fidelity (client-reported visual defects)
+## Group 13 — UI fidelity 
 - [ ] 13.1 Clip/block colour renders true — no global blue tint; each palette colour displays correctly ("yellow" is yellow)
 - [ ] 13.2 Large stack of 9 blocks → all tiles visible and reachable, none cut off out of view
 - [ ] 13.3 Long clip → grid lines do not obscure the waveform preview
-- [ ] 13.4 Zoom maximum scales with clip length (short clips zoom further than long clips)
+- [ ] 13.4 Zoom-in limit does NOT change with clip length — the beat (~0.5s window) is reachable on long clips too [Carter correction 2026-07-15]
 
 ## Sign-off
 All boxes checked → build both platforms → send to client with this checklist attached.
