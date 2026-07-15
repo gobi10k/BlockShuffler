@@ -53,7 +53,7 @@ Expected on BOTH platforms: `STEP6 RESULT: ALL PASS` (T1–T46).
 | 4.3 | 100% link swaps EVERY play, deterministic | T9 | 10/10 resolves swapped, same resulting order each time | PASS (T9, 2026-07-14) | |
 | 4.4 | 1&3 linked 100%, 2 between → 3,2,1 | T9 | Order 3,2,1 every play; block 2 never moves; nothing dropped; model positions unmutated | PASS (T9, 2026-07-14) | |
 | 4.5 | 0% never / 50% ≈ half | T13 | 0/200 swaps at 0%; ~103/200 at 50% | PASS (T13, 2026-07-14) | |
-| 4.6 | Link into stack swaps THAT block only | T14 | 20/20 the specific linked member swaps; stack-mates untouched | PASS (T14, 2026-07-14) | |
+| 4.6 | Link into stack swaps THAT block only; link to the stack's BASE swaps the WHOLE stack (Carter correction 2026-07-15) | T14 + T14b | Non-base: 20/20 only the linked member swaps, stack-mates untouched (T14). Base: 20/20 W takes the stack's slot, intact stack takes W's slot, members still shuffle within it, 0% control never swaps (T14b) | PASS (T14+T14b, 2026-07-15) | |
 | 4.7 | Remove link; undo restores | T15 + MAN | Link gone after remove; one undo restores link AND its % | PASS (T15 + MAN, 2026-07-14) | |
 
 ## Group 5 — Stacks (HIGH REGRESSION — client's #1 complaint)
@@ -138,14 +138,14 @@ Expected on BOTH platforms: `STEP6 RESULT: ALL PASS` (T1–T46).
 | 13.1 | Colours render true (yellow is yellow) | T45 + MAN (visual) | All 8 palette hues visually correct; no blue tint | PASS (T45 + MAN, 2026-07-14) | |
 | 13.2 | 9-block stack: all tiles reachable | T26 + MAN | Every tile visible or reachable via stack scroll; none lost | PASS (T26 + MAN, 2026-07-14) | |
 | 13.3 | Grid lines don't obscure long-clip waveform | T27 | Adaptive grid keeps ≥8px spacing at any zoom | PASS (T27, 2026-07-14) | |
-| 13.4 | Zoom max scales with clip length | T28 | computeMaxZoom = duration/0.5s; short clips zoom further | PASS (T28, 2026-07-14) | |
+| 13.4 | Zoom-in limit constant with clip length: deepest window ~0.5s on long clips too (Carter correction 2026-07-15) | T28 (reframed) + MAN | dur/maxZoom = 0.5 +/- eps at 2/30/300/3000s; tiny-clip clamp intact; 65536 safety cap (T28 PASS 2026-07-15). MAN: zoom a >5min clip to the beat on the FRESH build | PENDING fresh-build manual re-verify (harness T28 PASS 2026-07-15) | |
 
 ## Section A — INVARIANTS (project rules; each must hold on BOTH platforms)
 | # | invariant | how to verify | result |
 |---|---|---|---|
 | A1 | isDone is cosmetic-only (never affects resolve/playback/export) | T10, T21, T22 + `grep -rn isDone Source/Audio/` → zero functional hits | Mac PASS (T10/T21/T22 + grep comments-only, 2026-07-14); Windows pending |
 | A2 | stackPlayCount.pick honored EXACTLY (never more/fewer) | T1–T5, T18 + jassert guard ArrangementResolver.cpp:320 present | Mac PASS (T1–T5/T18 + jassert present, 2026-07-14); Windows pending |
-| A3 | Link swaps: bidirectional, deterministic at 100%, third blocks never move | T9, T13, T14 (positions asserted unmutated) | Mac PASS (T9/T13/T14, 2026-07-14); Windows pending |
+| A3 | Link swaps: bidirectional, deterministic at 100%, third blocks never move — EXCEPT stack-mates of a BASE endpoint, which move with their stack by design (Carter 4.6, 2026-07-15) | T9, T13, T14, T14b (positions asserted unmutated) | Mac PASS (T9/T13/T14 2026-07-14 + T14b 2026-07-15); Windows pending |
 | A4 | Lead-in/tail crossfade at every join (incl. entry 0 full-gain lead-in) | T38 (gain envelopes, numeric) + T2 timeline | Mac PASS (T38+T2, 2026-07-14); Windows pending |
 | A5 | Sequential timeline: zero gap, zero unintended overlap | T2, T18 (gapless 10/10) | Mac PASS (T2/T18, 2026-07-14); Windows pending |
 | A6 | ONE mixing path: EntryMixer::mixEntryToBuffer serves playback AND export | `grep -rn mixEntryToBuffer Source/` → exactly PlaybackEngine + ExportRenderer call sites, one definition | Mac PASS (grep: one def EntryMixer.h:22, callers PlaybackEngine.cpp:130 + ExportRenderer.cpp:34 only, 2026-07-14); Windows pending |
