@@ -971,6 +971,90 @@ int main(int argc, char* argv[]) {
                     juce::String(ok) + "/20, sample [" + sample + "], pos before[" + posBefore
                     + "] after[" + posAfter + "]");
         }
+        { // T14b (4.6 Carter correction): link to the stack's BASE block swaps
+          // the WHOLE stack (link to a non-base member still extracts only that
+          // block -- guarded by T14 above).  Setup: stack {S1,S2,S3} (S1 = base,
+          // SEQ, pc=3), follower W, link W<->S1 @100%.
+          // Expected per resolve: W takes the stack's slot (entry 0); the INTACT
+          // 3-member stack takes W's slot (entries 1-3, all members present,
+          // random order); ascending timeline; model positions unmutated; 20/20.
+          // Negative control @0%: never swaps -- stack first, W last, 20/20.
+            auto buildT14b = [&](Project& p, float linkProb) -> juce::String {
+                auto* S1 = p.addBlock("S1"); auto* S2 = p.addBlock("S2"); auto* S3 = p.addBlock("S3");
+                auto* W  = p.addBlock("W");
+                addClipTo(S1, "c1", 1000); addClipTo(S2, "c2", 1100);
+                addClipTo(S3, "c3", 1200); addClipTo(W,  "cW", 700);
+                p.stackBlocks(S2->id, S1->id);
+                p.stackBlocks(S3->id, S1->id);
+                S1->stackPlayCount.values.set(0, 3);
+                p.propagateStackSettings(S1->stackGroup, S1);
+                p.addLink(W->id, S1->id, linkProb);
+                juce::String pos;
+                for (auto* b : p.blocks) pos << b->name << "=" << juce::String(b->position) << ";";
+                return pos;
+            };
+
+            { // 100%: whole stack swaps with W, deterministic slot order 20/20
+                Project p; juce::String posBefore = buildT14b(p, 1.0f);
+                juce::Random r(6141); ArrangementResolver res;
+                int ok = 0; juce::String sample;
+                std::set<int> s1Idx;  // INTACT-stack proof: S1 must shuffle WITHIN
+                // the stack (varying entry index). The old extract-only behaviour
+                // pins S1 into its own trailing solo slot => always entry 3.
+                for (int i = 0; i < 20; ++i) {
+                    auto arr = res.resolve(p, r);
+                    bool good = (arr.entries.size() == 4);
+                    std::map<juce::String, int> idx;
+                    if (good) {
+                        for (int e = 0; e < 4; ++e) {
+                            auto* b = p.getBlockById(arr.entries[e].blockId);
+                            if (!b || idx.count(b->name)) { good = false; break; }
+                            idx[b->name] = e;
+                            if (e > 0 && arr.entries[e].timelinePos <= arr.entries[e - 1].timelinePos)
+                                good = false;
+                        }
+                    }
+                    if (good)
+                        good = idx.count("S1") && idx.count("S2") && idx.count("S3") && idx.count("W")
+                               && idx["W"] == 0
+                               && idx["S1"] >= 1 && idx["S2"] >= 1 && idx["S3"] >= 1;
+                    if (good) s1Idx.insert(idx["S1"]);
+                    ok += good;
+                    if (i == 0)
+                        for (const auto& e : arr.entries) {
+                            auto* b = p.getBlockById(e.blockId);
+                            sample << (b ? b->name : juce::String("?")) << " ";
+                        }
+                }
+                juce::String posAfter;
+                for (auto* b : p.blocks) posAfter << b->name << "=" << juce::String(b->position) << ";";
+                verdict("T14b link to BASE swaps WHOLE stack: W,{S1,S2,S3} intact + positions unmutated",
+                        ok == 20 && s1Idx.size() >= 2 && posBefore == posAfter,
+                        juce::String(ok) + "/20, s1 entry indices seen="
+                        + juce::String((int)s1Idx.size()) + ", sample [" + sample
+                        + "], pos before[" + posBefore + "] after[" + posAfter + "]");
+            }
+            { // 0% negative control: never swaps
+                Project p; buildT14b(p, 0.0f);
+                juce::Random r(6142); ArrangementResolver res;
+                int ok = 0;
+                for (int i = 0; i < 20; ++i) {
+                    auto arr = res.resolve(p, r);
+                    bool good = (arr.entries.size() == 4);
+                    if (good) {
+                        auto* last = p.getBlockById(arr.entries[3].blockId);
+                        good = (last != nullptr && last->name == "W");
+                        for (int e = 0; e < 3 && good; ++e) {
+                            auto* b = p.getBlockById(arr.entries[e].blockId);
+                            good = (b != nullptr && b->name != "W");
+                        }
+                    }
+                    ok += good;
+                }
+                verdict("T14b control link@0%: stack stays first, W last", ok == 20,
+                        juce::String(ok) + "/20");
+            }
+        }
         { // T15 (4.7): undo-of-link structural — create-link and change-% both
           // revert to string-identical JSON via resetAndLoad (the undo path).
             auto tmpDir = juce::File::getSpecialLocation(juce::File::tempDirectory)

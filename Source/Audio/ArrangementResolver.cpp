@@ -66,9 +66,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     // Pre-roll every link's swap decision.
     //
     // Cross-stack links (blocks in different stacks, or at least one standalone):
-    //   Apply the swap to localPos immediately and record both block IDs in
-    //   swappedBlockIds.  In slot-building, any block in swappedBlockIds is
-    //   treated as standalone for this pass, leaving its original stack.
+    //   Non-base endpoint: swap it in localPos and record its ID in
+    //   swappedBlockIds — slot-building treats it as standalone for this pass,
+    //   leaving its original stack.
+    //   BASE endpoint (Carter 4.6): the WHOLE stack swaps — the group's slot
+    //   anchor (its minimum-localPos member) takes the other endpoint's
+    //   position and NO member enters swappedBlockIds, so the group stays
+    //   pooled into one slot with stack semantics intact.
     //
     // Same-stack links (both blocks share the same stackGroup >= 0):
     //   The decision is carried forward into the sequential-stack slot loop,
@@ -79,6 +83,26 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     linkDecisions.reserve(shuffledLinks.size());
     std::unordered_set<std::string> swappedBlockIds;
 
+    // Anchor key for one triggered link endpoint (Carter 4.6):
+    //   non-base → the block itself (single-block extract-and-swap, unchanged);
+    //   BASE     → the stack member with the MINIMUM current localPos (the
+    //              member that determines the stack's slot in the position
+    //              sort), skipping members already extracted this pass.
+    auto anchorKeyFor = [&](const Block* blk, bool isBase) -> std::string {
+        std::string bestKey = blk->id.toStdString();
+        if (!isBase) return bestKey;
+        int bestPos = INT_MAX;
+        for (auto* m : project.blocks) {
+            if (m->stackGroup != blk->stackGroup) continue;
+            auto key = m->id.toStdString();
+            if (swappedBlockIds.count(key)) continue;  // extracted this pass
+            auto it = localPos.find(key);
+            int pos = (it != localPos.end()) ? it->second : m->position;
+            if (pos < bestPos) { bestPos = pos; bestKey = key; }
+        }
+        return bestKey;
+    };
+
     for (auto* lnk : shuffledLinks) {
         bool triggered = (rng.nextFloat() < lnk->swapProbability);
         linkDecisions.push_back({lnk, triggered});
@@ -86,21 +110,30 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
         auto itBa = blockById.find(lnk->blockA.toStdString());
         auto itBb = blockById.find(lnk->blockB.toStdString());
-        bool sameStack = (itBa != blockById.end() && itBb != blockById.end()
-                          && itBa->second->stackGroup >= 0
-                          && itBa->second->stackGroup == itBb->second->stackGroup);
+        if (itBa == blockById.end() || itBb == blockById.end()) continue;
+        const Block* ba = itBa->second;
+        const Block* bb = itBb->second;
+        bool sameStack = (ba->stackGroup >= 0
+                          && ba->stackGroup == bb->stackGroup);
         if (sameStack) continue;  // order enforced in sequential slot loop
+                                  // (incl. same-stack links touching the base)
 
-        // Cross-stack: swap the two specific blocks in localPos and mark them
-        // as swapped.  Stack mates of either block are NOT touched.
-        // swappedBlockIds (checked in slot-building below) pulls each swapped
-        // block out of its former stack and gives it its own slot.
-        auto itA = localPos.find(lnk->blockA.toStdString());
-        auto itB = localPos.find(lnk->blockB.toStdString());
+        // Cross-stack swap. INVARIANT A3 (amended for Carter 4.6): third
+        // blocks never move — EXCEPT stack-mates of a BASE endpoint, which
+        // move with their stack by design. Link to a non-base member still
+        // extracts and swaps only that block (T14); link to the BASE swaps
+        // the whole stack (T14b).
+        const bool aIsBase = (ba->stackGroup >= 0
+            && StackPicker::findStackBase(project.blocks, ba->stackGroup) == ba);
+        const bool bIsBase = (bb->stackGroup >= 0
+            && StackPicker::findStackBase(project.blocks, bb->stackGroup) == bb);
+
+        auto itA = localPos.find(anchorKeyFor(ba, aIsBase));
+        auto itB = localPos.find(anchorKeyFor(bb, bIsBase));
         if (itA != localPos.end() && itB != localPos.end()) {
             std::swap(itA->second, itB->second);  // model untouched
-            swappedBlockIds.insert(lnk->blockA.toStdString());
-            swappedBlockIds.insert(lnk->blockB.toStdString());
+            if (!aIsBase) swappedBlockIds.insert(ba->id.toStdString());
+            if (!bIsBase) swappedBlockIds.insert(bb->id.toStdString());
         }
     }
 

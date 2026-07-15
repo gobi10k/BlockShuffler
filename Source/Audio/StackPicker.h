@@ -20,6 +20,17 @@
 namespace BlockShuffler {
 namespace StackPicker {
 
+/** The stack's BASE block: the FIRST block in project/model order whose
+ *  stackGroup matches. SINGLE SOURCE OF TRUTH for "base of a stack" — used by
+ *  the always-play-base branch below and by ArrangementResolver's link-swap
+ *  base detection (Carter 4.6: a link to the base swaps the WHOLE stack). */
+inline Block* findStackBase(const juce::OwnedArray<Block>& projectBlocks, int stackGroup) {
+    if (stackGroup < 0) return nullptr;
+    for (auto* b : projectBlocks)
+        if (b->stackGroup == stackGroup) return b;
+    return nullptr;
+}
+
 struct Result {
     int playCount = 1;              // resolved "How Many to Play" for this pass
     std::vector<Block*> picked;     // exactly playCount blocks (fewer only if group is smaller)
@@ -58,11 +69,18 @@ inline Result pick(const std::vector<Block*>& groupBlocks,
     // pre-picked; the remaining (playCount - 1) are weighted-sampled from
     // the rest. With playCount == 1 only the base plays.
     if (isSimultaneous && groupBlocks[0]->alwaysPlayBase) {
-        Block* baseBlock = nullptr;
-        for (auto* pb : projectBlocks) {
-            if (std::find(groupBlocks.begin(), groupBlocks.end(), pb) != groupBlocks.end()) {
-                baseBlock = pb;
-                break;
+        Block* baseBlock = findStackBase(projectBlocks, groupBlocks[0]->stackGroup);
+        if (baseBlock == nullptr
+            || std::find(groupBlocks.begin(), groupBlocks.end(), baseBlock) == groupBlocks.end()) {
+            // Base not in this slot (defensive — links never extract a base
+            // post-4.6): fall back to the first member present in model order,
+            // the pre-4.6 definition, preserving behaviour exactly.
+            baseBlock = nullptr;
+            for (auto* pb : projectBlocks) {
+                if (std::find(groupBlocks.begin(), groupBlocks.end(), pb) != groupBlocks.end()) {
+                    baseBlock = pb;
+                    break;
+                }
             }
         }
         if (baseBlock != nullptr) {
