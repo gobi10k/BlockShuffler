@@ -138,7 +138,7 @@ Expected on BOTH platforms: `STEP6 RESULT: ALL PASS` (T1–T46).
 | 13.1 | Colours render true (yellow is yellow) | T45 + MAN (visual) | All 8 palette hues visually correct; no blue tint | PASS (T45 + MAN, 2026-07-14) | |
 | 13.2 | 9-block stack: all tiles reachable | T26 + MAN | Every tile visible or reachable via stack scroll; none lost | PASS (T26 + MAN, 2026-07-14) | |
 | 13.3 | Grid lines don't obscure long-clip waveform | T27 | Adaptive grid keeps ≥8px spacing at any zoom | PASS (T27, 2026-07-14) | |
-| 13.4 | Zoom-in limit constant with clip length: deepest window ~0.5s on long clips too (Carter correction 2026-07-15) | T28 (reframed) + MAN | dur/maxZoom = 0.5 +/- eps at 2/30/300/3000s; tiny-clip clamp intact; 65536 safety cap (T28 PASS 2026-07-15). MAN: zoom a >5min clip to the beat on the FRESH build | PENDING fresh-build manual re-verify (harness T28 PASS 2026-07-15) | |
+| 13.4 | Zoom-in limit constant with clip length: deepest window ~0.5s on long clips too (Carter correction 2026-07-15) | T28 (reframed) + MAN | dur/maxZoom = 0.5 +/- eps at 2/30/300/3000s; tiny-clip clamp intact; 65536 safety cap (T28 PASS 2026-07-15). MAN: zoom a >5min clip to the beat on the FRESH build | PASS (MAN 2026-07-15 - cursor-anchored zoom, smooth scroll at deep zoom, reaches the beat on a long clip; a416bd2 clip-region paint + T47, 1147a19 centre anchor, c6d91b2 cursor anchor; harness T28 PASS) | |
 
 ## Section A — INVARIANTS (project rules; each must hold on BOTH platforms)
 | # | invariant | how to verify | result |
