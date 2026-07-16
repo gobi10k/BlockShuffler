@@ -36,7 +36,11 @@ private:
     double currentSecs = 0.0;
     double totalSecs   = 0.0;
 
-    juce::Image logoImage;  // loaded once in constructor from BinaryData
+    juce::Image logoImage;        // loaded once in constructor from BinaryData
+    // 12.3: logo pre-scaled ONCE to the draw size with highResamplingQuality.
+    // Windows' software renderer aliases the ~28x downscale if done per-paint at
+    // the default (medium) quality; Mac's CoreGraphics only masked the problem.
+    juce::Image logoImageScaled;  // rebuilt in resized() only when the size changes
 
     // Rects calculated in resized(), used in paint()
     juce::Rectangle<int> timeDisplayArea;
