@@ -149,6 +149,16 @@ public:
      *  Call this when the project changes but the link structure is unchanged. */
     void refreshValues();
 
+    /** Height needed to lay out all current content (mirrors the removeFromTop
+     *  accounting in resized() — keep the two in sync). The panel lives in a
+     *  Viewport, so content taller than the window scrolls instead of getting
+     *  zero-height bounds from an exhausted layout area (5.12, >12 stack rows). */
+    int preferredHeight() const;
+
+    /** Height floor supplied by MainComponent (window-derived). The panel never
+     *  shrinks below this even when content is short. */
+    void setMinHeight(int h) { minPanelHeight = h; }
+
     // juce::Slider::Listener
     void sliderValueChanged(juce::Slider* slider) override;
     void sliderDragStarted (juce::Slider* slider) override;
@@ -165,6 +175,13 @@ private:
     Project* project      = nullptr;
     Clip*    selectedClip  = nullptr;
     Block*   selectedBlock = nullptr;
+
+    /** Guarded resize to jmax(preferredHeight(), minPanelHeight): only calls
+     *  setSize when the needed height differs (setSize fires resized(); resized()
+     *  never calls back here, so no recursion). Falls back to a plain resized()
+     *  when the height is already right, so callers always get a layout pass. */
+    void updatePanelHeight();
+    int  minPanelHeight = 800;
 
     // ── Clip section ─────────────────────────────────────────────────────────
     juce::Label  clipTitle;

@@ -95,6 +95,13 @@ void Project::removeBlock(const juce::String& blockId) {
             blocks.remove(i);
             for (int j = 0; j < blocks.size(); ++j)
                 blocks[j]->position = j;
+            // Prune links referencing the deleted block inside this same
+            // snapshot — NOT via removeLinksForBlock(), which would record a
+            // second undo transaction. `pre` already captured the links, so
+            // one undo restores the block and its links together.
+            for (int k = links.size() - 1; k >= 0; --k)
+                if (links[k]->blockA == blockId || links[k]->blockB == blockId)
+                    links.remove(k);
             sendChangeMessage();
             recordMutation(pre);
             return;

@@ -12,6 +12,7 @@
 #include "Audio/ExportRenderer.h"
 #include "Audio/PlaybackEngine.h"
 #include "Audio/StackPicker.h"
+#include "UI/InspectorPanel.h"
 #include "Utils/GridSnap.h"
 #include "UI/BlockLinkOverlay.h"
 #include "UI/LookAndFeel_BlockShuffler.h"
@@ -2828,6 +2829,69 @@ int main(int argc, char* argv[]) {
                         "pills=" + juce::String(pills.size()) + " (want 4), boxes: " + boxTxt
                         + (disjoint ? "DISJOINT" : "OVERLAP(BUG)"));
             }
+        }
+
+        { // T48 (BUG A): deleting a block prunes every link referencing it, as
+          // ONE undo entry — undo restores the block AND the link with its %.
+            Project p;
+            auto* A = p.addBlock("A"); p.addBlock("B"); auto* C = p.addBlock("C");
+            const juce::String aId = A->id, cId = C->id;
+            p.addLink(aId, cId, 0.37f);
+            const auto preDelete = juce::JSON::toString(p.toJSON());
+
+            p.removeBlock(cId);
+            bool pruned = true;
+            for (auto* l : p.links)
+                if (l->blockA == cId || l->blockB == cId) pruned = false;
+
+            p.undoManager.undo();  // single step must bring back block C + A<->C link
+            const bool restored = (juce::JSON::toString(p.toJSON()) == preDelete);
+            const bool linkBack = p.links.size() == 1
+                && ((p.links[0]->blockA == aId && p.links[0]->blockB == cId) ||
+                    (p.links[0]->blockA == cId && p.links[0]->blockB == aId))
+                && std::abs(p.links[0]->swapProbability - 0.37f) < 1e-6f;
+
+            verdict("T48 delete-block prunes its links; ONE undo restores block + link + %",
+                    pruned && restored && linkBack,
+                    juce::String("danglingAfterDelete: ") + (pruned ? "none" : "PRESENT(BUG)")
+                    + ", undoRestores: " + (restored ? "exact" : "MISMATCH")
+                    + ", linkBack: " + (linkBack ? "ok(0.37)" : "BAD"));
+        }
+
+        { // T49 (5.12 BUG B): headless inspector backstop — a Simultaneous stack
+          // of 16 blocks must give EVERY per-block chance slider non-zero bounds.
+          // The panel starts at the fixed 844px MainComponent used at the default
+          // 1200x700 window; content past that height must grow the panel (the
+          // viewport scrolls), not get zero-height rects from an exhausted area.
+            Project p;
+            Block* first = nullptr;
+            for (int i = 0; i < 16; ++i) {
+                auto* b = p.addBlock("S" + juce::String(i + 1));
+                b->stackGroup     = 0;
+                b->stackPlayMode  = StackPlayMode::Simultaneous;
+                b->stackPlayCount.values  = { 1, 2 };   // two How-Many rows
+                b->stackPlayCount.weights = { 0.5f, 0.5f };
+                if (first == nullptr) first = b;
+            }
+
+            InspectorPanel panel;
+            panel.setProject(&p);
+            panel.setBounds(0, 0, 210, 844);
+            panel.setBlock(first);
+
+            int visSliders = 0, zeroH = 0;
+            for (int i = 0; i < panel.getNumChildComponents(); ++i) {
+                if (auto* s = dynamic_cast<juce::Slider*>(panel.getChildComponent(i))) {
+                    if (!s->isVisible()) continue;
+                    ++visSliders;
+                    if (s->getHeight() <= 0) ++zeroH;
+                }
+            }
+            verdict("T49 5.12 inspector: 16-block SIM stack -> all chance sliders have non-zero bounds",
+                    visSliders >= 16 && zeroH == 0,
+                    "visibleSliders=" + juce::String(visSliders) + " (want >=16), zeroHeight="
+                    + juce::String(zeroH) + (zeroH > 0 ? " (BUG: clipped by fixed panel height)" : "")
+                    + ", panelH=" + juce::String(panel.getHeight()));
         }
 
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")

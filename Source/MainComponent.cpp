@@ -152,10 +152,12 @@ void MainComponent::resized() {
     transportBar  .setBounds(area.removeFromBottom(transportHeight));
     inspectorViewport.setBounds(area.removeFromRight(inspectorWidth));
 
-    // Set inspector panel size to accommodate all content (including stack settings)
-    // Width matches viewport, height is enough for full content with some margin
-    int panelHeight = juce::jmax(getHeight() - transportHeight + 200, 800);
-    inspectorPanel.setBounds(0, 0, inspectorWidth, panelHeight);
+    // Inspector height: window-derived floor, but never below what the content
+    // needs — big stacks/link lists grow the panel and the viewport scrolls (5.12).
+    int panelFloor = juce::jmax(getHeight() - transportHeight + 200, 800);
+    inspectorPanel.setMinHeight(panelFloor);
+    inspectorPanel.setBounds(0, 0, inspectorWidth,
+                             juce::jmax(panelFloor, inspectorPanel.preferredHeight()));
 
     auto blockArea = area.removeFromBottom(blockStripHeight);
     blockStrip .setBounds(blockArea);
