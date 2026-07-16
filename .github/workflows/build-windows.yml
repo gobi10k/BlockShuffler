@@ -2,7 +2,7 @@ name: Build Windows
 
 on:
   push:
-    branches: [ master, final_draft, UI_firstdraft, blockshuffler-ui-polish-wt6M4, UI_noLogo, fix-playback-ui-bugs-LD89P, claude/fix-playback-ui-bugs-LD89P, fix-audit-issues-2BRgG, claude/fix-audit-issues-2BRgG ]
+    branches: [ master, final_draft, UI_firstdraft, blockshuffler-ui-polish-wt6M4, UI_noLogo, fix-playback-ui-bugs-LD89P, claude/fix-playback-ui-bugs-LD89P, fix-audit-issues-2BRgG, claude/fix-audit-issues-2BRgG, worktree-ci-resolver-diag ]
   pull_request:
     branches: [ master, fix-audit-issues-2BRgG, claude/fix-audit-issues-2BRgG  ]
   workflow_dispatch:
@@ -32,3 +32,18 @@ jobs:
         with:
           name: BlockShuffler-Standalone-Windows
           path: build/BlockShuffler_artefacts/Release/Standalone/
+
+      - name: Configure ResolverDiag
+        run: cmake -B build-diag
+
+      - name: Build ResolverDiag
+        run: cmake --build build-diag --config Debug --target ResolverDiag
+
+      - name: Run ResolverDiag (T1-T46)
+        run: |
+          $out = & "build-diag\ResolverDiag_artefacts\Debug\ResolverDiag.exe" 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch [regex]::Escape("STEP6 RESULT: ALL PASS")) {
+            Write-Error "ResolverDiag did not report 'STEP6 RESULT: ALL PASS'"
+            exit 1
+          }
