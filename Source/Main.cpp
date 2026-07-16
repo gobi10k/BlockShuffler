@@ -3,6 +3,36 @@
 #include "MainComponent.h"
 #include "UI/LookAndFeel_BlockShuffler.h"
 
+#if JUCE_WINDOWS
+#include <shlobj.h>   // SHChangeNotify
+
+/** Self-registers the .bsp file association for the current user (HKCU — no admin,
+ *  no installer). Explorer double-click then launches us with the path as argv[1],
+ *  which initialise()/anotherInstanceStarted() already route to loadProject().
+ *  See docs/WINDOWS_PACKAGING.md; an installer is only needed for per-machine HKLM. */
+static void registerBspAssociation()
+{
+    const juce::String exePath = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                                     .getFullPathName();
+    const juce::String classes = "HKEY_CURRENT_USER\\Software\\Classes\\";
+    const juce::String progId  = "BlockShuffler.Project";
+    const juce::String command = "\"" + exePath + "\" \"%1\"";
+
+    // Only (re)write when the stored open command differs from this exe — first
+    // launch, or the exe was moved. Avoids registry writes on every start.
+    if (juce::WindowsRegistry::getValue(classes + progId + "\\shell\\open\\command\\", {}) == command)
+        return;
+
+    juce::WindowsRegistry::setValue(classes + ".bsp\\",                          progId);
+    juce::WindowsRegistry::setValue(classes + progId + "\\",                     "BlockShuffler Project");
+    juce::WindowsRegistry::setValue(classes + progId + "\\DefaultIcon\\",        "\"" + exePath + "\",0");
+    juce::WindowsRegistry::setValue(classes + progId + "\\shell\\open\\command\\", command);
+
+    // Tell Explorer the association changed so icons/double-click update immediately.
+    ::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+}
+#endif // JUCE_WINDOWS
+
 /** Thin AudioSource adapter that drives a PlaybackEngine from the audio device callback. */
 class PlaybackEngineSource final : public juce::AudioSource {
 public:
@@ -102,6 +132,9 @@ public:
     bool moreThanOneInstanceAllowed() override           { return true; }
 
     void initialise(const juce::String& commandLine) override {
+#if JUCE_WINDOWS
+        registerBspAssociation();   // per-user (HKCU) .bsp association, no admin needed
+#endif
         mainWindow = std::make_unique<MainWindow>(getApplicationName());
         // Open a .bsp passed on the command line (Windows/Linux double-click,
         // or launching from a terminal). macOS Finder does NOT use argv — it

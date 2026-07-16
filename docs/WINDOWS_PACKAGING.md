@@ -1,12 +1,16 @@
 # Windows packaging — `.bsp` file association
 
-**Status:** documentation only (no installer is built yet). The **application side** is
-already done — `BlockShuffler.exe` accepts a `.bsp` path as `argv[1]` and opens it through
-the same canonical `loadProject()` the in-app Open button uses (see `Source/Main.cpp`
-`initialise()` → `openBspFromCommandLine()` → `MainWindow::openFile()` →
-`MainComponent::loadProject()`). The **only** remaining step to make Windows Explorer
-double-click open a `.bsp` in BlockShuffler is for the installer to register the file
-association below.
+**Status:** the app now **self-registers the association on launch** — no installer
+needed for the per-user case. `registerBspAssociation()` in `Source/Main.cpp`
+(`#if JUCE_WINDOWS`, called at the top of `initialise()`) writes the entries below under
+`HKEY_CURRENT_USER\Software\Classes` (per-user, no admin), guarded to only rewrite when
+the stored `shell\open\command` doesn't match the current exe path (first run or moved
+exe), then fires `SHChangeNotify(SHCNE_ASSOCCHANGED, …)` so Explorer updates immediately.
+The application side of opening was already done — `BlockShuffler.exe` accepts a `.bsp`
+path as `argv[1]` and opens it through the same canonical `loadProject()` the in-app Open
+button uses (`initialise()` → `openBspFromCommandLine()` → `MainWindow::openFile()` →
+`MainComponent::loadProject()`). An installer is now only needed for **per-machine**
+(HKLM) associations — the entries below.
 
 macOS association is already handled by the app bundle (`DOCUMENT_EXTENSIONS bsp` in
 CMake → `CFBundleDocumentTypes`, routed to `anotherInstanceStarted()`); this doc is the
