@@ -124,3 +124,13 @@ Run in "x64 Native Tools" (or any shell with CMake + MSVC):
 
 - Windows CI build (Configure/Build, Standalone + VST3 artifacts): GREEN on b829f75 — run 29419333753.
 - Mac column: complete except 13.4's manual re-verify (pending on BOTH platforms — fresh builds contain the fix).
+
+## Post-slice resolutions (2026-07-16) — every FAIL above is closed
+
+- **5.12 FAIL** (sliders hidden past ~12 blocks) → fixed e4291ea (content-driven inspector height, T49 backstop); re-verified.
+- **12.3 FAIL** (logo distorted) → fixed 355edaa (cached highResamplingQuality rescale); re-verified crisp.
+- **11.3 / C6 / C7 FAIL** (.bsp double-click / association) → fixed f8dba5d (app self-registers the .bsp association in HKCU on launch — no installer needed); re-verified.
+- **W5 note** (deleted linked block leaves an "unknown" link) → fixed 23f5462 (removeBlock prunes links in the same undo entry, T48 guards it).
+- **10.3 FAIL** (.bsf won't open in Explorer/7-Zip) → NOT a format bug: the .bsf is a valid standard ZIP (unzip -t clean). Explorer only opens archives literally named `*.zip`; rename .bsf→.zip (not "/zip") or use 7-Zip's right-click → Open archive.
+- **C9 / W0** → MSVC harness now gated in CI on every push (run 29492810846 on f51e2ac: `STEP6 RESULT: ALL PASS`, T1–T49).
+- **12.2 sign-off** → PASS; see VALIDATION_PLAN.md Windows column (fully filled 2026-07-16).
