@@ -2830,6 +2830,33 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        { // T48 (BUG A): deleting a block prunes every link referencing it, as
+          // ONE undo entry — undo restores the block AND the link with its %.
+            Project p;
+            auto* A = p.addBlock("A"); p.addBlock("B"); auto* C = p.addBlock("C");
+            const juce::String aId = A->id, cId = C->id;
+            p.addLink(aId, cId, 0.37f);
+            const auto preDelete = juce::JSON::toString(p.toJSON());
+
+            p.removeBlock(cId);
+            bool pruned = true;
+            for (auto* l : p.links)
+                if (l->blockA == cId || l->blockB == cId) pruned = false;
+
+            p.undoManager.undo();  // single step must bring back block C + A<->C link
+            const bool restored = (juce::JSON::toString(p.toJSON()) == preDelete);
+            const bool linkBack = p.links.size() == 1
+                && ((p.links[0]->blockA == aId && p.links[0]->blockB == cId) ||
+                    (p.links[0]->blockA == cId && p.links[0]->blockB == aId))
+                && std::abs(p.links[0]->swapProbability - 0.37f) < 1e-6f;
+
+            verdict("T48 delete-block prunes its links; ONE undo restores block + link + %",
+                    pruned && restored && linkBack,
+                    juce::String("danglingAfterDelete: ") + (pruned ? "none" : "PRESENT(BUG)")
+                    + ", undoRestores: " + (restored ? "exact" : "MISMATCH")
+                    + ", linkBack: " + (linkBack ? "ok(0.37)" : "BAD"));
+        }
+
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
                   << "\n";
     }
