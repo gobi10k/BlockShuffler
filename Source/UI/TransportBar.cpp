@@ -107,14 +107,11 @@ void TransportBar::paint(juce::Graphics& g) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
         g.fillRect(brandingArea);
 
-        float scale = juce::jmin((float)brandingArea.getHeight() / (float)logoImage.getHeight(),
-                                 (float)brandingArea.getWidth()  / (float)logoImage.getWidth());
-        int drawW = juce::roundToInt((float)logoImage.getWidth()  * scale);
-        int drawH = juce::roundToInt((float)logoImage.getHeight() * scale);
-        int drawX = brandingArea.getCentreX() - drawW / 2;
-        int drawY = brandingArea.getCentreY() - drawH / 2;
-        g.drawImage(logoImage, drawX, drawY, drawW, drawH, 0, 0,
-                    logoImage.getWidth(), logoImage.getHeight());
+        if (logoImageScaled.isValid()) {
+            int drawX = brandingArea.getCentreX() - logoImageScaled.getWidth()  / 2;
+            int drawY = brandingArea.getCentreY() - logoImageScaled.getHeight() / 2;
+            g.drawImageAt(logoImageScaled, drawX, drawY);  // 1:1 blit, no per-frame rescale
+        }
     }
 }
 
@@ -150,6 +147,20 @@ void TransportBar::resized() {
     logoW = juce::jlimit(0, 180, logoW);
     brandingArea = (logoW > 0) ? area.removeFromRight(logoW).withSizeKeepingCentre(logoW, logoH)
                                : juce::Rectangle<int>();
+
+    // 12.3: pre-scale the logo to its draw size ONCE, at high quality. Guarded so
+    // the (expensive) rescale of the 1707x1035 source only reruns when the target
+    // size actually changes — paint() then blits the cache 1:1 every frame.
+    if (logoImage.isValid() && !brandingArea.isEmpty()) {
+        float scale = juce::jmin((float)brandingArea.getHeight() / (float)logoImage.getHeight(),
+                                 (float)brandingArea.getWidth()  / (float)logoImage.getWidth());
+        int drawW = juce::roundToInt((float)logoImage.getWidth()  * scale);
+        int drawH = juce::roundToInt((float)logoImage.getHeight() * scale);
+        if (drawW > 0 && drawH > 0
+            && (logoImageScaled.getWidth() != drawW || logoImageScaled.getHeight() != drawH))
+            logoImageScaled = logoImage.rescaled(drawW, drawH,
+                                                 juce::Graphics::highResamplingQuality);
+    }
 
     // Remaining centre strip = time display
     area.removeFromLeft(gap * 2);
