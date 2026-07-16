@@ -8,7 +8,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 ---
 
 ## CURRENT STATUS (keep this current)
-- Stage: FINAL DELIVERY PUSH against locked spec. Client deadline ~2026-07-17.
+- Stage: **DELIVERY-READY (2026-07-16)** — every acceptance row PASS on Mac AND Windows (VALIDATION_PLAN.md fully filled; C9 = MSVC harness CI run 29492810846 ALL PASS on HEAD f51e2ac). Remaining before sign-off: Carter ratification of the 3 beyond-spec items only (`docs/CARTER_RATIFICATION.md`). Client deadline ~2026-07-17.
 - Build: compiles; macOS arm64 primary. Windows parity pass done 2026-07-07 session 10 (paths load with either separator + T30; open-on-launch verified; app icon wired cross-platform via JUCE ICON_BIG/SMALL). MSVC build + double-click assoc validated by Windows CI (UI_firstdraft added to trigger) + documented manual step.
 - Last full audit: 0 critical / 0 high / 0 medium after fixes.
 
@@ -23,7 +23,7 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 8. ~~**Source/ is UNTRACKED in git**~~ — **CLOSED 2026-07-05 session 2.** Full tree committed on `UI_firstdraft` and tagged `baseline-step1-clean`. IMPORTANT: the old "repo" was accidentally rooted at `$HOME` (that's why Source/ looked untracked); a proper repo now lives at the project directory with the UI_firstdraft history imported and origin set (details in entry below). One commit per completed MASTER_PROMPT step from now on.
 
 ### NEXT UP
-REMAINING BEFORE DELIVERY (updated 2026-07-15c — **MAC SLICE 100% COMPLETE**, every Mac-Release cell PASS incl. 13.4 on the fresh build): (1) Windows slice — docs/WINDOWS_SLICE_CHECKLIST.md W0–W7 + sign-off (CI already green on b829f75); (2) Carter ratification of the 3 BEYOND-SPEC items; (3) optional :340 clamp (TODO 7 — root-caused, one-line fix parked, needs T27/T28 re-verify).
+**DELIVERY-READY (updated 2026-07-16).** Windows slice CLOSED — all acceptance items PASS on both platforms. Remaining: (1) Carter ratification of the 3 BEYOND-SPEC items (`docs/CARTER_RATIFICATION.md`) — the ONLY open delivery item; (2) optional post-delivery: :340 clamp (TODO 7, parked one-liner, needs T27/T28 re-verify).
 
 ### TRACKED FINDINGS (non-blocking, 2026-07-13)
 1. Debug-only undo flicker on large (50-block) projects — deferred callAsync rebuild window stretched by ASan slowness; CLEAN on Release; pre-existing (undo code path byte-identical to baseline). Not a shipping defect.
@@ -109,6 +109,13 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 **STATUS (updated 2026-07-13):** Mac acceptance on 54ed7f8 (Release build): 1b drag safety PASS (ASan clean) · 1c positioning PASS (ground-truth, all drag types) · 1d undo PASS on Release · 2.9 scroll retention PASS · 7.6 rapid play/stop PASS · 13.1 colour PASS · 12.1 stress PASS. UI issue-1 (fit-to-window): NON-REPRODUCING, no code change (LAYDIAG fitsVisible=1). UI issue-2 (name legibility): FIXED (54ed7f8). Suite T1–T37 ALL PASS.
 
 ## SESSION LOG
+
+### 2026-07-16 (session 15) — WINDOWS SLICE CLOSED; DELIVERY-READY (all acceptance rows PASS on both platforms)
+- What I changed (files): `.github/workflows/build-windows.yml` (harness gate in CI); `Source/Model/Project.cpp` (link prune on block delete); `Source/UI/InspectorPanel.h/.cpp` + `Source/MainComponent.cpp` (content-driven inspector height); `Source/UI/TransportBar.h/.cpp` (cached high-quality logo rescale); `Source/Main.cpp` + `docs/WINDOWS_PACKAGING.md` (.bsp association self-registration); `diag/ResolverDiag.cpp` + `CMakeLists.txt` (T48/T49); docs wrap-up (VALIDATION_PLAN Windows column filled, WINDOWS_SLICE_CHECKLIST committed, CARTER_RATIFICATION.md added).
+- Final commits since the Mac-slice close (e469f9a): d5c7c50 CI harness gate on Windows → 23f5462 T48 + link prune in removeBlock (one undo entry) → e4291ea T49 + content-driven inspector height (5.12) → merges 16cac2a/0614025 (PRs #6/#7) → 355edaa 12.3 cached logo rescale (merge 3fa3ab9, PR #8) → f8dba5d Windows .bsp self-registration HKCU (merge f51e2ac, PR #9) → docs wrap-up (this entry).
+- What I proved: full harness `STEP6 RESULT: ALL PASS` (T1–T49) on Mac Debug AND ASan (no reports) AND MSVC via CI run 29492810846 on f51e2ac; 12.3 Mac-unchanged via before/after screenshots at fixed window position; 10.3 .bsf verified a valid standard ZIP (`file`/`unzip -l`/`unzip -t`/`ditto` all clean — the W-slice Explorer/7-Zip symptom was the .bsf extension, not the format); Alec's W-slice record committed with its four FAILs annotated as fixed + re-verified.
+- What regressed or surprised me: Alec's "still broken on fresh 0614025" report was a stale `build-release` binary (Jul 15) — both stale trees deleted and clean-rebuilt; lesson: always check binary mtimes vs fix commits before re-diagnosing.
+- NEXT SESSION should: collect Carter's sign-off on `docs/CARTER_RATIFICATION.md` (the only open delivery item), then attach VALIDATION_PLAN.md to the delivery per ACCEPTANCE_TESTS sign-off.
 
 ### 2026-07-15 (session 14) — CARTER CORRECTIONS 2.7 / 4.6 / 13.4 landed; acceptance re-baselined as ratified authoritative
 - Carter ratified corrected semantics for three acceptance rows; all three fixed test-first and committed: **243dce3** — 4.6: link to a stack's BASE block swaps the WHOLE stack (shared StackPicker::findStackBase, non-base extract path byte-identical — T9/T13/T14 evidence unchanged; T14b red-then-green with intact-stack proof). **0fe680a** — 2.7: 0% weight = 0% effective, never selected; all-0% block SKIPPED (pickClip positive-weight filter + strict boundary; three UI effective-% fallbacks 100/count -> 0.0%; T17 inverted, T17b added). **ff56714** — 13.4: constant ~0.5s deepest zoom window at any clip length (256 cap -> 65536 arithmetic-safety cap; T28 reframed to the constant-window property). Also this session: **15b0b58** mojibake cleanup (11.1), **fee8947** logo to 2/3 bar height (12.3), **8fe6853** Mac slice recorded.
