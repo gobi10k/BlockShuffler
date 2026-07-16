@@ -204,7 +204,62 @@ void InspectorPanel::setBlock(Block* block) {
     rebuildStackCountRows();
     rebuildStackBlockLabels();
     updateFromModel();
-    resized();
+    updatePanelHeight();
+}
+
+int InspectorPanel::preferredHeight() const {
+    // Mirrors the removeFromTop accounting in resized() — keep the two in sync.
+    const int rh = 22, slh = 28, gap = 4, sec = 10;
+    int h = 8;                                            // top margin (reduced(8, 8))
+
+    // Clip section (space is consumed even when the controls are hidden)
+    h += rh + gap;                                        // clipTitle
+    h += rh + slh;                                        // probLabel + probSlider
+    if (effectiveProbLabel.isVisible()) h += 18;
+    h += gap;
+    h += rh + rh;                                         // tempoLabel + tempoField
+    h += gap;
+    h += (rh + 2) * 3 + rh;                               // songEnder/clipDone/retainLeadIn + retainTail
+    h += sec;
+
+    // Block section
+    h += rh + gap;                                        // blockTitle
+    if (blockTempoLabel.isVisible()) h += rh + rh + gap;
+    h += rh + 2;                                          // blockDoneToggle
+    if (playChanceLabel.isVisible()) h += rh + slh + gap;
+
+    // Stack section
+    if (selectedBlock != nullptr && selectedBlock->stackGroup >= 0) {
+        h += rh + 2;                                      // stackSectionTitle
+        h += (rh - 4) + gap;                              // stackInfoLabel
+        h += rh;                                          // playModeLabel
+        h += slh + gap;                                   // playModeCombo
+        if (selectedBlock->stackPlayMode == StackPlayMode::Simultaneous)
+            h += rh + 2;                                  // alwaysPlayBaseToggle
+        h += rh + 2;                                      // stackPlayCountLabel
+        h += stackCountRows.size() * (rh + 2);
+        h += rh + 2;                                      // stackBlocksTitle
+        h += stackBlockProbRows.size() * (rh + 2);
+        h += gap;
+    }
+    h += sec - gap;
+
+    // Project section (shown when no block selected)
+    if (projectTitle.isVisible()) h += rh + gap + rh + rh + gap;
+
+    // Links section
+    h += rh + gap;
+    h += linkRows.size() * (rh + slh + gap);
+
+    return h + 8;                                         // bottom margin
+}
+
+void InspectorPanel::updatePanelHeight() {
+    const int needed = juce::jmax(preferredHeight(), minPanelHeight);
+    if (getWidth() > 0 && needed != getHeight())
+        setSize(getWidth(), needed);   // fires resized()
+    else
+        resized();
 }
 
 void InspectorPanel::refreshValues() {
@@ -243,6 +298,7 @@ void InspectorPanel::refreshValues() {
 
     }
     updateFromModel();
+    updatePanelHeight();
 }
 
 // ── Link rows ─────────────────────────────────────────────────────────────────
