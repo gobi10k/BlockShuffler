@@ -97,14 +97,9 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
                                   ? (int64_t)entry.stretchedTail->getNumSamples()
                                   : (int64_t)(tailLen   * entry.tailStretchRatio   + 0.5f);
 
-        // timelinePos = body start; lead-in ENDS at timelinePos (end-aligned by
-        // EntryMixer FIX 1(ii)), so it starts at timelinePos - leadInTL where
-        // leadInTL is the STRETCHED length — mirror of the tailTL pattern above.
+        // timelinePos = body start; lead-in at [timelinePos - startMark, timelinePos).
         // Convert project-space bounds to hardware-space bounds.
-        const int64_t leadInTL  = entry.stretchedLeadIn
-                                  ? (int64_t)entry.stretchedLeadIn->getNumSamples()
-                                  : (int64_t)(entry.startMark * entry.leadInStretchRatio + 0.5f);
-        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - leadInTL) * hToP + 0.5);
+        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - entry.startMark) * hToP + 0.5);
         int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + (entry.endMark - entry.startMark) + tailTL) * hToP + 0.5);
 
         if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;

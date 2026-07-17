@@ -108,11 +108,7 @@ inline void mixEntryToBuffer(
         if (entry.stretchedLeadIn)
         {
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            // FIX 1(ii): END-align the stretched lead-in at the join (bodyStart).
-            // Anchoring at leadInStart (unstretched length) spilled it past the
-            // join for ratio>1 (double-mix over own body) and left a hole before
-            // the join for ratio<1. For ratio==1, sl == leadInLen — identical.
-            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0.0, liGainStart, 1.0f);
+            mixBuf(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0.0, liGainStart, 1.0f);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
@@ -121,10 +117,9 @@ inline void mixEntryToBuffer(
         else
         {
             // FIX M1: guard against zero-length stretched lead-in
-            // FIX 1(ii): end-align at the join (see stretched-buffer branch above)
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
             if (leadInTL > 0)
-                mixBuf(src, bodyStart - leadInTL, bodyStart, 0.0, liGainStart, 1.0f);
+                mixBuf(src, leadInStart, leadInStart + leadInTL, 0.0, liGainStart, 1.0f);
         }
     }
 
