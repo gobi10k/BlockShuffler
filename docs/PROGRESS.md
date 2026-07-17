@@ -110,6 +110,22 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-07-17 — Audio mixer RESTORED to f541b87 baseline (tempo fix kept) to restart mixer work incrementally
+- What I changed (files):
+  - `Source/Audio/EntryMixer.h`, `Source/Audio/PlaybackEngine.cpp` — `git checkout f541b87 --` restore; reverts 2e93c22 (end-aligned stretched lead-in + matching culling window). The soft-limiter (f3b85ba) was already reverted by 937ca1c, so no further change needed there.
+  - DISCARDED from the working tree (was UNCOMMITTED, per Alec's restore instruction): the equal-gain crossfade work — EntryMixer.h body-fade logic + `leadInTimelineLength`/`tailTimelineLength`, PlaybackEngine.cpp/.h + ExportRenderer.cpp arrangement-pointer plumbing, diag T51 + T38 equal-gain assertions. **Full diff preserved at `~/.claude/projects/-Users-alecgordon-Documents-BlockShuffler-Hail-Mary/uncommitted-equal-gain-crossfade-2026-07-17.patch`** (507 lines) if any of it is wanted back.
+  - `diag/ResolverDiag.cpp` — restored to HEAD state (T50 tempo test KEPT; T51/T38-equal-gain uncommitted edits discarded).
+  - KEPT UNTOUCHED (uncommitted, unrelated to audio): ACCEPTANCE_TESTS.md + docs/ACCEPTANCE_TESTS.md working-tree edits (checkbox ticks + Carter 2.7/4.6 wording) — still uncommitted for Alec to review.
+  - `docs/PROGRESS.md` — this entry.
+- What I proved (PASS/FAIL):
+  - PASS: `git diff f541b87 -- Source/Audio/` → EMPTY (mixer byte-identical to baseline).
+  - PASS: `git diff f541b87 -- Source/Model/Project.cpp` → ONLY the 7bb9cc9 tempo-adoption hunk (5 lines).
+  - PASS: full ResolverDiag harness rebuilt + run → `STEP6 RESULT: ALL PASS`, zero FAIL lines, all SUMMARY lines green (incl. T50).
+  - PASS: Release (`build-release`) and ASan (`build-asan`) both rebuilt clean.
+- Commits: `cd34f1b` "Restore audio mixer to f541b87 baseline (keep tempo fix)" — pushed to origin/UI_firstdraft. HEAD = cd34f1b. Commits since baseline now: 7bb9cc9 (tempo, kept) → 2e93c22 (mixer, now reverted by cd34f1b) → f3b85ba/937ca1c (limiter, self-cancelling) → cd34f1b.
+- What regressed or surprised me: the equal-gain crossfade existed only as uncommitted working-tree changes, not a commit — hence the patch backup above before discarding. Note TRACKED FINDING 3 (export clamps >0 dBFS crossfades) is back in its original state since both mixer mitigation attempts are now off the branch.
+- NEXT SESSION should: restart the mixer work incrementally from this clean baseline, one change per commit with harness proof; the saved patch can serve as reference for the equal-gain approach.
+
 ### 2026-07-16 (session 15) — WINDOWS SLICE CLOSED; DELIVERY-READY (all acceptance rows PASS on both platforms)
 - What I changed (files): `.github/workflows/build-windows.yml` (harness gate in CI); `Source/Model/Project.cpp` (link prune on block delete); `Source/UI/InspectorPanel.h/.cpp` + `Source/MainComponent.cpp` (content-driven inspector height); `Source/UI/TransportBar.h/.cpp` (cached high-quality logo rescale); `Source/Main.cpp` + `docs/WINDOWS_PACKAGING.md` (.bsp association self-registration); `diag/ResolverDiag.cpp` + `CMakeLists.txt` (T48/T49); docs wrap-up (VALIDATION_PLAN Windows column filled, WINDOWS_SLICE_CHECKLIST committed, CARTER_RATIFICATION.md added).
 - Final commits since the Mac-slice close (e469f9a): d5c7c50 CI harness gate on Windows → 23f5462 T48 + link prune in removeBlock (one undo entry) → e4291ea T49 + content-driven inspector height (5.12) → merges 16cac2a/0614025 (PRs #6/#7) → 355edaa 12.3 cached logo rescale (merge 3fa3ab9, PR #8) → f8dba5d Windows .bsp self-registration HKCU (merge f51e2ac, PR #9) → docs wrap-up (this entry).
