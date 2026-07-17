@@ -11,7 +11,6 @@
 #include "Audio/ArrangementResolver.h"
 #include "Audio/ExportRenderer.h"
 #include "Audio/PlaybackEngine.h"
-#include "Audio/SoftLimiter.h"
 #include "Audio/StackPicker.h"
 #include "UI/InspectorPanel.h"
 #include "Utils/GridSnap.h"
@@ -2371,12 +2370,8 @@ int main(int argc, char* argv[]) {
                     auto a = res.resolve(p, r); a.sampleRate = sr;
                     return a;
                 };
-                // DC 0.8: BELOW SoftLimiter::threshold (0.9), where the final-mix
-                // limiter is bit-identical (T51) — so envelope reads stay EXACT.
-                // (DC 1.0 would now read shaped: shape(1.0)=0.976 by design.)
-                const float dc = 0.8f;
-                auto arr1 = resolveWith(dc, 0.0f);                   // A alone
-                auto arr2 = resolveWith(0.0f, dc);                   // B alone
+                auto arr1 = resolveWith(1.0f, 0.0f);                 // A alone
+                auto arr2 = resolveWith(0.0f, 1.0f);                 // B alone
                 auto arr3 = resolveWith(0.4f, 0.4f);                 // both live
                 bool twoEntries = arr1.entries.size() == 2;
                 int64_t bodyEndA = twoEntries ? arr1.entries[0].timelinePos + body : 0;
@@ -2385,10 +2380,10 @@ int main(int argc, char* argv[]) {
                 auto r2 = renderEngineLen(arr2, 512, arr2.totalDurationSamples);
                 auto r3 = renderEngineLen(arr3, 512, arr3.totalDurationSamples);
 
-                // (a) entry-0 lead-in FULL gain from t=0 — flat at dc, no ramp, exact.
+                // (a) entry-0 lead-in FULL gain from t=0 — flat 1.0, no ramp, exact.
                 float headDev = 0.0f;
                 for (int i = 0; i < L; ++i)
-                    headDev = juce::jmax(headDev, std::abs(r1.getSample(0, i) - dc));
+                    headDev = juce::jmax(headDev, std::abs(r1.getSample(0, i) - 1.0f));
                 // (b) recovered envelopes: A tail ramps down over [bodyEndA, +L);
                 //     B lead-in ramps up over [bodyEndA - L, bodyEndA).
                 int w1a = (int)bodyEndA - L, w1b = (int)bodyEndA;
@@ -2399,10 +2394,10 @@ int main(int argc, char* argv[]) {
                 float maxStep = 0.0f;
                 for (int i = w1a - 99; i < w2b + 100 && i < (int)arr3.totalDurationSamples; ++i)
                     maxStep = juce::jmax(maxStep, std::abs(r3.getSample(0, i) - r3.getSample(0, i - 1)));
-                // NEGATIVE CONTROL: checker must REJECT a flat segment (A body ≡ dc).
+                // NEGATIVE CONTROL: checker must REJECT a flat segment (A body ≡ 1.0).
                 bool flatRejected = !monoDec(r1, L + 1000, L + 3000);
 
-                verdict("T38 crossfade envelope: head flat@dc(sub-T), tail down, lead-in up, no step; neg-control bites",
+                verdict("T38 crossfade envelope: head flat@1.0, tail down, lead-in up, no step; neg-control bites",
                         twoEntries && aligned && headDev < 1e-6f && tailDown && leadUp
                             && maxStep < 0.01f && flatRejected,
                         juce::String("headDev=") + juce::String(headDev, 8)
@@ -2945,73 +2940,6 @@ int main(int argc, char* argv[]) {
                     + ", explicitKept=" + (explicitKept ? "ok" : "BAD")
                     + ", loadRoundTrip=" + (roundTrip ? "ok" : "BAD")
                     + ", zeroDefault->120=" + (zeroFallback ? "ok" : "BAD"));
-        }
-
-        { // T51 (1(i)): stateless soft-limit on the FINAL mix (SoftLimiter.h).
-          // (1) Sub-threshold transparency: a buffer peaking BELOW T must be
-          //     BYTE-identical pre/post limiter. (2) Curve: identity to T, C1 at
-          //     the knee, monotone, asymptotes so any input (incl. the measured
-          //     worst 2.14 overshoot) maps <= 1.0. (3) End-to-end: a HOT (0.9)
-          //     crossfade arrangement whose raw sum peaks ~1.58 renders <= 1.0
-          //     through BOTH real paths and export==playback stays identical
-          //     (stateless => block-by-block == single-pass).
-            const double sr = 44100.0;
-
-            // (1) sub-threshold byte-transparency (mixed tone+noise, peak 0.85)
-            juce::AudioBuffer<float> sub(2, 4096), subCopy;
-            juce::Random nz(51);
-            for (int ch = 0; ch < 2; ++ch)
-                for (int i = 0; i < sub.getNumSamples(); ++i)
-                    sub.setSample(ch, i, 0.85f * (0.6f * (float)std::sin(0.05 * i)
-                                                 + 0.4f * (nz.nextFloat() * 2.0f - 1.0f)));
-            subCopy.makeCopyOf(sub);
-            SoftLimiter::process(sub, sub.getNumSamples());
-            bool subIdentical = true;
-            for (int ch = 0; ch < 2 && subIdentical; ++ch)
-                subIdentical = std::memcmp(sub.getReadPointer(ch), subCopy.getReadPointer(ch),
-                                           sizeof(float) * (size_t)sub.getNumSamples()) == 0;
-
-            // (2) curve properties
-            const float T = SoftLimiter::threshold;
-            bool idAtKnee   = SoftLimiter::shape(T) == T && SoftLimiter::shape(-T) == -T;
-            bool c1Knee     = std::abs(SoftLimiter::shape(T + 1e-4f) - (T + 1e-4f)) < 2e-6f;
-            bool tames214   = SoftLimiter::shape(2.14f) <= 1.0f && SoftLimiter::shape(-2.14f) >= -1.0f;
-            bool tamesHuge  = SoftLimiter::shape(100.0f) <= 1.0f;
-            bool monotone   = true;
-            for (float x = 0.0f; x < 3.0f && monotone; x += 0.001f)
-                monotone = SoftLimiter::shape(x + 0.001f) >= SoftLimiter::shape(x);
-
-            // (3) hot crossfade end-to-end: 0.9-amp tones, 0.4s tail/lead overlap
-            Project p; p.sampleRate = sr;
-            auto* a = p.addBlock("A");
-            auto* b = p.addBlock("B");
-            auto bufA = makeTone((int)(1.2 * sr), 440.0, sr);
-            auto bufB = makeTone((int)(1.2 * sr), 220.0, sr);
-            bufA->applyGain(3.0f);   // makeTone amp 0.3 -> 0.9 (raw sum peaks ~1.58)
-            bufB->applyGain(3.0f);
-            addClipTo(a, "hotA", bufA->getNumSamples());
-            a->clips[0]->audioBuffer = bufA;
-            a->clips[0]->endMark = (int64_t)(0.8 * sr);          // 0.4s tail
-            addClipTo(b, "hotB", bufB->getNumSamples());
-            b->clips[0]->audioBuffer = bufB;
-            b->clips[0]->startMark = (int64_t)(0.4 * sr);        // 0.4s lead-in
-            b->clips[0]->endMark   = (int64_t)(1.2 * sr);
-            juce::Random r(5100); ArrangementResolver res;
-            auto arr = res.resolve(p, r); arr.sampleRate = sr;
-            auto cr = compareEngineExport(arr);
-            bool hotOk = cr.sameLen && cr.exportRateOk && cr.engRms > 0.1
-                         && cr.peak <= 1.0f && cr.peak > 0.95f   // limited, not silent/attenuated
-                         && cr.maxDiff < 1.0e-3;
-
-            verdict("T51 soft limiter: sub-T byte-identical; curve tames 2.14->[-1,1]; hot mix <=1.0 both paths",
-                    subIdentical && idAtKnee && c1Knee && tames214 && tamesHuge && monotone && hotOk,
-                    juce::String("subT byteIdentical: ") + (subIdentical ? "y" : "BAD")
-                    + ", knee id/C1: " + (idAtKnee ? "y" : "BAD") + "/" + (c1Knee ? "y" : "BAD")
-                    + ", shape(2.14)=" + juce::String(SoftLimiter::shape(2.14f), 6)
-                    + ", shape(100)=" + juce::String(SoftLimiter::shape(100.0f), 6)
-                    + ", monotone: " + (monotone ? "y" : "BAD")
-                    + ", hotPeak=" + juce::String(cr.peak, 4) + " (<=1.0)"
-                    + ", hotMaxDiff=" + juce::String(cr.maxDiff, 6));
         }
 
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")

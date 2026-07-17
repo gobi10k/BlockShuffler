@@ -1,6 +1,5 @@
 #include "PlaybackEngine.h"
 #include "EntryMixer.h"
-#include "SoftLimiter.h"
 #include "TempoStretcher.h"
 
 namespace BlockShuffler {
@@ -112,11 +111,6 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
 
         mixEntryIntoBuffer(buffer, numSamples, entry, head, pToH, hToP, entryIndex);
     }
-
-    // FIX 1(i): stateless soft-limit the FINAL summed block (all entries mixed)
-    // before it reaches the device. Shared curve with ExportRenderer; stateless
-    // per-sample => block-by-block output == export's single-pass output.
-    SoftLimiter::process(buffer, numSamples);
 
     head += numSamples;
     playheadSamples.store(head);
