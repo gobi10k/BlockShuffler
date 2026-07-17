@@ -2894,6 +2894,54 @@ int main(int argc, char* argv[]) {
                     + ", panelH=" + juce::String(panel.getHeight()));
         }
 
+        { // T50: new blocks adopt the PROJECT DEFAULT tempo on creation
+          // (Project.cpp addBlock), using the same >0-else-120 fallback 9.4 uses
+          // (MainComponent.cpp:202). New clips then inherit it through the
+          // block-tempo-priority expression both clip-add paths use
+          // (MainComponent.cpp:200-202, ClipWaveformView.cpp:594-596) — mirrored
+          // here verbatim. Explicitly-set tempos and serialized tempos unchanged.
+            Project p;
+            p.defaultClipTempo = 137.5;
+            auto* nb = p.addBlock("NewB");
+            bool blockAdopts = nb && std::abs(nb->tempo - 137.5) < 1e-9;
+
+            // clip inheritance expression as used by both clip-add paths
+            double blockT = nb ? nb->tempo : 0.0;
+            double clipTempo = (blockT > 0.0) ? blockT
+                             : (p.defaultClipTempo > 0.0 ? p.defaultClipTempo : 120.0);
+            bool clipInherits = std::abs(clipTempo - 137.5) < 1e-9;
+
+            // explicitly-set tempo survives later block creation
+            nb->tempo = 90.0;
+            auto* nb2 = p.addBlock("NewB2");
+            bool explicitKept = std::abs(nb->tempo - 90.0) < 1e-9
+                                && nb2 && std::abs(nb2->tempo - 137.5) < 1e-9;
+
+            // save/load round-trip preserves both (load path must NOT re-default)
+            auto snap = p.toJSON();
+            Project q;
+            q.defaultClipTempo = 99.0;   // different default; must not leak into loaded blocks
+            bool loaded = q.fromJSON(snap);
+            bool roundTrip = loaded && q.blocks.size() == 2
+                             && std::abs(q.blocks[0]->tempo - 90.0)  < 1e-9
+                             && std::abs(q.blocks[1]->tempo - 137.5) < 1e-9;
+
+            // zero/unset default falls back to 120 (same guard as 9.4)
+            Project z;
+            z.defaultClipTempo = 0.0;
+            auto* zb = z.addBlock("Z");
+            bool zeroFallback = zb && std::abs(zb->tempo - 120.0) < 1e-9;
+
+            verdict("T50 new block adopts project default tempo; clips inherit; explicit/loaded kept",
+                    blockAdopts && clipInherits && explicitKept && roundTrip && zeroFallback,
+                    juce::String("blockTempo=") + juce::String(nb ? nb->tempo : -1.0, 1)
+                    + " (adopt " + (blockAdopts ? "ok" : "BAD")
+                    + "), clipInherit=" + (clipInherits ? "ok" : "BAD")
+                    + ", explicitKept=" + (explicitKept ? "ok" : "BAD")
+                    + ", loadRoundTrip=" + (roundTrip ? "ok" : "BAD")
+                    + ", zeroDefault->120=" + (zeroFallback ? "ok" : "BAD"));
+        }
+
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")
                   << "\n";
     }

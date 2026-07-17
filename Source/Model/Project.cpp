@@ -81,6 +81,11 @@ Block* Project::addBlock(const juce::String& blockName) {
     block->color = palette[blocks.size() % palette.size()];
 
     block->position = blocks.isEmpty() ? 0 : blocks.getLast()->position + 1;
+
+    // New blocks adopt the project default tempo (same fallback 9.4 uses for clips),
+    // so clips added to them inherit it via the block-tempo-priority paths (9.3).
+    block->tempo = defaultClipTempo > 0.0 ? defaultClipTempo : 120.0;
+
     auto* ptr = block.get();
     blocks.add(block.release());
     sendChangeMessage();
