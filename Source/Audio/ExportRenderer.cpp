@@ -1,5 +1,6 @@
 #include "ExportRenderer.h"
 #include "EntryMixer.h"
+#include "SoftLimiter.h"
 #include "TempoStretcher.h"
 #include "../Model/Clip.h"
 #include <unordered_map>
@@ -34,6 +35,11 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
         mixEntryToBuffer(arrangement.entries.getReference(i), output, (int)numSamples, 0LL, 1.0, 1.0, i);
         if (progress) progress((float)(i + 1) / (float)numEntries);
     }
+
+    // FIX 1(i): stateless soft-limit the FINAL summed mix so no sample exceeds
+    // full scale at the writer. Same shared curve as PlaybackEngine — stateless,
+    // so export stays bit-identical to block-by-block playback.
+    SoftLimiter::process(output, (int)numSamples);
 
     // Write to file
     outputFile.deleteFile();
