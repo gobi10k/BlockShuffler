@@ -623,7 +623,12 @@ public:
             juce::AudioFormat* fmt = (ext == ".flac")
                                    ? (juce::AudioFormat*)&flacFmt
                                    : (juce::AudioFormat*)&wavFmt;
-            ok = renderer.renderToFile(arrangement, file, *fmt, 24, progressFn);
+            // WAV exports at 32-bit IEEE float (JUCE writes bitDepth 32 as float):
+            // the file holds the exact float mix, so crossfade peaks >1.0 that
+            // playback passes are preserved instead of clamped by a fixed-point
+            // writer. FLAC is integer-only and stays at 24-bit.
+            const int depth = (ext == ".flac") ? 24 : 32;
+            ok = renderer.renderToFile(arrangement, file, *fmt, depth, progressFn);
         }
     }
 

@@ -110,6 +110,19 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-07-17 (session 2) — Incremental Step 1: WAV export → 32-bit FLOAT — CONFIRMED BY ALEC, COMMITTED
+- What I changed (files):
+  - `Source/MainComponent.cpp` (ExportJob::run, 1 call site) — WAV export bit depth 24 → 32. JUCE `WavAudioFormat` writes bitDepth 32 as IEEE float (`usesFloatingPointData = (bitsPerSample == 32)`, juce_WavAudioFormat.cpp:1807, IEEEFloatFormat sub-format :1786), so the file now holds the exact float mix incl. crossfade peaks >1.0 — export == playback, nothing clamps. FLAC stays 24-bit (integer-only format). NOTHING ELSE touched: mixer/crossfade/playback/ExportRenderer/diag all clean (`git status` shows only MainComponent.cpp + Alec's pre-existing acceptance-doc edits). Resolves TRACKED FINDING 3 for WAV.
+- What I proved (PASS/FAIL) — via a TEMPORARY `--step1-probe` mode added to ResolverDiag, run, then REVERTED (probe patch kept at `~/Desktop/BlockShuffler_step1_export_test/step1-probe.patch` for re-running):
+  - Scenario: 44.1k source clips (220/330 Hz tones @0.9, 0.5s lead-in/tail) loaded via the real `Clip::loadFromFile` Lagrange resample into a 48k project; resolver crossfade join sums past FS (mix peak 1.71387, 15544 samples >1.0).
+  - PASS: 32f export (same `renderToFile` call the app makes): file IS 32-bit float, `maxDiff(mix,file) = 0` (bit-exact), filePeak 1.71387, ALL 15544 >FS samples preserved, `clampedAtFS = 0`.
+  - PASS (contrast, old path): 24-bit export of the same mix clamps ALL 15544 samples to ±1.0, maxDiff 0.713865 — confirms the diagnosed distortion mechanism.
+  - PASS: full ResolverDiag suite rebuilt from the exact working tree → `STEP6 RESULT: ALL PASS` (suite's own 16-bit renderToFile tests intentionally unchanged).
+  - Release standalone rebuilt with the change so Alec can export from the app.
+- FOR ALEC: A/B files on Desktop in `BlockShuffler_step1_export_test/` — `step1_export_float32.wav` (new path; should sound like the app, hot join intact) vs `step1_export_24bit_OLD.wav` (old path; distorted join). Note players/DAWs may themselves clip >0 dBFS float on playback at full volume — the FILE is exact; turn playback gain down for a fair listen.
+- GATE CLOSED: Alec confirmed and ordered the commit (2026-07-17). Committed as "Step 1 (export-only): WAV export at 32-bit float — export matches playback exactly" and pushed. Acceptance-doc working-tree edits deliberately left uncommitted (Alec's own, still under his review).
+- NEXT SESSION should: proceed to the next incremental mixer step from this baseline.
+
 ### 2026-07-17 — Audio mixer RESTORED to f541b87 baseline (tempo fix kept) to restart mixer work incrementally
 - What I changed (files):
   - `Source/Audio/EntryMixer.h`, `Source/Audio/PlaybackEngine.cpp` — `git checkout f541b87 --` restore; reverts 2e93c22 (end-aligned stretched lead-in + matching culling window). The soft-limiter (f3b85ba) was already reverted by 937ca1c, so no further change needed there.
