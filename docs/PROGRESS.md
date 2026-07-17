@@ -110,6 +110,13 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-07-18 — FINAL DELIVERY BUILD on 39a81af (no code changes)
+- Windows CI GREEN on 39a81af: run 29616457213, job 88002523149 (8m12s) — MSVC compile+link of the audio change OK, harness gate step "Run ResolverDiag (T1-T46)" printed `STEP6 RESULT: ALL PASS` in the CI log.
+- Mac Release: fresh `--clean-first` build of BlockShuffler_Standalone on 39a81af → arm64 Mach-O, binary timestamp 2026-07-18 00:05:53 local, at `build-release/BlockShuffler_artefacts/Release/Standalone/BlockShuffler.app`.
+- Windows Standalone: downloaded from THAT run (29616457213) → `~/Desktop/BlockShuffler_delivery_39a81af/BlockShuffler.exe` (PE32+ x86-64, PE link timestamp 2026-07-17 22:04:46 UTC, 7,802,368 bytes).
+- Baseline integrity re-verified on 39a81af: `git diff f541b87 -- Source/Audio/` EMPTY (mixer byte-identical); full delta vs f541b87 = MainComponent.cpp (+6/−1 export hunk only), Project.cpp (tempo fix), diag T50, PROGRESS.md. Local full suite: `STEP6 RESULT: ALL PASS`.
+- Working tree: only Alec's ACCEPTANCE_TESTS.md + docs/ACCEPTANCE_TESTS.md edits remain uncommitted (his review).
+
 ### 2026-07-17 (session 2) — Incremental Step 1: WAV export → 32-bit FLOAT — CONFIRMED BY ALEC, COMMITTED
 - What I changed (files):
   - `Source/MainComponent.cpp` (ExportJob::run, 1 call site) — WAV export bit depth 24 → 32. JUCE `WavAudioFormat` writes bitDepth 32 as IEEE float (`usesFloatingPointData = (bitsPerSample == 32)`, juce_WavAudioFormat.cpp:1807, IEEEFloatFormat sub-format :1786), so the file now holds the exact float mix incl. crossfade peaks >1.0 — export == playback, nothing clamps. FLAC stays 24-bit (integer-only format). NOTHING ELSE touched: mixer/crossfade/playback/ExportRenderer/diag all clean (`git status` shows only MainComponent.cpp + Alec's pre-existing acceptance-doc edits). Resolves TRACKED FINDING 3 for WAV.
