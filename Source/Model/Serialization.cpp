@@ -28,6 +28,7 @@ juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
         bObj->setProperty("isDone",            block->isDone);
         bObj->setProperty("playChance",       (double)block->playChance);
         bObj->setProperty("tempo",            block->tempo);
+        bObj->setProperty("tempoOverridden",  block->tempoOverridden);
 
         // stackPlayCount
         auto* spcObj = new juce::DynamicObject();
@@ -60,6 +61,7 @@ juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
             cObj->setProperty("endMark",            juce::String(clip->endMark));
             cObj->setProperty("probability",        (double)clip->probability);
             cObj->setProperty("tempo",              clip->tempo);
+            cObj->setProperty("tempoOverridden",    clip->tempoOverridden);
             cObj->setProperty("retainLeadInTempo",  clip->retainLeadInTempo);
             cObj->setProperty("retainTailTempo",    clip->retainTailTempo);
             cObj->setProperty("isSongEnder",        clip->isSongEnder);
@@ -118,6 +120,14 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
             block->playChance     = juce::jlimit(0.0f, 1.0f,
                                         (float)(double)bVar.getProperty("playChance", 1.0));
             block->tempo          = (double)bVar.getProperty("tempo",          120.0);
+            // Legacy files (no flag): a block whose tempo diverges from the
+            // project default must be treated as overridden, else the first
+            // setDefaultTempo would flatten it.
+            if (bVar.hasProperty("tempoOverridden"))
+                block->tempoOverridden = (bool)bVar.getProperty("tempoOverridden", false);
+            else
+                block->tempoOverridden =
+                    std::abs(block->tempo - project.defaultClipTempo) > 0.01;
 
             // stackPlayCount
             auto spcVar = bVar.getProperty("stackPlayCount", juce::var());
@@ -160,6 +170,13 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
                     }
                     clip->probability      = (float)(double)cVar.getProperty("probability",     1.0);
                     clip->tempo            = (double)cVar.getProperty("tempo",            120.0);
+                    // Legacy inference mirrors the block-level rule, against the
+                    // (already loaded) parent block tempo.
+                    if (cVar.hasProperty("tempoOverridden"))
+                        clip->tempoOverridden = (bool)cVar.getProperty("tempoOverridden", false);
+                    else
+                        clip->tempoOverridden =
+                            std::abs(clip->tempo - block->tempo) > 0.01;
                     clip->retainLeadInTempo= (bool)cVar.getProperty("retainLeadInTempo",  false);
                     clip->retainTailTempo  = (bool)cVar.getProperty("retainTailTempo",    false);
                     clip->isSongEnder      = (bool)cVar.getProperty("isSongEnder",        false);

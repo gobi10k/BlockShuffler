@@ -110,6 +110,23 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-07-18 (session 2) — Tempo inherit/override (A+B) + always-visible Project Default Tempo — CONFIRMED BY ALEC, COMMITTED
+- What I changed (files) — write-paths/serialization/UI/tests ONLY; read paths (resolver, grid, nudge, inspector reads) untouched, tempos stay MATERIALIZED:
+  - `Source/Model/Block.h`, `Source/Model/Clip.h` — `tempoOverridden = false` flags (false = inherits parent tempo).
+  - `Source/Model/Project.h/.cpp` — new setters, each ONE undo entry incl. propagation: `setClipTempo` (marks override), `setBlockTempo` (skips overridden clips), `setDefaultTempo` (skips overridden blocks entirely — an overridden block shields all its clips), `resetClipTempoToInherited` / `resetBlockTempoToInherited` (clear flag + re-materialize from parent; no-op → no undo entry).
+  - `Source/Model/Serialization.cpp` — both flags saved/loaded; LEGACY files (flag absent) infer: block = |tempo − defaultClipTempo| > 0.01, clip = |tempo − block.tempo| > 0.01. Flags round-trip through toJSON/fromJSON so undo snapshots keep them.
+  - `Source/MainComponent.cpp` (clip-drag onClipDropped) — retarget to target-block tempo ONLY if `!tempoOverridden`; overridden clips keep theirs (Alec's decision 1).
+  - `Source/UI/InspectorPanel.h/.cpp` — tempo lambdas routed through the setters; "↺" reset buttons (UTF-8-decoded) next to clip/block tempo fields, visible only while overridden (decision 2); inherited fields dimmed to 0.65 alpha; labels now "Clip Tempo (BPM)" / "Block Tempo (BPM)" / "Project Default Tempo (BPM)". REACHABILITY FIX: project section was gated on `selectedBlock == nullptr`, which is unreachable in practice (startup auto-select + FIX C1 fallback re-selects the first block after every deletion; no deselect gesture exists) → `showProject = true`, section always renders; `isVisible()`-gated resized()/preferredHeight() adapted (T49 panelH 986→1060, still PASS).
+  - `diag/ResolverDiag.cpp` — T50 switched to `setBlockTempo` + asserts both flags round-trip; NEW T52 (a) setBlockTempo skips overridden clip (b) setDefaultTempo skips overridden block, updates inheriting block+clips (c) flags survive save/load AND an undo (resetAndLoad) (d) legacy JSON w/ flags stripped → correct inference (e) resets re-inherit, overridden sibling survives block reset (f) drag mirror (GUI-DISPATCH MIRROR of MainComponent onClipDropped): overridden keeps 150, inheriting adopts 160.
+  - `docs/PROGRESS.md` — this entry.
+- What I proved (PASS/FAIL):
+  - PASS: full ResolverDiag suite `STEP6 RESULT: ALL PASS`, 0 FAILs — incl. T42 (tempo-only-grid) green, T50 with flags, T52 all 8 sub-checks ok.
+  - PASS: `git diff -- Source/Audio/` EMPTY (no resolver/mixer touch).
+  - PASS: rebuilt Release standalone + ASan (ResolverDiag AND standalone); ASan suite run ALL PASS, no sanitizer reports.
+- Deviations (recorded per standing rule): (1) `resetBlockTempoToInherited` uses the same `>0-else-120` fallback as addBlock/9.4 instead of raw `defaultClipTempo` (guards against 0 BPM); (2) typing an IDENTICAL value into the clip tempo field does not mark an override (kept the pre-existing >0.001 change-check); (3) optional dim-when-inherited implemented.
+- KEPT UNTOUCHED: ACCEPTANCE_TESTS.md + docs/ACCEPTANCE_TESTS.md working-tree edits (Alec's, still under his review).
+- NEXT SESSION should: Alec manual pass (override a clip tempo, drag it, reset it, change project default with mixed overrides, save→reopen a PRE-FLAG project to see inference); then next enhancement from this baseline.
+
 ### 2026-07-18 — FINAL DELIVERY BUILD on 39a81af (no code changes)
 - Windows CI GREEN on 39a81af: run 29616457213, job 88002523149 (8m12s) — MSVC compile+link of the audio change OK, harness gate step "Run ResolverDiag (T1-T46)" printed `STEP6 RESULT: ALL PASS` in the CI log.
 - Mac Release: fresh `--clean-first` build of BlockShuffler_Standalone on 39a81af → arm64 Mach-O, binary timestamp 2026-07-18 00:05:53 local, at `build-release/BlockShuffler_artefacts/Release/Standalone/BlockShuffler.app`.

@@ -30,7 +30,7 @@ InspectorPanel::InspectorPanel()
     // ── Clip section ─────────────────────────────────────────────────────────
     setupLabel(this, clipTitle,    "CLIP",           11.0f, true);
     setupLabel(this, probLabel,    "Probability (%)", 12.0f);
-    setupLabel(this, tempoLabel,   "Tempo (BPM)",     12.0f);
+    setupLabel(this, tempoLabel,   "Clip Tempo (BPM)", 12.0f);
 
     probSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     probSlider.setRange(0.0, 100.0, 1.0);
@@ -51,14 +51,18 @@ InspectorPanel::InspectorPanel()
 
     tempoField.onValueChanged = [this](double t) {
         if (selectedClip && !updatingFromModel && project) {
-            if (t > 0.0 && std::abs(t - selectedClip->tempo) > 0.001) {
-                auto pre = project->toJSON();
-                selectedClip->tempo = t;
-                project->applyExternalMutation(pre);
-            }
+            if (t > 0.0 && std::abs(t - selectedClip->tempo) > 0.001)
+                project->setClipTempo(*selectedClip, t);  // marks override + one undo entry
         }
     };
     addAndMakeVisible(tempoField);
+
+    clipTempoResetBtn.onClick = [this] {
+        if (project && selectedClip && selectedBlock)
+            project->resetClipTempoToInherited(*selectedClip, *selectedBlock);
+    };
+    clipTempoResetBtn.setTooltip("Reset to the block's inherited tempo");
+    addChildComponent(clipTempoResetBtn);  // shown only while the clip tempo is overridden
 
     retainLeadIn.addListener(this);   addAndMakeVisible(retainLeadIn);
     retainTail  .addListener(this);   addAndMakeVisible(retainTail);
@@ -70,20 +74,20 @@ InspectorPanel::InspectorPanel()
     setupLabel(this, blockTempoLabel, "Block Tempo (BPM)", 12.0f);
 
     blockTempoField.onValueChanged = [this](double t) {
-        if (selectedBlock && !updatingFromModel && project) {
-            if (t > 0.0) {
-                auto pre = project->toJSON();
-                // Store the block-level tempo so new clips added later inherit it,
-                // and update all current clips so they all play to the same grid.
-                selectedBlock->tempo = t;
-                for (auto* c : selectedBlock->clips)
-                    c->tempo = t;
-                project->applyExternalMutation(pre);
-            }
-        }
+        // setBlockTempo stores the block-level tempo (new clips inherit it) and
+        // updates every non-overridden clip so they all play to the same grid.
+        if (selectedBlock && !updatingFromModel && project && t > 0.0)
+            project->setBlockTempo(*selectedBlock, t);
     };
-    blockTempoField.setTooltip("Set the tempo for all clips in this block (new clips will inherit this tempo)");
+    blockTempoField.setTooltip("Set the tempo for this block's clips (clips with their own tempo keep it)");
     addAndMakeVisible(blockTempoField);
+
+    blockTempoResetBtn.onClick = [this] {
+        if (project && selectedBlock)
+            project->resetBlockTempoToInherited(*selectedBlock);
+    };
+    blockTempoResetBtn.setTooltip("Reset to the project default tempo");
+    addChildComponent(blockTempoResetBtn);  // shown only while the block tempo is overridden
 
     blockDoneToggle.addListener(this);
     addAndMakeVisible(blockDoneToggle);
@@ -155,18 +159,15 @@ InspectorPanel::InspectorPanel()
 
     // ── Project section (no block selected) ──────────────────────────────────
     setupLabel(this, projectTitle,     "PROJECT",              11.0f, true);
-    setupLabel(this, defaultTempoLabel,"Default Clip Tempo (BPM)", 12.0f);
+    setupLabel(this, defaultTempoLabel,"Project Default Tempo (BPM)", 12.0f);
 
     defaultTempoField.onValueChanged = [this](double t) {
-        if (!updatingFromModel && project && t > 0.0) {
-            auto pre = project->toJSON();
-            project->defaultClipTempo = t;
-            // applyExternalMutation records the undo snapshot AND fires sendChangeMessage
-            // so MainComponent syncs waveformView.defaultTempo on the next tick.
-            project->applyExternalMutation(pre);
-        }
+        // setDefaultTempo records the undo snapshot AND fires sendChangeMessage
+        // so MainComponent syncs waveformView.defaultTempo on the next tick.
+        if (!updatingFromModel && project && t > 0.0)
+            project->setDefaultTempo(t);
     };
-    defaultTempoField.setTooltip("Default tempo applied to new clips when they are loaded");
+    defaultTempoField.setTooltip("Project default tempo — blocks and clips without their own tempo follow it");
     addAndMakeVisible(defaultTempoField);
 
     // ── Links section ────────────────────────────────────────────────────────
@@ -605,6 +606,11 @@ void InspectorPanel::updateFromModel() {
         retainTail     .setToggleState(selectedClip->retainTailTempo,   juce::dontSendNotification);
     }
 
+    // Reset affordance only exists while the clip tempo is overridden;
+    // inherited fields are dimmed slightly so overrides stand out.
+    clipTempoResetBtn.setVisible(hasClip && selectedClip->tempoOverridden);
+    tempoField.setAlpha(hasClip && !selectedClip->tempoOverridden ? 0.65f : 1.0f);
+
     if (hasClip && hasBlock) {
         float total = 0.0f;
         for (auto* c : selectedBlock->clips)
@@ -624,6 +630,8 @@ void InspectorPanel::updateFromModel() {
     blockTempoField  .setEnabled(hasBlock);
     blockTempoLabel  .setVisible(hasBlock);
     blockTempoField  .setVisible(hasBlock);
+    blockTempoResetBtn.setVisible(hasBlock && selectedBlock->tempoOverridden);
+    blockTempoField  .setAlpha(hasBlock && !selectedBlock->tempoOverridden ? 0.65f : 1.0f);
     // Standalone play-chance slider is only shown for non-stacked blocks
     const bool inStackForSlider = hasBlock && selectedBlock->stackGroup >= 0;
     playChanceLabel  .setVisible(hasBlock && !inStackForSlider);
@@ -718,8 +726,10 @@ void InspectorPanel::updateFromModel() {
         recalcStackEffectiveLabels();
     }
 
-    // ── Project section (no block selected)
-    const bool showProject = !hasBlock;
+    // ── Project section — ALWAYS visible: the project default tempo is a global
+    // setting, and a block is always selected in practice (startup auto-select +
+    // FIX C1 fallback), so gating on !hasBlock made it unreachable.
+    const bool showProject = true;
     projectTitle      .setVisible(showProject);
     defaultTempoLabel .setVisible(showProject);
     defaultTempoField .setVisible(showProject);
@@ -891,7 +901,12 @@ void InspectorPanel::resized() {
         effectiveProbLabel.setBounds(area.removeFromTop(18));
     area.removeFromTop(gap);
     tempoLabel.setBounds(area.removeFromTop(rh));
-    tempoField.setBounds(area.removeFromTop(rh));
+    {   // reset button shares the field row (bounds set even while hidden)
+        auto row = area.removeFromTop(rh);
+        clipTempoResetBtn.setBounds(row.removeFromRight(rh));
+        row.removeFromRight(2);
+        tempoField.setBounds(row);
+    }
     area.removeFromTop(gap);
     songEnderToggle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
     clipDoneToggle .setBounds(area.removeFromTop(rh)); area.removeFromTop(2);
@@ -903,7 +918,10 @@ void InspectorPanel::resized() {
     blockTitle     .setBounds(area.removeFromTop(rh)); area.removeFromTop(gap);
     if (blockTempoLabel.isVisible()) {
         blockTempoLabel.setBounds(area.removeFromTop(rh));
-        blockTempoField.setBounds(area.removeFromTop(rh));
+        auto row = area.removeFromTop(rh);
+        blockTempoResetBtn.setBounds(row.removeFromRight(rh));
+        row.removeFromRight(2);
+        blockTempoField.setBounds(row);
         area.removeFromTop(gap);
     }
     blockDoneToggle.setBounds(area.removeFromTop(rh)); area.removeFromTop(2);

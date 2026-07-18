@@ -61,7 +61,10 @@ MainComponent::MainComponent(PlaybackEngine& eng)
         for (int i = 0; i < sourceBlock->clips.size(); ++i) {
             if (sourceBlock->clips[i] == movedClip) {
                 Clip* rawClip = sourceBlock->clips.removeAndReturn(i);
-                rawClip->tempo = targetBlock->tempo > 0.0 ? targetBlock->tempo : rawClip->tempo;
+                // Overridden clips KEEP their tempo across the move; inheriting
+                // clips retarget to the destination block's grid.
+                if (!rawClip->tempoOverridden)
+                    rawClip->tempo = targetBlock->tempo > 0.0 ? targetBlock->tempo : rawClip->tempo;
                 targetBlock->clips.add(rawClip);
                 moved = true;
                 break;

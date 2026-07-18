@@ -149,6 +149,66 @@ Block* Project::getBlockById(const juce::String& blockId) {
     return nullptr;
 }
 
+//==============================================================================
+// Tempo inherit/override write-paths. Values are propagated at write time so
+// every read path keeps seeing a materialized tempo; the flags only gate which
+// targets a propagation may touch.
+void Project::setClipTempo(Clip& clip, double t) {
+    if (t <= 0.0) return;
+    auto pre = toJSON();
+    clip.tempo = t;
+    clip.tempoOverridden = true;
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
+void Project::setBlockTempo(Block& block, double t) {
+    if (t <= 0.0) return;
+    auto pre = toJSON();
+    block.tempo = t;
+    block.tempoOverridden = true;
+    for (auto* c : block.clips)
+        if (!c->tempoOverridden) c->tempo = t;
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
+void Project::setDefaultTempo(double t) {
+    if (t <= 0.0) return;
+    auto pre = toJSON();
+    defaultClipTempo = t;
+    for (auto* b : blocks) {
+        if (b->tempoOverridden) continue;   // overridden block shields ALL its clips
+        b->tempo = t;
+        for (auto* c : b->clips)
+            if (!c->tempoOverridden) c->tempo = t;
+    }
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
+void Project::resetClipTempoToInherited(Clip& clip, Block& block) {
+    if (!clip.tempoOverridden) return;      // already inheriting — no undo entry
+    auto pre = toJSON();
+    clip.tempoOverridden = false;
+    clip.tempo = block.tempo;
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
+void Project::resetBlockTempoToInherited(Block& block) {
+    if (!block.tempoOverridden) return;     // already inheriting — no undo entry
+    auto pre = toJSON();
+    // Same >0-else-120 fallback addBlock uses for the project default.
+    const double t = defaultClipTempo > 0.0 ? defaultClipTempo : 120.0;
+    block.tempoOverridden = false;
+    block.tempo = t;
+    for (auto* c : block.clips)
+        if (!c->tempoOverridden) c->tempo = t;
+    sendChangeMessage();
+    recordMutation(pre);
+}
+
 void Project::stackBlocks(const juce::String& blockIdA, const juce::String& blockIdB) {
     auto* a = getBlockById(blockIdA);
     auto* b = getBlockById(blockIdB);

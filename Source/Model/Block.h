@@ -50,6 +50,8 @@ public:
 
     // Tempo
     double tempo;
+    bool tempoOverridden = false;  // false = inherits the project default tempo
+                                   // (Project::setDefaultTempo re-materializes it)
 
     // Helpers
     void addClip(std::unique_ptr<Clip> clip) {

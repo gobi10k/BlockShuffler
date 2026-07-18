@@ -47,6 +47,15 @@ public:
 
     Block* getBlockById(const juce::String& blockId);
 
+    // Tempo inherit/override write-paths. Tempos stay MATERIALIZED: these
+    // setters propagate downward at write time; read paths (resolver, grid,
+    // nudge, inspector reads) are untouched. Each call = ONE undo entry.
+    void setClipTempo(Clip& clip, double t);            // marks the clip overridden
+    void setBlockTempo(Block& block, double t);         // marks the block overridden; skips overridden clips
+    void setDefaultTempo(double t);                     // skips overridden blocks (and their clips entirely)
+    void resetClipTempoToInherited(Clip& clip, Block& block);
+    void resetBlockTempoToInherited(Block& block);
+
     /** Copies stackPlayCount and stackPlayMode from sourceBlock to all other blocks in the group.
      *  If sourceBlock is null or not in the group, uses the first block as source.
      *  Call this after any mutation to stack-level settings, and after stacking/unstacking. */

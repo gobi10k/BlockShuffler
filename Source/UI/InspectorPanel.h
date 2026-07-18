@@ -190,6 +190,8 @@ private:
     juce::Label  effectiveProbLabel;
     juce::Label  tempoLabel;
     DraggableNumberBox tempoField { 20.0, 300.0, 1 };
+    // U+21BA anticlockwise arrow — must be UTF-8-decoded, plain char* mojibakes
+    juce::TextButton clipTempoResetBtn { juce::String(juce::CharPointer_UTF8("\xe2\x86\xba")) };
     juce::ToggleButton songEnderToggle { "Song Ender" };
     juce::ToggleButton clipDoneToggle  { "Mark as Done" };
     juce::ToggleButton retainLeadIn    { "Retain Lead-In Tempo" };
@@ -199,6 +201,7 @@ private:
     juce::Label        blockTitle;
     juce::Label        blockTempoLabel;
     DraggableNumberBox blockTempoField  { 20.0, 300.0, 1 };
+    juce::TextButton   blockTempoResetBtn { juce::String(juce::CharPointer_UTF8("\xe2\x86\xba")) };
     juce::ToggleButton blockDoneToggle  { "Mark Block as Done" };
     juce::Label        playChanceLabel;
     juce::Slider       playChanceSlider;

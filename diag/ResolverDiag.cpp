@@ -2911,20 +2911,26 @@ int main(int argc, char* argv[]) {
                              : (p.defaultClipTempo > 0.0 ? p.defaultClipTempo : 120.0);
             bool clipInherits = std::abs(clipTempo - 137.5) < 1e-9;
 
-            // explicitly-set tempo survives later block creation
-            nb->tempo = 90.0;
+            // explicitly-set tempo (via the setter, which flags the override)
+            // survives later block creation; new blocks keep flag=false
+            p.setBlockTempo(*nb, 90.0);
             auto* nb2 = p.addBlock("NewB2");
             bool explicitKept = std::abs(nb->tempo - 90.0) < 1e-9
-                                && nb2 && std::abs(nb2->tempo - 137.5) < 1e-9;
+                                && nb->tempoOverridden
+                                && nb2 && std::abs(nb2->tempo - 137.5) < 1e-9
+                                && !nb2->tempoOverridden;
 
-            // save/load round-trip preserves both (load path must NOT re-default)
+            // save/load round-trip preserves both tempos AND both flags
+            // (load path must NOT re-default; flags present -> no inference)
             auto snap = p.toJSON();
             Project q;
             q.defaultClipTempo = 99.0;   // different default; must not leak into loaded blocks
             bool loaded = q.fromJSON(snap);
             bool roundTrip = loaded && q.blocks.size() == 2
                              && std::abs(q.blocks[0]->tempo - 90.0)  < 1e-9
-                             && std::abs(q.blocks[1]->tempo - 137.5) < 1e-9;
+                             && q.blocks[0]->tempoOverridden
+                             && std::abs(q.blocks[1]->tempo - 137.5) < 1e-9
+                             && !q.blocks[1]->tempoOverridden;
 
             // zero/unset default falls back to 120 (same guard as 9.4)
             Project z;
@@ -2940,6 +2946,141 @@ int main(int argc, char* argv[]) {
                     + ", explicitKept=" + (explicitKept ? "ok" : "BAD")
                     + ", loadRoundTrip=" + (roundTrip ? "ok" : "BAD")
                     + ", zeroDefault->120=" + (zeroFallback ? "ok" : "BAD"));
+        }
+
+        { // T52: tempo inherit/override write-paths (design A+B). Tempos stay
+          // MATERIALIZED — read paths untouched; only the Project setters, the
+          // serialization flags (+ legacy inference) and the clip-drag retarget
+          // gate on tempoOverridden. Sub-tests (a)-(f).
+            auto near = [](double a, double b) { return std::abs(a - b) < 1e-9; };
+
+            // (a) setBlockTempo: overridden clip kept, inheriting clip updated
+            Project p;
+            p.defaultClipTempo = 120.0;
+            auto* A = p.addBlock("A");
+            addClipTo(A, "a1"); addClipTo(A, "a2");
+            p.setClipTempo(*A->clips[0], 150.0);            // override a1
+            p.setBlockTempo(*A, 100.0);
+            bool aOk = near(A->clips[0]->tempo, 150.0) &&  A->clips[0]->tempoOverridden
+                    && near(A->clips[1]->tempo, 100.0) && !A->clips[1]->tempoOverridden
+                    && near(A->tempo, 100.0)           &&  A->tempoOverridden;
+
+            // (b) setDefaultTempo: overridden block (incl. its inheriting clips)
+            //     skipped entirely; inheriting block + its inheriting clips
+            //     updated; overridden clip inside the inheriting block kept
+            auto* B = p.addBlock("B");                       // inherits 120
+            addClipTo(B, "b1"); addClipTo(B, "b2");          // clips default 120
+            p.setClipTempo(*B->clips[1], 77.0);              // override b2
+            p.setDefaultTempo(140.0);
+            bool bOk = near(A->tempo, 100.0)                 // overridden block skipped
+                    && near(A->clips[1]->tempo, 100.0)       // its inheriting clip shielded
+                    && near(B->tempo, 140.0)           && !B->tempoOverridden
+                    && near(B->clips[0]->tempo, 140.0) && !B->clips[0]->tempoOverridden
+                    && near(B->clips[1]->tempo, 77.0)  &&  B->clips[1]->tempoOverridden
+                    && near(p.defaultClipTempo, 140.0);
+
+            // (c) flags survive save/load AND an undo snapshot (resetAndLoad path)
+            auto snap = p.toJSON();
+            Project q; bool loaded = q.fromJSON(snap);
+            bool cLoadOk = loaded && q.blocks.size() == 2
+                &&  q.blocks[0]->tempoOverridden
+                &&  q.blocks[0]->clips[0]->tempoOverridden
+                && !q.blocks[0]->clips[1]->tempoOverridden
+                && !q.blocks[1]->tempoOverridden
+                &&  q.blocks[1]->clips[1]->tempoOverridden;
+            p.setBlockTempo(*B, 99.0);                       // then revert it
+            p.undoManager.undo();                            // resetAndLoad(pre)
+            // undo rebuilds all model objects — re-fetch, old pointers dangle
+            auto* A2 = p.blocks[0]; auto* B2 = p.blocks[1];
+            bool cUndoOk =  A2->tempoOverridden && near(A2->tempo, 100.0)
+                &&  A2->clips[0]->tempoOverridden && near(A2->clips[0]->tempo, 150.0)
+                && !A2->clips[1]->tempoOverridden
+                && !B2->tempoOverridden && near(B2->tempo, 140.0)
+                &&  B2->clips[1]->tempoOverridden && near(B2->clips[1]->tempo, 77.0);
+
+            // (d) legacy JSON (flags stripped) -> inference:
+            //     block flag = |block - default| > eps, clip flag = |clip - block| > eps
+            Project l;
+            l.defaultClipTempo = 120.0;
+            auto* L = l.addBlock("L");
+            addClipTo(L, "l1"); addClipTo(L, "l2");
+            L->tempo = 100.0;                                // direct writes = legacy divergence
+            L->clips[0]->tempo = 100.0;                      // matches block -> inheriting
+            L->clips[1]->tempo = 91.0;                       // diverges -> overridden
+            auto* M = l.addBlock("M");                       // stays at default 120
+            addClipTo(M, "m1");                              // clip default 120 == block
+            auto legacy = l.toJSON();
+            if (auto* blocksArr = legacy.getProperty("blocks", juce::var()).getArray())
+                for (auto& bv : *blocksArr) {
+                    bv.getDynamicObject()->removeProperty("tempoOverridden");
+                    if (auto* clipsArr = bv.getProperty("clips", juce::var()).getArray())
+                        for (auto& cv : *clipsArr)
+                            cv.getDynamicObject()->removeProperty("tempoOverridden");
+                }
+            Project l2; bool lLoaded = l2.fromJSON(legacy);
+            bool dOk = lLoaded && l2.blocks.size() == 2
+                &&  l2.blocks[0]->tempoOverridden            // 100 vs default 120
+                && !l2.blocks[0]->clips[0]->tempoOverridden  // 100 == block 100
+                &&  l2.blocks[0]->clips[1]->tempoOverridden  //  91 != block 100
+                && !l2.blocks[1]->tempoOverridden            // 120 == default
+                && !l2.blocks[1]->clips[0]->tempoOverridden; // 120 == block
+
+            // (e) reset clears the override AND re-inherits (clip <- block,
+            //     block <- project default incl. its inheriting clips)
+            Project r;
+            r.defaultClipTempo = 120.0;
+            auto* R = r.addBlock("R"); addClipTo(R, "r1"); addClipTo(R, "r2");
+            r.setBlockTempo(*R, 100.0);
+            r.setClipTempo(*R->clips[0], 150.0);
+            r.resetClipTempoToInherited(*R->clips[0], *R);
+            bool eClipOk = !R->clips[0]->tempoOverridden && near(R->clips[0]->tempo, 100.0);
+            r.setClipTempo(*R->clips[1], 88.0);              // survives the block reset
+            r.resetBlockTempoToInherited(*R);
+            bool eBlockOk = !R->tempoOverridden && near(R->tempo, 120.0)
+                && near(R->clips[0]->tempo, 120.0) && !R->clips[0]->tempoOverridden
+                && near(R->clips[1]->tempo,  88.0) &&  R->clips[1]->tempoOverridden;
+
+            // (f) clip drag between blocks: overridden clip KEEPS its tempo,
+            //     inheriting clip adopts the target block's tempo.
+            // GUI-DISPATCH MIRROR: must stay equivalent to the tempo-retarget in
+            // MainComponent.cpp onClipDropped (removeAndReturn + gated adopt).
+            Project d;
+            d.defaultClipTempo = 120.0;
+            auto* S = d.addBlock("S"); auto* T = d.addBlock("T");
+            d.setBlockTempo(*T, 160.0);
+            addClipTo(S, "keep"); addClipTo(S, "adopt");
+            Clip* keepC  = S->clips[0];
+            Clip* adoptC = S->clips[1];
+            d.setClipTempo(*keepC, 150.0);
+            auto dragClip = [](Project& pr, Block* src, Block* dst, Clip* mc) {
+                auto pre = pr.toJSON();
+                for (int i = 0; i < src->clips.size(); ++i) {
+                    if (src->clips[i] == mc) {
+                        Clip* rawClip = src->clips.removeAndReturn(i);
+                        if (!rawClip->tempoOverridden)
+                            rawClip->tempo = dst->tempo > 0.0 ? dst->tempo : rawClip->tempo;
+                        dst->clips.add(rawClip);
+                        break;
+                    }
+                }
+                pr.applyExternalMutation(pre);
+            };
+            dragClip(d, S, T, keepC);
+            dragClip(d, S, T, adoptC);
+            bool fOk =  keepC->tempoOverridden && near(keepC->tempo, 150.0)
+                    && !adoptC->tempoOverridden && near(adoptC->tempo, 160.0)
+                    && T->clips.size() == 2 && S->clips.isEmpty();
+
+            verdict("T52 tempo override: setters gate on flags; flags survive save/undo; legacy inferred; reset re-inherits; drag keeps override",
+                    aOk && bOk && cLoadOk && cUndoOk && dOk && eClipOk && eBlockOk && fOk,
+                    juce::String("a(setBlockTempo)=") + (aOk ? "ok" : "BAD")
+                    + ", b(setDefaultTempo)=" + (bOk ? "ok" : "BAD")
+                    + ", c(load)=" + (cLoadOk ? "ok" : "BAD")
+                    + ", c(undo)=" + (cUndoOk ? "ok" : "BAD")
+                    + ", d(legacyInfer)=" + (dOk ? "ok" : "BAD")
+                    + ", e(resetClip)=" + (eClipOk ? "ok" : "BAD")
+                    + ", e(resetBlock)=" + (eBlockOk ? "ok" : "BAD")
+                    + ", f(dragKeeps)=" + (fOk ? "ok" : "BAD"));
         }
 
         std::cout << "STEP6 RESULT: " << (failed == 0 ? "ALL PASS" : juce::String(failed) + " FAILED")

@@ -41,6 +41,8 @@ public:
 
     // Tempo / Grid
     double tempo;
+    bool tempoOverridden = false;  // false = inherits the block tempo
+                                   // (Project::setBlockTempo re-materializes it)
     bool retainLeadInTempo;
     bool retainTailTempo;
     int64_t gridOffsetSamples;
