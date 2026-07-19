@@ -2556,6 +2556,216 @@ int main(int argc, char* argv[]) {
                           << " postMixAlteredSamples(MUST be 0)=" << altered << "\n";
             }
 
+            { // OFFGRID (diagnostic probe, print-only, NO verdict): cross-tempo
+              // joins with FREE-DROPPED (off-grid) markers. Markers are written
+              // through the EXACT free-drop model path — Shift-drag bypasses
+              // snapToGrid and does two jlimit-clamped raw writes, mirrored
+              // VERBATIM from ClipWaveformView.cpp:353 and :359 (no other field,
+              // no cached snap state exists). A = 220 Hz, B = 330 Hz, amp 0.5,
+              // project 48000, tempos per case. Per case: zone max-delta table
+              // (3x sine-slope bound), off-peak residual of the two crossfade
+              // windows (LSQ removal of the 220+330 components — equivalent to
+              // FFT off-peak energy), LENGTH ACCOUNTING incl. the FLOAT target
+              // before rounding, and zero-run lengths at both ends of each
+              // stretched buffer (windowAcc[0]/[last] evidence).
+                const double srO = 48000.0;
+                auto freeDrop = [&](Clip* clip, int64_t rawStart, int64_t rawEnd) {
+                    // VERBATIM free-drop writes (ClipWaveformView.cpp:353 / :359)
+                    clip->startMark = juce::jlimit((int64_t)0, clip->endMark - 1, rawStart);
+                    int64_t tot = (clip->audioBuffer) ? (int64_t)clip->audioBuffer->getNumSamples() : 0;
+                    clip->endMark = juce::jlimit(clip->startMark + 1, tot, rawEnd);
+                };
+                auto zeroRun = [](const juce::AudioBuffer<float>* sb, bool fromEnd) -> int {
+                    if (!sb || sb->getNumSamples() == 0) return -1;
+                    const int n = sb->getNumSamples(); int run = 0;
+                    for (int i = 0; i < n; ++i) {
+                        const int idx = fromEnd ? n - 1 - i : i;
+                        bool z = true;
+                        for (int ch = 0; ch < sb->getNumChannels(); ++ch)
+                            if (std::abs(sb->getSample(ch, idx)) > 1.0e-7f) { z = false; break; }
+                        if (!z) break;
+                        ++run;
+                    }
+                    return run;
+                };
+                auto runOff = [&](const char* tag, double tempoA, double tempoB,
+                                  int64_t sA, int64_t eA, int lenA,
+                                  int64_t sB, int64_t eB, int lenB) {
+                    Project p; p.sampleRate = srO;
+                    auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+                    addClipTo(A, "cA", lenA);
+                    addClipTo(B, "cB", lenB);
+                    A->clips[0]->tempo = tempoA; B->clips[0]->tempo = tempoB;
+                    auto fill = [&](Clip* c, double f) {
+                        for (int ch = 0; ch < 2; ++ch) {
+                            auto* w = c->audioBuffer->getWritePointer(ch);
+                            const int n = c->audioBuffer->getNumSamples();
+                            for (int i = 0; i < n; ++i)
+                                w[i] = 0.5f * (float)std::sin(2.0 * juce::MathConstants<double>::pi
+                                                              * f * i / srO);
+                        }
+                    };
+                    fill(A->clips[0], 220.0); fill(B->clips[0], 330.0);
+                    freeDrop(A->clips[0], sA, eA);
+                    freeDrop(B->clips[0], sB, eB);
+                    ArrangementResolver res; juce::Random r(6200);
+                    auto arr = res.resolve(p, r); arr.sampleRate = srO;
+                    const auto& EA = arr.entries.getReference(0);
+                    const auto& EB = arr.entries.getReference(1);
+                    const int64_t join  = EB.timelinePos;
+                    const int64_t Wpre  = renderedLeadInLength(EB);
+                    const int64_t Wpost = renderedTailLength(EA);
+                    // Chunked render, 512-sample windows, exactly like the engine path
+                    const int total = (int)arr.totalDurationSamples;
+                    juce::AudioBuffer<float> out(2, total); out.clear();
+                    juce::AudioBuffer<float> chunk(2, 512);
+                    for (int head = 0; head < total; head += 512) {
+                        const int n = juce::jmin(512, total - head);
+                        chunk.clear();
+                        for (int i = 0; i < arr.entries.size(); ++i)
+                            mixEntryToBuffer(arr.entries.getReference(i), chunk, n,
+                                             (int64_t)head, 1.0, 1.0, i);
+                        for (int ch = 0; ch < 2; ++ch)
+                            out.copyFrom(ch, (int)head, chunk, ch, 0, n);
+                    }
+                    juce::uint32 fnv = 2166136261u;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < total; ++i) {
+                            juce::uint32 bits; const float v = out.getSample(ch, i);
+                            std::memcpy(&bits, &v, sizeof(bits));
+                            fnv = (fnv ^ bits) * 16777619u;
+                        }
+                    // Zone max-delta table, bound = 3x the summed natural sine slopes present
+                    const double s220 = 0.5 * 2.0 * juce::MathConstants<double>::pi * 220.0 / srO;
+                    const double s330 = 0.5 * 2.0 * juce::MathConstants<double>::pi * 330.0 / srO;
+                    struct Zn { const char* nm; int64_t a, b; double bound; };
+                    Zn zs[5] = {
+                        { "Z1 A-body ", juce::jmax((int64_t)0, join - Wpre - 2000), join - Wpre, s220 },
+                        { "Z2 xfPre  ", join - Wpre, join, s220 + s330 },
+                        { "Z3 join+-16", join - 16, join + 16, s220 + s330 },
+                        { "Z4 xfPost ", join, join + Wpost, s220 + s330 },
+                        { "Z5 B-body ", join + Wpost,
+                          juce::jmin((int64_t)total, join + Wpost + 2000), s330 },
+                    };
+                    std::cout << "OFFGRID[" << tag << "] join=" << join << " Wpre=" << Wpre
+                              << " Wpost=" << Wpost
+                              << " renderHashFNV=0x" << juce::String::toHexString((int)fnv) << "\n";
+                    for (const auto& z : zs) {
+                        float mx = 0.0f; int64_t firstViol = -1; int nViol = 0;
+                        for (int64_t i = z.a + 1; i < z.b; ++i) {
+                            float d = std::abs(out.getSample(0, (int)i) - out.getSample(0, (int)i - 1));
+                            mx = juce::jmax(mx, d);
+                            if (d > 3.0 * z.bound) { if (firstViol < 0) firstViol = i; ++nViol; }
+                        }
+                        std::cout << "  " << z.nm << " [" << z.a << "," << z.b
+                                  << ") maxDelta=" << juce::String(mx, 6)
+                                  << " bound3x=" << juce::String(3.0 * z.bound, 6)
+                                  << " viol=" << nViol;
+                        if (firstViol >= 0)
+                            std::cout << " FIRST@join" << (firstViol >= join ? "+" : "")
+                                      << (int64_t)(firstViol - join);
+                        std::cout << "\n";
+                    }
+                    // Off-peak residual: LSQ-remove 220 & 330 (sin+cos each) per window
+                    auto offPeak = [&](int64_t a, int64_t b) -> double {
+                        if (b - a < 8) return 0.0;
+                        double m[4][4] = {}, v[4] = {}, tot2 = 0.0;
+                        auto basis = [&](int64_t i, double* ph) {
+                            const double w1 = 2.0 * juce::MathConstants<double>::pi * 220.0 * i / srO;
+                            const double w2 = 2.0 * juce::MathConstants<double>::pi * 330.0 * i / srO;
+                            ph[0] = std::sin(w1); ph[1] = std::cos(w1);
+                            ph[2] = std::sin(w2); ph[3] = std::cos(w2);
+                        };
+                        for (int64_t i = a; i < b; ++i) {
+                            double ph[4]; basis(i, ph);
+                            const double x = out.getSample(0, (int)i);
+                            tot2 += x * x;
+                            for (int r2 = 0; r2 < 4; ++r2) {
+                                v[r2] += ph[r2] * x;
+                                for (int c2 = 0; c2 < 4; ++c2) m[r2][c2] += ph[r2] * ph[c2];
+                            }
+                        }
+                        for (int col = 0; col < 4; ++col) {           // Gaussian elim
+                            int piv = col;
+                            for (int r2 = col + 1; r2 < 4; ++r2)
+                                if (std::abs(m[r2][col]) > std::abs(m[piv][col])) piv = r2;
+                            for (int c2 = 0; c2 < 4; ++c2) std::swap(m[col][c2], m[piv][c2]);
+                            std::swap(v[col], v[piv]);
+                            if (std::abs(m[col][col]) < 1e-12) return -1.0;
+                            for (int r2 = 0; r2 < 4; ++r2) {
+                                if (r2 == col) continue;
+                                const double f = m[r2][col] / m[col][col];
+                                for (int c2 = 0; c2 < 4; ++c2) m[r2][c2] -= f * m[col][c2];
+                                v[r2] -= f * v[col];
+                            }
+                        }
+                        double coef[4];
+                        for (int r2 = 0; r2 < 4; ++r2) coef[r2] = v[r2] / m[r2][r2];
+                        double resid = 0.0;
+                        for (int64_t i = a; i < b; ++i) {
+                            double ph[4]; basis(i, ph);
+                            double e = out.getSample(0, (int)i);
+                            for (int r2 = 0; r2 < 4; ++r2) e -= coef[r2] * ph[r2];
+                            resid += e * e;
+                        }
+                        return tot2 > 0.0 ? resid / tot2 : 0.0;
+                    };
+                    std::cout << "  offPeak xfPre=" << juce::String(offPeak(join - Wpre, join), 6)
+                              << " xfPost=" << juce::String(offPeak(join, join + Wpost), 6) << "\n";
+                    // LENGTH ACCOUNTING (targetF uses the same float ratio the code uses)
+                    auto lenRow = [&](const char* seg, int64_t orig, float ratio,
+                                      bool stretched, int64_t actual, int64_t xfade) {
+                        const double targetF = (double)((float)orig * ratio);
+                        const int64_t roundedTS = juce::jmax(1, (int)((float)orig * ratio + 0.5f));
+                        std::cout << "  LEN " << seg << " orig=" << orig
+                                  << " ratio=" << juce::String(ratio, 6)
+                                  << " targetF=" << juce::String(targetF, 3)
+                                  << " rounded=" << (stretched ? roundedTS : orig)
+                                  << (stretched ? " @TempoStretcher.h:34(outLen)" : " @no-stretch")
+                                  << " actualOut=" << actual
+                                  << " crossfadeLen=" << xfade
+                                  << " agree=" << ((actual == xfade) ? "YES" : "NO(DIVERGENT)")
+                                  << "\n";
+                    };
+                    const int64_t tailOrigA = (int64_t)EA.audioBuffer->getNumSamples() - EA.endMark;
+                    lenRow("A.tail  ", tailOrigA, EA.tailStretchRatio,
+                           EA.stretchedTail != nullptr,
+                           renderedTailLength(EA), EB.prevTailLen);
+                    lenRow("B.leadIn", EB.startMark, EB.leadInStretchRatio,
+                           EB.stretchedLeadIn != nullptr,
+                           renderedLeadInLength(EB), EA.nextLeadInLen);
+                    std::cout << "  ADVANCE join-A.pos=" << (join - EA.timelinePos)
+                              << " A.bodyLen=" << (EA.endMark - EA.startMark)
+                              << " agree=" << ((join - EA.timelinePos) == (EA.endMark - EA.startMark)
+                                               ? "YES" : "NO(DIVERGENT)") << "\n";
+                    auto zr = [&](const char* nm, const std::shared_ptr<juce::AudioBuffer<float>>& sb) {
+                        if (!sb) { std::cout << "  ZRUN " << nm << " (no stretched buffer)\n"; return; }
+                        std::cout << "  ZRUN " << nm << " len=" << sb->getNumSamples()
+                                  << " leadingZeros=" << zeroRun(sb.get(), false)
+                                  << " trailingZeros=" << zeroRun(sb.get(), true) << "\n";
+                    };
+                    zr("A.stretchedTail  ", EA.stretchedTail);
+                    zr("B.stretchedLeadIn", EB.stretchedLeadIn);
+                };
+                // C1 markers ON-GRID via the real snapToGrid (control).
+                // A@100BPM/48k: beat=28800 -> s=28800 e=144000 (exact). Tail 1 beat.
+                // B@140BPM: beat=20571.4286 (fractional grid) -> snap lands 20571/102857.
+                const int64_t c1sA = snapToGrid(28700, 100.0, srO), c1eA = snapToGrid(143900, 100.0, srO);
+                const int64_t c1sB = snapToGrid(20500, 140.0, srO), c1eB = snapToGrid(102900, 140.0, srO);
+                runOff("C1 ongrid 100->140", 100.0, 140.0,
+                       c1sA, c1eA, 172800, c1sB, c1eB, 112857);
+                runOff("C2 offgrid+137",     100.0, 140.0,
+                       c1sA + 137, c1eA + 137, 172800, c1sB + 137, c1eB + 137, 112857);
+                runOff("C3 offgrid+1009",    100.0, 140.0,
+                       c1sA + 1009, c1eA + 1009, 172800, c1sB + 1009, c1eB + 1009, 112857);
+                // C4 fractional beats: A lead 2.63 beats=75744, tail 0.37=10656;
+                // B lead 2.63 beats=54102.857->54103 (free drop), tail 0.37->7611.
+                runOff("C4 fracbeats",       100.0, 140.0,
+                       75744, 190944, 201600, 54103, 136389, 144000);
+                runOff("C5 offgrid+137 equal-tempo", 100.0, 100.0,
+                       c1sA + 137, c1eA + 137, 172800, c1sB + 137, c1eB + 137, 112857);
+            }
+
             { // T38b (invariant sweep): sequential timeline WITH tails — dump +
               // numeric adjacency. Tails overlap the NEXT body region by design but
               // must never move bodies apart nor overlap them.
