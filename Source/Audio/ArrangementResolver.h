@@ -33,6 +33,12 @@ struct ResolvedEntry {
     // Pre-computed pitch-preserving stretched buffers (null if no stretching needed).
     std::shared_ptr<juce::AudioBuffer<float>> stretchedLeadIn = {};
     std::shared_ptr<juce::AudioBuffer<float>> stretchedTail   = {};
+
+    // Cross‑fade lengths (project samples) for complementary gain ramps.
+    // prevTailLen  = length of the previous entry's tail (overlaps with the start of this body)
+    // nextLeadInLen = length of the next entry's lead‑in (overlaps with the end of this body)
+    int64_t prevTailLen   = 0;
+    int64_t nextLeadInLen = 0;
 };
 
 /** Concrete arrangement produced by resolving probabilities. */

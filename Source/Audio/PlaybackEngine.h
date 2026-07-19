@@ -47,13 +47,7 @@ private:
 
     double outputSampleRate = 48000.0;
 
-    void mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
-                            int numSamples,
-                            const ResolvedEntry& entry,
-                            int64_t currentHead,
-                            double pToH,
-                            double hToP,
-                            int entryIndex = -1) const;
+    // Removed the old mixEntryIntoBuffer declaration - we now use the global function
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlaybackEngine)
 };

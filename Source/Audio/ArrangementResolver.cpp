@@ -12,6 +12,7 @@
 //    entry N's body end (timelinePos + bodyLen); lead-ins/tails overlap it.
 // ══════════════════════════════════════════════════════════════════════════════
 #include "ArrangementResolver.h"
+#include "EntryMixer.h"     // renderedLeadInLength / renderedTailLength (fix (b))
 #include "StackPicker.h"
 #include "TempoStretcher.h"
 #include <algorithm>
@@ -205,10 +206,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
             // Snapshot the FULL buffer — lead-in [0,startMark), body, tail [endMark,len)
             auto trimmed = trimBuffer(*clip->audioBuffer, 0,
-                        (int64_t)clip->audioBuffer->getNumSamples());  // FIX tail-discard 2026-07-13:
-                        // copy the FULL buffer — the tail [endMark, len) must reach the entry
-                        // (mixer/stretch/duration derive tailLen = len - endMark; trimming at
-                        // endMark silenced every tail: T38/T40/T41)
+                        (int64_t)clip->audioBuffer->getNumSamples());
             if (!trimmed) continue;
 
             // Offset cursor so the first clip's lead-in starts at timeline position 0.
@@ -258,10 +256,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     if (!clip) continue;
 
                     auto trimmed = trimBuffer(*clip->audioBuffer, 0,
-                        (int64_t)clip->audioBuffer->getNumSamples());  // FIX tail-discard 2026-07-13:
-                        // copy the FULL buffer — the tail [endMark, len) must reach the entry
-                        // (mixer/stretch/duration derive tailLen = len - endMark; trimming at
-                        // endMark silenced every tail: T38/T40/T41)
+                        (int64_t)clip->audioBuffer->getNumSamples());
                     if (!trimmed) continue;
 
                     // Initialise cursor on first ever entry so lead-in starts at t=0.
@@ -279,7 +274,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, stackGain, b->id
                     });
                     maxBodyLen = std::max(maxBodyLen, bodyLen);
-                    if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
+                    if (clip->isSongEnder) { songEnded = true; break; }
                 }
 
                 if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid
@@ -318,10 +313,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
                     // Snapshot the FULL buffer — lead-in [0,startMark), body, tail [endMark,len)
                     auto trimmed = trimBuffer(*clip->audioBuffer, 0,
-                        (int64_t)clip->audioBuffer->getNumSamples());  // FIX tail-discard 2026-07-13:
-                        // copy the FULL buffer — the tail [endMark, len) must reach the entry
-                        // (mixer/stretch/duration derive tailLen = len - endMark; trimming at
-                        // endMark silenced every tail: T38/T40/T41)
+                        (int64_t)clip->audioBuffer->getNumSamples());
                     if (!trimmed) continue;
 
                     // Initialise cursor on first ever entry so lead-in starts at t=0.
@@ -338,7 +330,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, 1.0f, b->id
                     });
                     cursor += bodyLen;
-                    if (clip->isSongEnder) { songEnded = true; break; }  // FIX C3: exit inner loop
+                    if (clip->isSongEnder) { songEnded = true; break; }
                 }
             }
 
@@ -354,7 +346,11 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         }
     }
 
-    // ── Post-process: compute tempo-stretch ratios between adjacent entries ──
+    // (Section 5b — cross-fade lengths — MOVED below section 6: the body ramps
+    //  must match the RENDERED overlap lengths, which only exist after the
+    //  stretch buffers are built. Fix (b), 2026-07-19.)
+
+    // ── 6. Post-process: compute tempo‑stretch ratios between adjacent entries ──
     // Simultaneous entries sharing the same timelinePos are skipped (no stretch within a slot).
     {
         std::vector<int> primary;
@@ -406,11 +402,33 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
         if (leadInLen > 0 && std::abs(entry.leadInStretchRatio - 1.0f) > 0.001f)
         {
-            auto stretched = TempoStretcher::stretch(buf, 0, (int)leadInLen,
+            // Fix (c) TIME-REVERSED stretch (2026-07-19): WSOLA anchors its
+            // output phase at the segment START and drifts toward the end. A
+            // lead-in meets the body at its END (the join), so stretch the
+            // REVERSED segment and reverse the output — the phase anchor moves
+            // to the join side and lands aligned with source[startMark]
+            // (XTDIAG 120->160 click). The TAIL stretch below stays as-is: it
+            // meets the body at its START, which is already WSOLA's anchor.
+            const int nCh = buf.getNumChannels();
+            juce::AudioBuffer<float> rev(nCh, (int)leadInLen);
+            for (int ch = 0; ch < nCh; ++ch) {
+                const float* rd = buf.getReadPointer(ch);
+                float*       wr = rev.getWritePointer(ch);
+                for (int i = 0; i < (int)leadInLen; ++i)
+                    wr[i] = rd[leadInLen - 1 - i];
+            }
+            auto stretched = TempoStretcher::stretch(rev, 0, (int)leadInLen,
                                                      entry.leadInStretchRatio);
-            if (stretched.getNumSamples() > 0)
+            const int outLen = stretched.getNumSamples();
+            if (outLen > 0) {
+                for (int ch = 0; ch < stretched.getNumChannels(); ++ch) {
+                    float* w = stretched.getWritePointer(ch);
+                    for (int i = 0, j = outLen - 1; i < j; ++i, --j)
+                        std::swap(w[i], w[j]);
+                }
                 entry.stretchedLeadIn =
                     std::make_shared<juce::AudioBuffer<float>>(std::move(stretched));
+            }
         }
 
         if (tailLen > 0 && std::abs(entry.tailStretchRatio - 1.0f) > 0.001f)
@@ -420,6 +438,27 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             if (stretched.getNumSamples() > 0)
                 entry.stretchedTail =
                     std::make_shared<juce::AudioBuffer<float>>(std::move(stretched));
+        }
+    }
+
+    // ── 5b (RELOCATED after section 6, fix (b) 2026-07-19). Cross-fade lengths
+    // for the complementary body ramps. These must equal the ACTUAL overlap on
+    // the timeline — the RENDERED (post-stretch) tail / lead-in extents, which
+    // exist only after the stretch buffers above are built. Computing them from
+    // the unstretched lengths made every cross-tempo body ramp the wrong
+    // length (ramps misaligned with the real overlap: XTDIAG THD ~0.10).
+    // Only timeline-adjacent (non-simultaneous) neighbors form an overlap.
+    for (int i = 0; i < result.entries.size(); ++i) {
+        auto& entry = result.entries.getReference(i);
+        if (i > 0) {
+            auto& prev = result.entries.getReference(i - 1);
+            if (prev.timelinePos != entry.timelinePos)
+                entry.prevTailLen = renderedTailLength(prev);
+        }
+        if (i < result.entries.size() - 1) {
+            auto& next = result.entries.getReference(i + 1);
+            if (entry.timelinePos != next.timelinePos)
+                entry.nextLeadInLen = renderedLeadInLength(next);
         }
     }
 

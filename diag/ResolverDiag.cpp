@@ -9,6 +9,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "Model/Project.h"
 #include "Audio/ArrangementResolver.h"
+#include "Audio/EntryMixer.h"
 #include "Audio/ExportRenderer.h"
 #include "Audio/PlaybackEngine.h"
 #include "Audio/StackPicker.h"
@@ -2407,6 +2408,148 @@ int main(int argc, char* argv[]) {
                         + juce::String(r2.getSample(0, w1b - 1), 3) + "]"
                         + ", maxStep=" + juce::String(maxStep, 6)
                         + ", flatRejected=" + (flatRejected ? "y" : "NO(test broken)"));
+            }
+
+            { // XTDIAG (diagnostic probe, print-only, NO verdict): cross-tempo
+              // join metrics. Self-contained — computes rendered lead/tail
+              // extents locally so the identical probe text runs against any
+              // mixer build. 440 Hz sine at 0.5 FS; renders via direct
+              // mixEntryToBuffer calls exactly as export does.
+                const double srX = 44100.0;
+                const int LX = 4410, bodyX = 17640;
+                auto runCase = [&](double tempoA, double tempoB, const char* tag) {
+                    Project p; p.sampleRate = srX;
+                    auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+                    addClipTo(A, "cA", LX + bodyX + LX);
+                    addClipTo(B, "cB", LX + bodyX);
+                    A->clips[0]->startMark = LX; A->clips[0]->endMark = LX + bodyX;
+                    B->clips[0]->startMark = LX; B->clips[0]->endMark = LX + bodyX;
+                    A->clips[0]->tempo = tempoA; B->clips[0]->tempo = tempoB;
+                    for (auto* blk : { A, B })
+                        for (int ch = 0; ch < 2; ++ch) {
+                            auto* w = blk->clips[0]->audioBuffer->getWritePointer(ch);
+                            const int n = blk->clips[0]->audioBuffer->getNumSamples();
+                            for (int i = 0; i < n; ++i)
+                                w[i] = 0.5f * (float)std::sin(2.0 * juce::MathConstants<double>::pi
+                                                              * 440.0 * i / srX);
+                        }
+                    ArrangementResolver res; juce::Random r(6000);
+                    auto arr = res.resolve(p, r); arr.sampleRate = srX;
+                    const auto& eA = arr.entries.getReference(0);
+                    const auto& eB = arr.entries.getReference(1);
+                    const int64_t join = eB.timelinePos;
+                    // Rendered extents, computed locally (mirror the mixer branches)
+                    int64_t Wpre = 0;
+                    if (eB.startMark > 0) {
+                        if (eB.stretchedLeadIn) Wpre = eB.stretchedLeadIn->getNumSamples();
+                        else if (std::abs(eB.leadInStretchRatio - 1.0f) < 0.0001f) Wpre = eB.startMark;
+                        else Wpre = juce::jmax((int64_t)0,
+                                       (int64_t)(eB.startMark * eB.leadInStretchRatio + 0.5f));
+                    }
+                    const int64_t tailLenA = juce::jmax((int64_t)0,
+                        (int64_t)eA.audioBuffer->getNumSamples() - eA.endMark);
+                    const int64_t Wpost = (tailLenA <= 0) ? 0
+                        : ((eA.retainTailTempo || !eA.stretchedTail) ? tailLenA
+                           : (int64_t)eA.stretchedTail->getNumSamples());
+                    juce::AudioBuffer<float> out(2, (int)arr.totalDurationSamples);
+                    out.clear();
+                    for (int i = 0; i < arr.entries.size(); ++i)
+                        mixEntryToBuffer(arr.entries.getReference(i), out,
+                                         (int)arr.totalDurationSamples, 0LL, 1.0, 1.0, i);
+                    juce::uint32 fnv = 2166136261u;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < out.getNumSamples(); ++i) {
+                            juce::uint32 bits;
+                            const float v = out.getSample(ch, i);
+                            std::memcpy(&bits, &v, sizeof(bits));
+                            fnv = (fnv ^ bits) * 16777619u;
+                        }
+                    const int a0 = (int)juce::jmax((int64_t)0, join - Wpre - 2205);
+                    const int a1 = (int)juce::jmin((int64_t)arr.totalDurationSamples,
+                                                   join + Wpost + 2205);
+                    float maxAbs = 0.0f, maxDelta = 0.0f; int deltaPos = -1;
+                    for (int i = a0 + 1; i < a1; ++i) {
+                        maxAbs = juce::jmax(maxAbs, std::abs(out.getSample(0, i)));
+                        float d = std::abs(out.getSample(0, i) - out.getSample(0, i - 1));
+                        if (d > maxDelta) { maxDelta = d; deltaPos = i; }
+                    }
+                    const int f0 = (int)(join - Wpre), f1 = (int)(join + Wpost);
+                    double ssum = 0, csum = 0, cs = 0, xs = 0, xc = 0, tot = 0;
+                    for (int i = f0; i < f1; ++i) {
+                        double ph = 2.0 * juce::MathConstants<double>::pi * 440.0 * i / srX;
+                        double s = std::sin(ph), c = std::cos(ph);
+                        double x = out.getSample(0, i);
+                        ssum += s * s; csum += c * c; cs += c * s;
+                        xs += x * s; xc += x * c; tot += x * x;
+                    }
+                    const double det = ssum * csum - cs * cs;
+                    const double fa = (xs * csum - xc * cs) / det;
+                    const double fb = (xc * ssum - xs * cs) / det;
+                    double resid = 0;
+                    for (int i = f0; i < f1; ++i) {
+                        double ph = 2.0 * juce::MathConstants<double>::pi * 440.0 * i / srX;
+                        double e = out.getSample(0, i) - (fa * std::sin(ph) + fb * std::cos(ph));
+                        resid += e * e;
+                    }
+                    std::cout << "XTDIAG[" << tag << "] Wpre=" << Wpre << " Wpost=" << Wpost
+                              << " renderHashFNV=0x" << juce::String::toHexString((int)fnv)
+                              << " maxAbs=" << juce::String(maxAbs, 6)
+                              << " maxDelta=" << juce::String(maxDelta, 6)
+                              << " @join" << (deltaPos >= join ? "+" : "")
+                              << juce::String((int64_t)deltaPos - join)
+                              << " THDresidual=" << juce::String(tot > 0 ? resid / tot : 0.0, 6)
+                              << "\n";
+                };
+                runCase(120.0, 120.0, "CONTROL 120->120");
+                runCase(120.0, 160.0, "CROSS 120->160");
+                runCase(160.0, 120.0, "CROSS 160->120");
+            }
+
+            { // REALDIAG (print-only): full-scale (peak >= 0.99) multi-partial
+              // join through the REAL engine — max|sample| and proof of ZERO
+              // post-mix processing (engine output == plain sum of
+              // mixEntryToBuffer calls; count of samples differing by > 1e-3
+              // MUST be 0 — an output stage would alter thousands).
+                const double srR = 44100.0;
+                const int LR = 4410, bodyR = 17640;
+                Project p; p.sampleRate = srR;
+                auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+                addClipTo(A, "cA", LR + bodyR + LR);
+                addClipTo(B, "cB", LR + bodyR);
+                A->clips[0]->startMark = LR; A->clips[0]->endMark = LR + bodyR;
+                B->clips[0]->startMark = LR; B->clips[0]->endMark = LR + bodyR;
+                for (auto* blk : { A, B }) {
+                    auto& buf = *blk->clips[0]->audioBuffer;
+                    float pk = 0.0f;
+                    for (int ch = 0; ch < 2; ++ch) {
+                        auto* w = buf.getWritePointer(ch);
+                        for (int i = 0; i < buf.getNumSamples(); ++i) {
+                            double t = (double)i / srR;
+                            w[i] = (float)(0.62 * std::sin(2.0 * juce::MathConstants<double>::pi * 220.0 * t)
+                                         + 0.31 * std::sin(2.0 * juce::MathConstants<double>::pi * 554.37 * t)
+                                         + 0.13 * std::sin(2.0 * juce::MathConstants<double>::pi * 1318.5 * t));
+                            pk = juce::jmax(pk, std::abs(w[i]));
+                        }
+                    }
+                    buf.applyGain(0.99f / pk);   // true peak exactly 0.99
+                }
+                ArrangementResolver res; juce::Random r(6100);
+                auto arr = res.resolve(p, r); arr.sampleRate = srR;
+                auto eng = renderEngineLen(arr, 512, arr.totalDurationSamples);
+                juce::AudioBuffer<float> raw(2, (int)arr.totalDurationSamples);
+                raw.clear();
+                for (int i = 0; i < arr.entries.size(); ++i)
+                    mixEntryToBuffer(arr.entries.getReference(i), raw,
+                                     (int)arr.totalDurationSamples, 0LL, 1.0, 1.0, i);
+                float maxEng = 0.0f; int64_t altered = 0;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < raw.getNumSamples(); ++i) {
+                        maxEng = juce::jmax(maxEng, std::abs(eng.getSample(ch, i)));
+                        if (std::abs(eng.getSample(ch, i) - raw.getSample(ch, i)) > 1.0e-3f)
+                            ++altered;
+                    }
+                std::cout << "REALDIAG fullscale join: engineMaxAbs=" << juce::String(maxEng, 6)
+                          << " postMixAlteredSamples(MUST be 0)=" << altered << "\n";
             }
 
             { // T38b (invariant sweep): sequential timeline WITH tails — dump +

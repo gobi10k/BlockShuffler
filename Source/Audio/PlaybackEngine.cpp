@@ -97,14 +97,18 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
                                   ? (int64_t)entry.stretchedTail->getNumSamples()
                                   : (int64_t)(tailLen   * entry.tailStretchRatio   + 0.5f);
 
-        // timelinePos = body start; lead-in at [timelinePos - startMark, timelinePos).
+        // timelinePos = body start; the lead-in ENDS at the body join and spans
+        // its RENDERED (post-stretch) length — the culling window must match
+        // the mixer's end-anchor or a stretched lead longer than startMark gets
+        // culled at block granularity (part of fix (a), the 2e93c22 pairing).
         // Convert project-space bounds to hardware-space bounds.
-        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - entry.startMark) * hToP + 0.5);
+        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - renderedLeadInLength(entry)) * hToP + 0.5);
         int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + (entry.endMark - entry.startMark) + tailTL) * hToP + 0.5);
 
         if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;
 
-        mixEntryIntoBuffer(buffer, numSamples, entry, head, pToH, hToP, entryIndex);
+        // Delegate to shared EntryMixer
+        mixEntryToBuffer(entry, buffer, numSamples, head, pToH, hToP, entryIndex);
     }
 
     head += numSamples;
@@ -116,18 +120,6 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
         playing.store(false);
         playheadSamples.store(totalH);
     }
-}
-
-void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
-                                         int numSamples,
-                                         const ResolvedEntry& entry,
-                                         int64_t currentHead,
-                                         double pToH,
-                                         double hToP,
-                                         int entryIndex) const
-{
-    // FIX H1: delegate to shared EntryMixer so playback and export use identical logic
-    mixEntryToBuffer(entry, buffer, numSamples, currentHead, pToH, hToP, entryIndex);
 }
 
 } // namespace BlockShuffler

@@ -31,6 +31,8 @@ bool ExportRenderer::renderToFile(const ResolvedArrangement& arrangement,
     // Export always runs at project sample rate (pToH = hToP = 1.0, currentHead = 0).
     const int numEntries = arrangement.entries.size();
     for (int i = 0; i < numEntries; ++i) {
+        // Call the shared mixer with the correct 7-argument signature.
+        // The cross‑fade logic is now entirely inside EntryMixer.h.
         mixEntryToBuffer(arrangement.entries.getReference(i), output, (int)numSamples, 0LL, 1.0, 1.0, i);
         if (progress) progress((float)(i + 1) / (float)numEntries);
     }
@@ -294,3 +296,4 @@ bool ExportRenderer::renderToBsf(const ResolvedArrangement& arrangement,
 }
 
 } // namespace BlockShuffler
+
