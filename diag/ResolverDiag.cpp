@@ -2588,10 +2588,16 @@ int main(int argc, char* argv[]) {
                     }
                     return run;
                 };
+                // Zone/length metrics returned so permanent tests (T53/T54) can
+                // assert on the SAME machinery the C1-C5 probes print.
+                struct OffR { double z3max = 0.0, z3bound = 0.0;
+                              bool advanceAgree = false, lenOk = false; };
                 auto runOff = [&](const char* tag, double tempoA, double tempoB,
                                   int64_t sA, int64_t eA, int lenA,
-                                  int64_t sB, int64_t eB, int lenB) {
-                    Project p; p.sampleRate = srO;
+                                  int64_t sB, int64_t eB, int lenB,
+                                  double freqA = 220.0, double freqB = 330.0,
+                                  double amp = 0.5, double srC = 48000.0) -> OffR {
+                    Project p; p.sampleRate = srC;
                     auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
                     addClipTo(A, "cA", lenA);
                     addClipTo(B, "cB", lenB);
@@ -2601,11 +2607,11 @@ int main(int argc, char* argv[]) {
                             auto* w = c->audioBuffer->getWritePointer(ch);
                             const int n = c->audioBuffer->getNumSamples();
                             for (int i = 0; i < n; ++i)
-                                w[i] = 0.5f * (float)std::sin(2.0 * juce::MathConstants<double>::pi
-                                                              * f * i / srO);
+                                w[i] = (float)amp * (float)std::sin(2.0 * juce::MathConstants<double>::pi
+                                                              * f * i / srC);
                         }
                     };
-                    fill(A->clips[0], 220.0); fill(B->clips[0], 330.0);
+                    fill(A->clips[0], freqA); fill(B->clips[0], freqB);
                     freeDrop(A->clips[0], sA, eA);
                     freeDrop(B->clips[0], sB, eB);
                     ArrangementResolver res; juce::Random r(6200);
@@ -2636,8 +2642,8 @@ int main(int argc, char* argv[]) {
                             fnv = (fnv ^ bits) * 16777619u;
                         }
                     // Zone max-delta table, bound = 3x the summed natural sine slopes present
-                    const double s220 = 0.5 * 2.0 * juce::MathConstants<double>::pi * 220.0 / srO;
-                    const double s330 = 0.5 * 2.0 * juce::MathConstants<double>::pi * 330.0 / srO;
+                    const double s220 = amp * 2.0 * juce::MathConstants<double>::pi * freqA / srC;
+                    const double s330 = amp * 2.0 * juce::MathConstants<double>::pi * freqB / srC;
                     struct Zn { const char* nm; int64_t a, b; double bound; };
                     Zn zs[5] = {
                         { "Z1 A-body ", juce::jmax((int64_t)0, join - Wpre - 2000), join - Wpre, s220 },
@@ -2647,16 +2653,19 @@ int main(int argc, char* argv[]) {
                         { "Z5 B-body ", join + Wpost,
                           juce::jmin((int64_t)total, join + Wpost + 2000), s330 },
                     };
+                    OffR ret;
                     std::cout << "OFFGRID[" << tag << "] join=" << join << " Wpre=" << Wpre
                               << " Wpost=" << Wpost
                               << " renderHashFNV=0x" << juce::String::toHexString((int)fnv) << "\n";
-                    for (const auto& z : zs) {
+                    for (int zi = 0; zi < 5; ++zi) {
+                        const auto& z = zs[zi];
                         float mx = 0.0f; int64_t firstViol = -1; int nViol = 0;
                         for (int64_t i = z.a + 1; i < z.b; ++i) {
                             float d = std::abs(out.getSample(0, (int)i) - out.getSample(0, (int)i - 1));
                             mx = juce::jmax(mx, d);
                             if (d > 3.0 * z.bound) { if (firstViol < 0) firstViol = i; ++nViol; }
                         }
+                        if (zi == 2) { ret.z3max = mx; ret.z3bound = 3.0 * z.bound; }
                         std::cout << "  " << z.nm << " [" << z.a << "," << z.b
                                   << ") maxDelta=" << juce::String(mx, 6)
                                   << " bound3x=" << juce::String(3.0 * z.bound, 6)
@@ -2666,13 +2675,16 @@ int main(int argc, char* argv[]) {
                                       << (int64_t)(firstViol - join);
                         std::cout << "\n";
                     }
-                    // Off-peak residual: LSQ-remove 220 & 330 (sin+cos each) per window
+                    // Off-peak residual: LSQ-remove freqA & freqB (sin+cos each) per
+                    // window. Equal frequencies (440/440 XT cases) collapse to a
+                    // 2-term basis — a duplicated pair would make the matrix singular.
+                    const int nb = (freqA == freqB) ? 2 : 4;
                     auto offPeak = [&](int64_t a, int64_t b) -> double {
                         if (b - a < 8) return 0.0;
                         double m[4][4] = {}, v[4] = {}, tot2 = 0.0;
                         auto basis = [&](int64_t i, double* ph) {
-                            const double w1 = 2.0 * juce::MathConstants<double>::pi * 220.0 * i / srO;
-                            const double w2 = 2.0 * juce::MathConstants<double>::pi * 330.0 * i / srO;
+                            const double w1 = 2.0 * juce::MathConstants<double>::pi * freqA * i / srC;
+                            const double w2 = 2.0 * juce::MathConstants<double>::pi * freqB * i / srC;
                             ph[0] = std::sin(w1); ph[1] = std::cos(w1);
                             ph[2] = std::sin(w2); ph[3] = std::cos(w2);
                         };
@@ -2680,32 +2692,32 @@ int main(int argc, char* argv[]) {
                             double ph[4]; basis(i, ph);
                             const double x = out.getSample(0, (int)i);
                             tot2 += x * x;
-                            for (int r2 = 0; r2 < 4; ++r2) {
+                            for (int r2 = 0; r2 < nb; ++r2) {
                                 v[r2] += ph[r2] * x;
-                                for (int c2 = 0; c2 < 4; ++c2) m[r2][c2] += ph[r2] * ph[c2];
+                                for (int c2 = 0; c2 < nb; ++c2) m[r2][c2] += ph[r2] * ph[c2];
                             }
                         }
-                        for (int col = 0; col < 4; ++col) {           // Gaussian elim
+                        for (int col = 0; col < nb; ++col) {           // Gaussian elim
                             int piv = col;
-                            for (int r2 = col + 1; r2 < 4; ++r2)
+                            for (int r2 = col + 1; r2 < nb; ++r2)
                                 if (std::abs(m[r2][col]) > std::abs(m[piv][col])) piv = r2;
-                            for (int c2 = 0; c2 < 4; ++c2) std::swap(m[col][c2], m[piv][c2]);
+                            for (int c2 = 0; c2 < nb; ++c2) std::swap(m[col][c2], m[piv][c2]);
                             std::swap(v[col], v[piv]);
                             if (std::abs(m[col][col]) < 1e-12) return -1.0;
-                            for (int r2 = 0; r2 < 4; ++r2) {
+                            for (int r2 = 0; r2 < nb; ++r2) {
                                 if (r2 == col) continue;
                                 const double f = m[r2][col] / m[col][col];
-                                for (int c2 = 0; c2 < 4; ++c2) m[r2][c2] -= f * m[col][c2];
+                                for (int c2 = 0; c2 < nb; ++c2) m[r2][c2] -= f * m[col][c2];
                                 v[r2] -= f * v[col];
                             }
                         }
-                        double coef[4];
-                        for (int r2 = 0; r2 < 4; ++r2) coef[r2] = v[r2] / m[r2][r2];
+                        double coef[4] = {};
+                        for (int r2 = 0; r2 < nb; ++r2) coef[r2] = v[r2] / m[r2][r2];
                         double resid = 0.0;
                         for (int64_t i = a; i < b; ++i) {
                             double ph[4]; basis(i, ph);
                             double e = out.getSample(0, (int)i);
-                            for (int r2 = 0; r2 < 4; ++r2) e -= coef[r2] * ph[r2];
+                            for (int r2 = 0; r2 < nb; ++r2) e -= coef[r2] * ph[r2];
                             resid += e * e;
                         }
                         return tot2 > 0.0 ? resid / tot2 : 0.0;
@@ -2713,10 +2725,13 @@ int main(int argc, char* argv[]) {
                     std::cout << "  offPeak xfPre=" << juce::String(offPeak(join - Wpre, join), 6)
                               << " xfPost=" << juce::String(offPeak(join, join + Wpost), 6) << "\n";
                     // LENGTH ACCOUNTING (targetF uses the same float ratio the code uses)
+                    bool lenOkAll = true;
                     auto lenRow = [&](const char* seg, int64_t orig, float ratio,
                                       bool stretched, int64_t actual, int64_t xfade) {
                         const double targetF = (double)((float)orig * ratio);
                         const int64_t roundedTS = juce::jmax(1, (int)((float)orig * ratio + 0.5f));
+                        const int64_t expected  = stretched ? roundedTS : orig;
+                        lenOkAll = lenOkAll && actual == xfade && actual == expected;
                         std::cout << "  LEN " << seg << " orig=" << orig
                                   << " ratio=" << juce::String(ratio, 6)
                                   << " targetF=" << juce::String(targetF, 3)
@@ -2738,10 +2753,11 @@ int main(int argc, char* argv[]) {
                     lenRow("B.leadIn", EB.startMark, EB.leadInStretchRatio,
                            EB.stretchedLeadIn != nullptr,
                            renderedLeadInLength(EB), renderedLeadInLength(EB));
+                    ret.advanceAgree = (join - EA.timelinePos) == (EA.endMark - EA.startMark);
+                    ret.lenOk = lenOkAll;
                     std::cout << "  ADVANCE join-A.pos=" << (join - EA.timelinePos)
                               << " A.bodyLen=" << (EA.endMark - EA.startMark)
-                              << " agree=" << ((join - EA.timelinePos) == (EA.endMark - EA.startMark)
-                                               ? "YES" : "NO(DIVERGENT)") << "\n";
+                              << " agree=" << (ret.advanceAgree ? "YES" : "NO(DIVERGENT)") << "\n";
                     auto zr = [&](const char* nm, const std::shared_ptr<juce::AudioBuffer<float>>& sb) {
                         if (!sb) { std::cout << "  ZRUN " << nm << " (no stretched buffer)\n"; return; }
                         std::cout << "  ZRUN " << nm << " len=" << sb->getNumSamples()
@@ -2750,6 +2766,7 @@ int main(int argc, char* argv[]) {
                     };
                     zr("A.stretchedTail  ", EA.stretchedTail);
                     zr("B.stretchedLeadIn", EB.stretchedLeadIn);
+                    return ret;
                 };
                 // C1 markers ON-GRID via the real snapToGrid (control).
                 // A@100BPM/48k: beat=28800 -> s=28800 e=144000 (exact). Tail 1 beat.
@@ -2768,6 +2785,177 @@ int main(int argc, char* argv[]) {
                        75744, 190944, 201600, 54103, 136389, 144000);
                 runOff("C5 offgrid+137 equal-tempo", 100.0, 100.0,
                        c1sA + 137, c1eA + 137, 172800, c1sB + 137, c1eB + 137, 112857);
+
+                // X1-X3 (JOINFIX): the original XTDIAG anchor cases re-examined
+                // with the OFFGRID zone machinery — 440/440 at 44.1k, marker
+                // layout mirroring XTDIAG exactly (lead 4410, body 17640;
+                // WIDE = 2x ratio; LONG = 2 s lead/tail, 4 s body).
+                runOff("X1 xt-anchor 120->160", 120.0, 160.0,
+                       4410, 22050, 26460, 4410, 22050, 22050,
+                       440.0, 440.0, 0.5, 44100.0);
+                runOff("X2 xt-wide 90->180",    90.0, 180.0,
+                       4410, 22050, 26460, 4410, 22050, 22050,
+                       440.0, 440.0, 0.5, 44100.0);
+                runOff("X3 xt-long-2s 120->160", 120.0, 160.0,
+                       88200, 264600, 352800, 88200, 264600, 264600,
+                       440.0, 440.0, 0.5, 44100.0);
+
+                { // C6-hot (print-only, JOINFIX): amp 0.95 pair, FREE markers,
+                  // cross-tempo. Bodies at full gain mean the ramped lead-in/tail
+                  // SUMS on top of the neighbour body — near the join the mix may
+                  // legitimately exceed 1.0 (report only; NO limiter). Proves the
+                  // in-app float path and the 32-bit float WAV export do not
+                  // clamp; 16-bit clamps by design downstream (numbers reported).
+                    Project p; p.sampleRate = srO;
+                    auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+                    addClipTo(A, "cA", 172800);
+                    addClipTo(B, "cB", 112857);
+                    A->clips[0]->tempo = 100.0; B->clips[0]->tempo = 140.0;
+                    auto fillHot = [&](Clip* c, double f) {
+                        for (int ch = 0; ch < 2; ++ch) {
+                            auto* w = c->audioBuffer->getWritePointer(ch);
+                            const int n = c->audioBuffer->getNumSamples();
+                            for (int i = 0; i < n; ++i)
+                                w[i] = 0.95f * (float)std::sin(2.0 * juce::MathConstants<double>::pi
+                                                               * f * i / srO);
+                        }
+                    };
+                    fillHot(A->clips[0], 220.0); fillHot(B->clips[0], 330.0);
+                    freeDrop(A->clips[0], c1sA + 137, c1eA + 137);
+                    freeDrop(B->clips[0], c1sB + 137, c1eB + 137);
+                    ArrangementResolver res; juce::Random r(6400);
+                    auto arr = res.resolve(p, r); arr.sampleRate = srO;
+                    const auto& EA = arr.entries.getReference(0);
+                    const auto& EB = arr.entries.getReference(1);
+                    const int64_t join  = EB.timelinePos;
+                    const int64_t Wpre  = renderedLeadInLength(EB);
+                    const int64_t Wpost = renderedTailLength(EA);
+                    const int total = (int)arr.totalDurationSamples;
+                    juce::AudioBuffer<float> raw(2, total); raw.clear();
+                    for (int i = 0; i < arr.entries.size(); ++i)
+                        mixEntryToBuffer(arr.entries.getReference(i), raw,
+                                         total, 0LL, 1.0, 1.0, i);
+                    auto eng = renderEngineLen(arr, 512, total);
+                    int64_t altered = 0;
+                    float joinMaxAbs = 0.0f; int64_t overFS = 0;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < total; ++i) {
+                            if (std::abs(eng.getSample(ch, i) - raw.getSample(ch, i)) > 1.0e-3f)
+                                ++altered;
+                            if (i >= (int)(join - Wpre) && i < (int)(join + Wpost)) {
+                                const float a = std::abs(raw.getSample(ch, i));
+                                joinMaxAbs = juce::jmax(joinMaxAbs, a);
+                                if (a > 1.0f) ++overFS;
+                            }
+                        }
+                    std::cout << "C6-hot join=" << join << " Wpre=" << Wpre << " Wpost=" << Wpost
+                              << " joinRegionMaxAbs=" << juce::String(joinMaxAbs, 6)
+                              << " overFSsamples=" << overFS
+                              << " engineVsRawAltered(MUST be 0)=" << altered << "\n";
+                    // 32-bit float WAV (the in-app WAV export path): bit-exact, no clamp
+                    auto wavCheck = [&](int depth) {
+                        auto f = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                     .getChildFile("resolverdiag_c6hot.wav");
+                        juce::WavAudioFormat wavFmt; ExportRenderer ex;
+                        bool ok = ex.renderToFile(arr, f, wavFmt, depth, nullptr);
+                        float maxDiff = -1.0f, filePeak = 0.0f; int64_t clamped = 0;
+                        juce::AudioFormatManager afm; afm.registerBasicFormats();
+                        std::unique_ptr<juce::AudioFormatReader> rd(afm.createReaderFor(f));
+                        if (ok && rd && (int64_t)rd->lengthInSamples == (int64_t)total) {
+                            juce::AudioBuffer<float> fb((int)rd->numChannels, total);
+                            rd->read(&fb, 0, total, 0, true, true);
+                            maxDiff = 0.0f;
+                            for (int ch = 0; ch < 2; ++ch)
+                                for (int i = 0; i < total; ++i) {
+                                    const float fv = fb.getSample(ch, i);
+                                    filePeak = juce::jmax(filePeak, std::abs(fv));
+                                    maxDiff  = juce::jmax(maxDiff,
+                                                   std::abs(fv - raw.getSample(ch, i)));
+                                    if (std::abs(raw.getSample(ch, i)) > 1.0f
+                                        && std::abs(fv) <= 1.0f) ++clamped;
+                                }
+                        }
+                        rd.reset(); f.deleteFile();
+                        std::cout << "C6-hot WAV" << depth
+                                  << (depth == 32 ? "f" : "") << ": filePeak="
+                                  << juce::String(filePeak, 6)
+                                  << " maxDiffVsMix=" << juce::String(maxDiff, 6)
+                                  << " clampedAtFS=" << clamped << "\n";
+                    };
+                    wavCheck(32);   // in-app WAV export depth (float, exact)
+                    wavCheck(16);   // clamps by design — reported, not "fixed"
+                }
+
+                { // JOINFIX-E0LOCK (print-only): single-entry arrangement
+                  // (lead-in + body + tail, NO join). Its render hash must be
+                  // BYTE-IDENTICAL before/after the JOINFIX topology change:
+                  // entry 0 plays its lead-in at FULL GAIN from timeline 0
+                  // (timelinePos = startMark), body constant, tail ramp
+                  // unchanged. Cosine fill so sample 0 is non-zero and the
+                  // full-gain check is non-vacuous.
+                    Project p; p.sampleRate = srO;
+                    auto* A = p.addBlock("A");
+                    addClipTo(A, "cA", 4410 + 17640 + 4410);
+                    A->clips[0]->startMark = 4410;
+                    A->clips[0]->endMark   = 4410 + 17640;
+                    for (int ch = 0; ch < 2; ++ch) {
+                        auto* w = A->clips[0]->audioBuffer->getWritePointer(ch);
+                        const int n = A->clips[0]->audioBuffer->getNumSamples();
+                        for (int i = 0; i < n; ++i)
+                            w[i] = 0.5f * (float)std::cos(2.0 * juce::MathConstants<double>::pi
+                                                          * 220.0 * i / srO);
+                    }
+                    ArrangementResolver res; juce::Random r(6300);
+                    auto arr = res.resolve(p, r); arr.sampleRate = srO;
+                    auto out = renderEngineLen(arr, 512, arr.totalDurationSamples);
+                    juce::uint32 fnv = 2166136261u;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < out.getNumSamples(); ++i) {
+                            juce::uint32 bits; const float v = out.getSample(ch, i);
+                            std::memcpy(&bits, &v, sizeof(bits));
+                            fnv = (fnv ^ bits) * 16777619u;
+                        }
+                    const float first    = out.getSample(0, 0);
+                    const float srcFirst = arr.entries.getReference(0).audioBuffer->getSample(0, 0);
+                    std::cout << "E0LOCK single-entry: entries=" << arr.entries.size()
+                              << " timelinePos=" << arr.entries.getReference(0).timelinePos
+                              << " total=" << arr.totalDurationSamples
+                              << " renderHashFNV=0x" << juce::String::toHexString((int)fnv)
+                              << " firstSample=" << juce::String(first, 6)
+                              << " srcLeadIn[0]=" << juce::String(srcFirst, 6)
+                              << " fullGainAtT0="
+                              << ((std::abs(first - srcFirst) < 1.0e-7f) ? "YES" : "NO(VIOLATION)")
+                              << "\n";
+                }
+
+                // ── T53/T54 (PERMANENT, JOINFIX 2026-07-19): continuous-envelope
+                // joins. The complementary-crossfade carrier swap put a raw
+                // waveform discontinuity at join+0 in EVERY free-marker case
+                // (OFFGRID C1-C5, 0.244-0.746); these turn the suite RED if any
+                // future mixer change reintroduces a join+0 step beyond 3x the
+                // natural summed sine slope, or breaks length agreement
+                // (stretcher output == rendered ramp extent; timeline advance
+                // == body length).
+                {
+                    auto r53 = runOff("T53 perm free-marker 100->140", 100.0, 140.0,
+                                      c1sA + 137, c1eA + 137, 172800,
+                                      c1sB + 137, c1eB + 137, 112857);
+                    verdict("T53 JOINFIX free-marker cross-tempo join: join+-16 within 3x bound + lengths agree",
+                            r53.z3max <= r53.z3bound && r53.lenOk && r53.advanceAgree,
+                            "z3max=" + juce::String(r53.z3max, 6)
+                            + " bound3x=" + juce::String(r53.z3bound, 6)
+                            + ", lenOk=" + (r53.lenOk ? "YES" : "NO")
+                            + ", advance=" + (r53.advanceAgree ? "YES" : "NO"));
+
+                    auto r54 = runOff("T54 perm fracbeats", 100.0, 140.0,
+                                      75744, 190944, 201600, 54103, 136389, 144000);
+                    verdict("T54 JOINFIX fractional-beats join: join+-16 within 3x bound + lengths agree",
+                            r54.z3max <= r54.z3bound && r54.lenOk && r54.advanceAgree,
+                            "z3max=" + juce::String(r54.z3max, 6)
+                            + " bound3x=" + juce::String(r54.z3bound, 6)
+                            + ", lenOk=" + (r54.lenOk ? "YES" : "NO")
+                            + ", advance=" + (r54.advanceAgree ? "YES" : "NO"));
+                }
             }
 
             { // T38b (invariant sweep): sequential timeline WITH tails — dump +
