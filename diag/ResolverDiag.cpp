@@ -3077,8 +3077,14 @@ int main(int argc, char* argv[]) {
                     int64_t outLen  = arr.totalDurationSamples + 2205;
                     auto out = renderEngineLen(arr, 512, outLen);
                     int lastLoud = -1;
+                    // 1e-6 threshold (was 1e-4): under the JOINFIX2 complementary
+                    // window the tail is ducked to T/(W-1) and approaches zero
+                    // shallowly, and makeTone's own 10 ms edge fade multiplies in —
+                    // at 1e-4 the product crossed the threshold ~100 samples early.
+                    // Beyond the arrangement end the buffer is exact zeros, so the
+                    // tighter threshold stays noise-free.
                     for (int i = (int)bodyEnd; i < (int)outLen; ++i)
-                        if (std::abs(out.getSample(0, i)) > 1e-4f) lastLoud = i;
+                        if (std::abs(out.getSample(0, i)) > 1e-6f) lastLoud = i;
                     lens[pass] = lastLoud - (int)bodyEnd + 1;
                     totals[pass] = arr.totalDurationSamples;
                 }

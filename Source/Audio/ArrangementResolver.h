@@ -31,11 +31,16 @@ struct ResolvedEntry {
     float tailStretchRatio   = 1.0f;  // default: no stretch; overridden by post-processing
 
     // Pre-computed pitch-preserving stretched buffers (null if no stretching needed).
-    // JOINFIX (2026-07-19): entries are fully self-contained — no cross-entry
-    // fade coupling. Bodies play at gain 1; each entry's own lead-in/tail ramps
-    // span their rendered extents (EntryMixer.h).
     std::shared_ptr<juce::AudioBuffer<float>> stretchedLeadIn = {};
     std::shared_ptr<juce::AudioBuffer<float>> stretchedTail   = {};
+
+    // Join-window extents (project samples, RENDERED/post-stretch) — the single
+    // source of truth for the ONE complementary crossfade window at each join
+    // (JOINFIX2 2026-07-20; restores the section-5b coupling removed in 36fd316).
+    // prevTailLen   = previous entry's rendered tail (overlaps this body's start)
+    // nextLeadInLen = next entry's rendered lead-in (overlaps this body's end)
+    int64_t prevTailLen   = 0;
+    int64_t nextLeadInLen = 0;
 };
 
 /** Concrete arrangement produced by resolving probabilities. */

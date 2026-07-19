@@ -8,7 +8,8 @@ namespace BlockShuffler {
 
 /** Rendered (post-stretch) timeline extent of an entry's lead-in. MUST mirror
  *  the lead-in branch selection in mixEntryToBuffer. Consumers: the mixer's
- *  END-ANCHORED lead placement and PlaybackEngine's culling window. */
+ *  END-ANCHORED lead placement, PlaybackEngine's culling window, and the
+ *  resolver's join-window sync (section 5b). */
 inline int64_t renderedLeadInLength(const ResolvedEntry& e)
 {
     if (!e.audioBuffer) return 0;
@@ -124,21 +125,51 @@ inline void mixEntryToBuffer(
         TempoStretcher::resampleAdd(s, srcStart, srcSamples, buffer, destOff, destCount, gs, ge);
     };
 
+    // ── JOINFIX2 join windows (2026-07-20) ─────────────────────────────────────
+    // ONE continuous complementary crossfade per join replaces the bodies-at-
+    // full-gain topology (36fd316): that cured the carrier-swap seam but summed
+    // two full-gain sources at every join (C6-hot 1.879 FS — hard clip at any
+    // DAC or integer export). Per join at B.timelinePos: window [join−L, join+T),
+    // W = L+T, L = B's RENDERED lead-in, T = A's RENDERED tail (resolver
+    // section 5b: nextLeadInLen / prevTailLen — the single source of truth).
+    //   A (body-end → tail, contiguous source): gA(p) = (W−1−p)/(W−1)
+    //   B (lead-in → body-start, contiguous):   gB(p) = p/(W−1)
+    // gA + gB ≡ 1 ⇒ |out| ≤ 1 for sources ≤ 1. LINEAR only — equal-power sums
+    // to 1.41 and forfeits the bound. Endpoint gains are evaluated from the
+    // window line at INCLUSIVE sample positions (resampleAdd applies gainStart
+    // at the first and gainEnd at the LAST sample), so split regions and
+    // 512-chunk edges stay on one line; complementary A/B regions share bounds,
+    // and mixBuf's interpolation is linear in the endpoints, so their per-sample
+    // gains sum to exactly 1. Degenerate L or T: same formulas, W = remainder.
+    const int64_t joinLeadIn = renderedLeadInLength(entry);   // L of this entry's B-side window
+    const int64_t joinTail   = renderedTailLength(entry);     // T of this entry's A-side window
+    const int64_t prevT      = (entryIndex == 0) ? 0 : entry.prevTailLen;
+    const int64_t Wb   = joinLeadIn + prevT;                  // window this entry ENTERS through
+    const int64_t Wa   = entry.nextLeadInLen + joinTail;      // window this entry EXITS through
+    const double  denB = (double)juce::jmax((int64_t)1, Wb - 1);
+    const double  denA = (double)juce::jmax((int64_t)1, Wa - 1);
+    // Window lines evaluated over the body (1.0 outside their windows).
+    auto gInAt  = [&](int64_t pos) -> double {                // B line through body start
+        if (entryIndex == 0 || prevT <= 0) return 1.0;
+        const int64_t p = joinLeadIn + (pos - bodyStart);
+        return (p >= Wb - 1) ? 1.0 : (double)p / denB;
+    };
+    auto gOutAt = [&](int64_t pos) -> double {                // A line through body end
+        if (entry.nextLeadInLen <= 0) return 1.0;
+        const int64_t winStart = bodyEnd - entry.nextLeadInLen;
+        if (pos < winStart) return 1.0;
+        return (double)(Wa - 1 - (pos - winStart)) / denA;
+    };
+
     // ── Lead-in ────────────────────────────────────────────────────────────────
-    // JOINFIX (2026-07-19): each source's gain envelope is CONTINUOUS through the
-    // join. The lead-in ramps g(k) = (k+1)/L over its RENDERED length L, so its
-    // LAST sample sits at gain exactly 1.0 and meets the full-gain body on the
-    // same contiguous source audio — no carrier swap at join+0 (OFFGRID C1-C5).
-    // It overlaps the PREVIOUS entry's body, which stays at gain 1; the sum may
-    // exceed 1.0 by design. Entry 0 has no previous body: full gain, no ramp.
-    // resampleAdd applies gainStart at the FIRST and gainEnd at the LAST sample
-    // of a full window, so (1/L, 1.0) renders exactly (k+1)/L.
+    // Entry 0: FULL GAIN from timeline 0 (song-start invariant, byte-locked by
+    // E0LOCK). Others: gB over p = 0..L−1 — in from silence to (L−1)/(W−1) at
+    // the last lead-in sample, continuing seamlessly into the body ramp below.
     if (leadInLen > 0)
     {
-        auto rampStart = [&](int64_t renderedLen) {
-            return (entryIndex == 0 || renderedLen <= 0) ? 1.0f
-                                                         : 1.0f / (float)renderedLen;
-        };
+        const float liG0 = (entryIndex == 0) ? 1.0f : 0.0f;
+        const float liG1 = (entryIndex == 0) ? 1.0f
+                          : (float)((double)juce::jmax((int64_t)0, joinLeadIn - 1) / denB);
 
         // END-ANCHORED (2026-07-19, re-applies 2e93c22): the stretched lead-in
         // ends AT the body join — [bodyStart - sl, bodyStart). Start-anchoring
@@ -148,39 +179,64 @@ inline void mixEntryToBuffer(
         if (entry.stretchedLeadIn)
         {
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0.0, rampStart(sl), 1.0f);
+            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0.0, liG0, liG1);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
-            mixBuf(src, leadInStart, bodyStart, 0.0, rampStart(leadInLen), 1.0f);
+            mixBuf(src, leadInStart, bodyStart, 0.0, liG0, liG1);
         }
         else
         {
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
             if (leadInTL > 0)
-                mixBuf(src, bodyStart - leadInTL, bodyStart, 0.0, rampStart(leadInTL), 1.0f);
+                mixBuf(src, bodyStart - leadInTL, bodyStart, 0.0, liG0, liG1);
         }
     }
 
     // ── Body ──────────────────────────────────────────────────────────────────
-    // JOINFIX: bodies ALWAYS play at gain exactly 1.0 — never attenuated.
-    // Overlapping neighbour lead-ins/tails mix on top at their own ramped gains.
+    // Continues the B window line up to gain 1.0 over the first prevTailLen
+    // samples, holds 1.0, then enters the A window line over the last
+    // nextLeadInLen samples. A body inside BOTH its join windows (fadeIn +
+    // fadeOut > bodyLen) gets both lines — endpoint gains multiply (linear
+    // approximation of the product inside the overlap region; no special
+    // machinery — no harness probe triggers this geometry).
     if (bodyLen > 0)
-        mixBuf(src, bodyStart, bodyEnd, (double)startMark, 1.0f, 1.0f);
+    {
+        const int64_t fadeIn  = juce::jmin(prevT, bodyLen);
+        const int64_t fadeOut = juce::jmin(entry.nextLeadInLen, bodyLen);
+        const int64_t m1 = bodyStart + fadeIn;
+        const int64_t m2 = bodyEnd - fadeOut;
+        const int64_t cuts[4] = { bodyStart, juce::jmin(m1, m2),
+                                  juce::jmax(m1, m2), bodyEnd };
+        for (int r = 0; r < 3; ++r) {
+            const int64_t rs = cuts[r], re = cuts[r + 1];
+            if (rs >= re) continue;
+            const double clipOff = (double)startMark + (double)(rs - bodyStart);
+            mixBuf(src, rs, re, clipOff,
+                   (float)(gInAt(rs) * gOutAt(rs)),
+                   (float)(gInAt(re - 1) * gOutAt(re - 1)));
+        }
+    }
 
     // ── Tail ──────────────────────────────────────────────────────────────────
+    // gA over p = L..W−1: from (W−1−L)/(W−1) — continuing the body-end fade
+    // without a seam — down to 0. With no successor (nextLeadInLen == 0) this
+    // degenerates to the plain 1 → 0 fade (byte-locked by E0LOCK).
     if (tailLen > 0)
     {
+        const float tlG0 = (float)((double)juce::jmax((int64_t)0,
+                                       Wa - 1 - entry.nextLeadInLen) / denA);
+
         // retainTailTempo=true → always play at original speed, never use a
         // pre-stretched buffer (even if one happened to be computed).
         if (entry.retainTailTempo || !entry.stretchedTail)
         {
-            mixBuf(src, bodyEnd, bodyEnd + tailLen, (double)endMark, 1.0f, 0.0f);
+            mixBuf(src, bodyEnd, bodyEnd + tailLen, (double)endMark, tlG0, 0.0f);
         }
         else
         {
             int64_t sl = (int64_t)entry.stretchedTail->getNumSamples();
-            mixBuf(*entry.stretchedTail, bodyEnd, bodyEnd + sl, 0.0, 1.0f, 0.0f);
+            mixBuf(*entry.stretchedTail, bodyEnd, bodyEnd + sl, 0.0, tlG0, 0.0f);
         }
     }
 }
