@@ -2591,7 +2591,8 @@ int main(int argc, char* argv[]) {
                 // Zone/length metrics returned so permanent tests (T53/T54) can
                 // assert on the SAME machinery the C1-C5 probes print.
                 struct OffR { double z3max = 0.0, z3bound = 0.0;
-                              bool advanceAgree = false, lenOk = false; };
+                              bool advanceAgree = false, lenOk = false;
+                              int64_t Wpre = 0, Wpost = 0; };
                 auto runOff = [&](const char* tag, double tempoA, double tempoB,
                                   int64_t sA, int64_t eA, int lenA,
                                   int64_t sB, int64_t eB, int lenB,
@@ -2654,6 +2655,7 @@ int main(int argc, char* argv[]) {
                           juce::jmin((int64_t)total, join + Wpost + 2000), s330 },
                     };
                     OffR ret;
+                    ret.Wpre = Wpre; ret.Wpost = Wpost;
                     std::cout << "OFFGRID[" << tag << "] join=" << join << " Wpre=" << Wpre
                               << " Wpost=" << Wpost
                               << " renderHashFNV=0x" << juce::String::toHexString((int)fnv) << "\n";
@@ -2742,17 +2744,16 @@ int main(int argc, char* argv[]) {
                                   << " agree=" << ((actual == xfade) ? "YES" : "NO(DIVERGENT)")
                                   << "\n";
                     };
-                    // crossfadeLen = the overlap/ramp extent the mixer actually
-                    // applies (JOINFIX: the rendered tail/lead-in extent itself —
-                    // the removed prevTailLen/nextLeadInLen sync carried the same
-                    // value, proven agree=YES in the OFFGRID round).
+                    // crossfadeLen = the resolver-stored join-window extent
+                    // (section 5b, restored by JOINFIX2) — cross-checked against
+                    // the rendered extent the mixer places (actualOut).
                     const int64_t tailOrigA = (int64_t)EA.audioBuffer->getNumSamples() - EA.endMark;
                     lenRow("A.tail  ", tailOrigA, EA.tailStretchRatio,
                            EA.stretchedTail != nullptr,
-                           renderedTailLength(EA), renderedTailLength(EA));
+                           renderedTailLength(EA), EB.prevTailLen);
                     lenRow("B.leadIn", EB.startMark, EB.leadInStretchRatio,
                            EB.stretchedLeadIn != nullptr,
-                           renderedLeadInLength(EB), renderedLeadInLength(EB));
+                           renderedLeadInLength(EB), EA.nextLeadInLen);
                     ret.advanceAgree = (join - EA.timelinePos) == (EA.endMark - EA.startMark);
                     ret.lenOk = lenOkAll;
                     std::cout << "  ADVANCE join-A.pos=" << (join - EA.timelinePos)
@@ -2773,8 +2774,19 @@ int main(int argc, char* argv[]) {
                 // B@140BPM: beat=20571.4286 (fractional grid) -> snap lands 20571/102857.
                 const int64_t c1sA = snapToGrid(28700, 100.0, srO), c1eA = snapToGrid(143900, 100.0, srO);
                 const int64_t c1sB = snapToGrid(20500, 140.0, srO), c1eB = snapToGrid(102900, 140.0, srO);
-                runOff("C1 ongrid 100->140", 100.0, 140.0,
+                auto rC1 = runOff("C1 ongrid 100->140", 100.0, 140.0,
                        c1sA, c1eA, 172800, c1sB, c1eB, 112857);
+                { // Ducking characterization (JOINFIX2, report-only): the
+                  // complementary window puts the downbeat at gB(L) = L/(W-1)
+                  // rather than 1.0 — the audible swell of the pre-JOINFIX
+                  // approved envelope shape, documented here.
+                    const double Wm1 = (double)juce::jmax((int64_t)1,
+                                           rC1.Wpre + rC1.Wpost - 1);
+                    const double gB  = (double)rC1.Wpre / Wm1;
+                    std::cout << "DUCK C1: L=" << rC1.Wpre << " T=" << rC1.Wpost
+                              << " gB(join)=" << juce::String(gB, 6)
+                              << " gA(join)=" << juce::String(1.0 - gB, 6) << "\n";
+                }
                 runOff("C2 offgrid+137",     100.0, 140.0,
                        c1sA + 137, c1eA + 137, 172800, c1sB + 137, c1eB + 137, 112857);
                 runOff("C3 offgrid+1009",    100.0, 140.0,
@@ -2800,17 +2812,18 @@ int main(int argc, char* argv[]) {
                        88200, 264600, 352800, 88200, 264600, 264600,
                        440.0, 440.0, 0.5, 44100.0);
 
-                { // C6-hot (print-only, JOINFIX): amp 0.95 pair, FREE markers,
-                  // cross-tempo. Bodies at full gain mean the ramped lead-in/tail
-                  // SUMS on top of the neighbour body — near the join the mix may
-                  // legitimately exceed 1.0 (report only; NO limiter). Proves the
-                  // in-app float path and the 32-bit float WAV export do not
-                  // clamp; 16-bit clamps by design downstream (numbers reported).
+                // Hot-material join probes (print-only): amp 0.95 pair, FREE
+                // markers. JOINFIX2 REQUIREMENT: joinRegionMaxAbs <= 1.0 + 1e-4
+                // (complementary gains keep the join mathematically bounded) and
+                // the WAV16 clamp count must be 0. C6 = cross-tempo, C7 = EQUAL
+                // tempos (proves any clip mechanism is topology, not tempo).
+                auto runHot = [&](const char* tag, double tempoA, double tempoB,
+                                  int seed) {
                     Project p; p.sampleRate = srO;
                     auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
                     addClipTo(A, "cA", 172800);
                     addClipTo(B, "cB", 112857);
-                    A->clips[0]->tempo = 100.0; B->clips[0]->tempo = 140.0;
+                    A->clips[0]->tempo = tempoA; B->clips[0]->tempo = tempoB;
                     auto fillHot = [&](Clip* c, double f) {
                         for (int ch = 0; ch < 2; ++ch) {
                             auto* w = c->audioBuffer->getWritePointer(ch);
@@ -2823,7 +2836,7 @@ int main(int argc, char* argv[]) {
                     fillHot(A->clips[0], 220.0); fillHot(B->clips[0], 330.0);
                     freeDrop(A->clips[0], c1sA + 137, c1eA + 137);
                     freeDrop(B->clips[0], c1sB + 137, c1eB + 137);
-                    ArrangementResolver res; juce::Random r(6400);
+                    ArrangementResolver res; juce::Random r(seed);
                     auto arr = res.resolve(p, r); arr.sampleRate = srO;
                     const auto& EA = arr.entries.getReference(0);
                     const auto& EB = arr.entries.getReference(1);
@@ -2848,7 +2861,7 @@ int main(int argc, char* argv[]) {
                                 if (a > 1.0f) ++overFS;
                             }
                         }
-                    std::cout << "C6-hot join=" << join << " Wpre=" << Wpre << " Wpost=" << Wpost
+                    std::cout << tag << " join=" << join << " Wpre=" << Wpre << " Wpost=" << Wpost
                               << " joinRegionMaxAbs=" << juce::String(joinMaxAbs, 6)
                               << " overFSsamples=" << overFS
                               << " engineVsRawAltered(MUST be 0)=" << altered << "\n";
@@ -2876,15 +2889,17 @@ int main(int argc, char* argv[]) {
                                 }
                         }
                         rd.reset(); f.deleteFile();
-                        std::cout << "C6-hot WAV" << depth
+                        std::cout << tag << " WAV" << depth
                                   << (depth == 32 ? "f" : "") << ": filePeak="
                                   << juce::String(filePeak, 6)
                                   << " maxDiffVsMix=" << juce::String(maxDiff, 6)
                                   << " clampedAtFS=" << clamped << "\n";
                     };
                     wavCheck(32);   // in-app WAV export depth (float, exact)
-                    wavCheck(16);   // clamps by design — reported, not "fixed"
-                }
+                    wavCheck(16);   // must NOT clamp once the join is bounded
+                };
+                runHot("C6-hot", 100.0, 140.0, 6400);
+                runHot("C7-hot", 100.0, 100.0, 6500);
 
                 { // JOINFIX-E0LOCK (print-only): single-entry arrangement
                   // (lead-in + body + tail, NO join). Its render hash must be
@@ -2955,6 +2970,87 @@ int main(int argc, char* argv[]) {
                             + " bound3x=" + juce::String(r54.z3bound, 6)
                             + ", lenOk=" + (r54.lenOk ? "YES" : "NO")
                             + ", advance=" + (r54.advanceAgree ? "YES" : "NO"));
+                }
+
+                { // T55 (PERMANENT, JOINFIX2 2026-07-20): the join must be
+                  // mathematically BOUNDED. Hot (amp 0.95) free-marker
+                  // cross-tempo join asserts (a) join-region max|sample| <=
+                  // 1.0 + 1e-4, (b) the complementary envelopes sum to 1
+                  // across the whole window — measured directly with DC-filled
+                  // sources (output == gA + gB; tolerance 1e-2 covers the known
+                  // WSOLA edge under-coverage zeros sitting at gain ~0), and
+                  // (c) join+-16 max delta within the 3x summed-slope bound
+                  // (the carrier-swap seam must not return). RED against the
+                  // 36fd316 bodies-at-full-gain mixer (maxAbs 1.879).
+                    auto renderChunked = [&](const ResolvedArrangement& arr) {
+                        const int total = (int)arr.totalDurationSamples;
+                        juce::AudioBuffer<float> out(2, total); out.clear();
+                        juce::AudioBuffer<float> chunk(2, 512);
+                        for (int head = 0; head < total; head += 512) {
+                            const int n = juce::jmin(512, total - head);
+                            chunk.clear();
+                            for (int i = 0; i < arr.entries.size(); ++i)
+                                mixEntryToBuffer(arr.entries.getReference(i), chunk, n,
+                                                 (int64_t)head, 1.0, 1.0, i);
+                            for (int ch = 0; ch < 2; ++ch)
+                                out.copyFrom(ch, (int)head, chunk, ch, 0, n);
+                        }
+                        return out;
+                    };
+                    auto buildHot = [&](bool dc) {
+                        Project p; p.sampleRate = srO;
+                        auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
+                        addClipTo(A, "cA", 172800);
+                        addClipTo(B, "cB", 112857);
+                        A->clips[0]->tempo = 100.0; B->clips[0]->tempo = 140.0;
+                        auto fill = [&](Clip* c, double f) {
+                            for (int ch = 0; ch < 2; ++ch) {
+                                auto* w = c->audioBuffer->getWritePointer(ch);
+                                const int n = c->audioBuffer->getNumSamples();
+                                for (int i = 0; i < n; ++i)
+                                    w[i] = dc ? 1.0f
+                                              : 0.95f * (float)std::sin(
+                                                    2.0 * juce::MathConstants<double>::pi
+                                                    * f * i / srO);
+                            }
+                        };
+                        fill(A->clips[0], 220.0); fill(B->clips[0], 330.0);
+                        freeDrop(A->clips[0], c1sA + 137, c1eA + 137);
+                        freeDrop(B->clips[0], c1sB + 137, c1eB + 137);
+                        ArrangementResolver res; juce::Random r(6600);
+                        auto arr = res.resolve(p, r); arr.sampleRate = srO;
+                        return arr;   // entries snapshot the buffers — safe
+                    };
+                    auto arrS = buildHot(false);
+                    const auto& sEA = arrS.entries.getReference(0);
+                    const auto& sEB = arrS.entries.getReference(1);
+                    const int64_t joinS  = sEB.timelinePos;
+                    const int64_t WpreS  = renderedLeadInLength(sEB);
+                    const int64_t WpostS = renderedTailLength(sEA);
+                    auto outS = renderChunked(arrS);
+                    float maxAbs = 0.0f, z3 = 0.0f;
+                    for (int64_t i = joinS - WpreS; i < joinS + WpostS; ++i)
+                        for (int ch = 0; ch < 2; ++ch)
+                            maxAbs = juce::jmax(maxAbs, std::abs(outS.getSample(ch, (int)i)));
+                    for (int64_t i = joinS - 15; i < joinS + 16; ++i)
+                        z3 = juce::jmax(z3, std::abs(outS.getSample(0, (int)i)
+                                                     - outS.getSample(0, (int)i - 1)));
+                    const double bound = 3.0 * (0.95 * 2.0 * juce::MathConstants<double>::pi
+                                                * (220.0 + 330.0) / srO);
+                    auto arrD = buildHot(true);
+                    auto outD = renderChunked(arrD);
+                    const int64_t joinD  = arrD.entries.getReference(1).timelinePos;
+                    const int64_t WpreD  = renderedLeadInLength(arrD.entries.getReference(1));
+                    const int64_t WpostD = renderedTailLength(arrD.entries.getReference(0));
+                    float sumDev = 0.0f;
+                    for (int64_t i = joinD - WpreD; i < joinD + WpostD; ++i)
+                        sumDev = juce::jmax(sumDev, std::abs(outD.getSample(0, (int)i) - 1.0f));
+                    verdict("T55 JOINFIX2 bounded join: hot maxAbs<=1+1e-4, gA+gB==1 (DC, tol 1e-2), join+-16 in bound",
+                            maxAbs <= 1.0001f && sumDev <= 0.01f && (double)z3 <= bound,
+                            "maxAbs=" + juce::String(maxAbs, 6)
+                            + ", sumDev=" + juce::String(sumDev, 6)
+                            + ", z3max=" + juce::String(z3, 6)
+                            + " bound=" + juce::String(bound, 6));
                 }
             }
 
