@@ -2416,8 +2416,8 @@ int main(int argc, char* argv[]) {
               // mixer build. 440 Hz sine at 0.5 FS; renders via direct
               // mixEntryToBuffer calls exactly as export does.
                 const double srX = 44100.0;
-                const int LX = 4410, bodyX = 17640;
-                auto runCase = [&](double tempoA, double tempoB, const char* tag) {
+                auto runCase = [&](double tempoA, double tempoB, const char* tag,
+                                   int LX = 4410, int bodyX = 17640) {
                     Project p; p.sampleRate = srX;
                     auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
                     addClipTo(A, "cA", LX + bodyX + LX);
@@ -2503,6 +2503,10 @@ int main(int argc, char* argv[]) {
                 runCase(120.0, 120.0, "CONTROL 120->120");
                 runCase(120.0, 160.0, "CROSS 120->160");
                 runCase(160.0, 120.0, "CROSS 160->120");
+                // Wider ratio (2x) and LONG segments (2s lead-in/tail, 4s body):
+                // catches length-dependent WSOLA drift / gaps that short cases hide.
+                runCase(90.0, 180.0,  "CROSS-WIDE 90->180");
+                runCase(120.0, 160.0, "CROSS-LONG 120->160", 88200, 176400);
             }
 
             { // REALDIAG (print-only): full-scale (peak >= 0.99) multi-partial
