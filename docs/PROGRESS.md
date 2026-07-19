@@ -110,6 +110,20 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-07-19 (session 2) — Complementary-crossfade mixer ADOPTED as baseline; cross-tempo join click ROOT-CAUSED + FIXED — awaiting Alec cross-tempo ear check
+- Context: previous session built the complementary-crossfade mixer + 3 fixes (end-anchored stretched lead-in re-applying 2e93c22; section 5b relocated after stretch so body ramps use RENDERED overlap lengths; time-reversed WSOLA for lead-ins so the phase anchor sits at the join) but left it uncommitted and unlogged. Alec ear-confirmed: equal-tempo joins CLEAN with real audio; cross-tempo still distorted. This session adopted that tree as baseline and fixed the cross-tempo path.
+- What I changed (files):
+  - COMMIT 5ea6ecd (baseline adoption, no new code): Source/Audio/{EntryMixer.h, ArrangementResolver.h/.cpp, PlaybackEngine.h/.cpp, ExportRenderer.cpp} + diag/ResolverDiag.cpp (XTDIAG cross-tempo join probe: Wpre/Wpost, render FNV hash, maxAbs, maxDelta@offset, 440Hz best-fit THD residual; REALDIAG full-scale probe proving engine output == raw mixEntryToBuffer sum, 0 altered samples). Alec's ACCEPTANCE_TESTS.md + docs/ACCEPTANCE_TESTS.md edits left uncommitted (his review).
+  - COMMIT 690c4a4 (the cross-tempo fix): `Source/Audio/TempoStretcher.h` — WSOLA `stretch()` output sample 0 was SILENTLY ZEROED: Hann window[0]=0 exactly, sample 0 is covered only by frame 0, so windowAcc[0]=0 and the >1e-6 normalization guard skipped it, leaving 0. Both stretch calls anchor frame 0 AT the join (tail: srcStart=endMark; lead-in: reversed, so sample 0 becomes the sample at join−1) → a click on EVERY cross-tempo join, exactly the "still distorts" symptom. Fix: when windowAcc[0]≤1e-6, write src[srcStart] (bounds-clamped) into sample 0. Also `diag/ResolverDiag.cpp`: runCase parametrized (lead/body lengths), +2 XTDIAG cases (CROSS-WIDE 90→180 ratio 2.0; CROSS-LONG 2s lead-in/tail, 4s body).
+- What I proved (PASS/FAIL):
+  - PASS pre-fix baseline: full suite `STEP6 RESULT: ALL PASS`; XTDIAG control THD 0.000000, cross cases maxDelta 0.062525 @join−1 (EXACTLY 2× the sine's natural per-sample slope 0.0313 — the doubled step a zeroed sample at the anchor predicts).
+  - PASS post-fix: cross maxDelta → 0.031345 (natural, position moved AWAY from the join); CROSS-WIDE and CROSS-LONG equally clean (no length-dependent drift/gap: CROSS-LONG THD 0.000262). Full suite `STEP6 RESULT: ALL PASS`, 0 FAILs.
+  - PASS equal-tempo untouched: CONTROL 120→120 render hash 0x127b1381 BYTE-IDENTICAL before/after the fix (equal tempo never calls stretch()).
+  - Release standalone rebuilt with the fix (build-release/.../BlockShuffler.app, 2026-07-19 19:33).
+- Residual (reported honestly): cross-case THD residual ~0.0011 (≈−30 dB) remains — smooth WSOLA interior phase drift from integer-sample frame alignment (2048/512/±256 @44.1k), NOT a discontinuity. Inherent to the current stretcher; upgrade path if Alec still hears artifacts = Rubber Band per CLAUDE.md, or sub-sample alignment.
+- EAR GATE (Alec, open): play/export cross-tempo joins (different clip tempos adjacent) with real audio — the per-join click should be gone; equal-tempo must still be clean (bit-identical path). Long stretched lead-ins/tails also measured clean.
+- NEXT SESSION should: if Alec confirms → mark cross-tempo closed; if he still hears distortion, it's stretch QUALITY (see residual note) → discuss Rubber Band / sub-sample WSOLA before coding.
+
 ### 2026-07-18 (session 2) — Tempo inherit/override (A+B) + always-visible Project Default Tempo — CONFIRMED BY ALEC, COMMITTED
 - What I changed (files) — write-paths/serialization/UI/tests ONLY; read paths (resolver, grid, nudge, inspector reads) untouched, tempos stay MATERIALIZED:
   - `Source/Model/Block.h`, `Source/Model/Clip.h` — `tempoOverridden = false` flags (false = inherits parent tempo).
