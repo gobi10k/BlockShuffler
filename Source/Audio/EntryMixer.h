@@ -8,8 +8,7 @@ namespace BlockShuffler {
 
 /** Rendered (post-stretch) timeline extent of an entry's lead-in. MUST mirror
  *  the lead-in branch selection in mixEntryToBuffer. Consumers: the mixer's
- *  END-ANCHORED lead placement, PlaybackEngine's culling window, and the
- *  resolver's cross-fade length sync (section 5b). */
+ *  END-ANCHORED lead placement and PlaybackEngine's culling window. */
 inline int64_t renderedLeadInLength(const ResolvedEntry& e)
 {
     if (!e.audioBuffer) return 0;
@@ -126,11 +125,20 @@ inline void mixEntryToBuffer(
     };
 
     // ── Lead-in ────────────────────────────────────────────────────────────────
-    // For the first entry there is no prior tail to crossfade with, so the lead-in
-    // plays at full gain rather than fading up from 0.
+    // JOINFIX (2026-07-19): each source's gain envelope is CONTINUOUS through the
+    // join. The lead-in ramps g(k) = (k+1)/L over its RENDERED length L, so its
+    // LAST sample sits at gain exactly 1.0 and meets the full-gain body on the
+    // same contiguous source audio — no carrier swap at join+0 (OFFGRID C1-C5).
+    // It overlaps the PREVIOUS entry's body, which stays at gain 1; the sum may
+    // exceed 1.0 by design. Entry 0 has no previous body: full gain, no ramp.
+    // resampleAdd applies gainStart at the FIRST and gainEnd at the LAST sample
+    // of a full window, so (1/L, 1.0) renders exactly (k+1)/L.
     if (leadInLen > 0)
     {
-        const float liGainStart = (entryIndex == 0) ? 1.0f : 0.0f;
+        auto rampStart = [&](int64_t renderedLen) {
+            return (entryIndex == 0 || renderedLen <= 0) ? 1.0f
+                                                         : 1.0f / (float)renderedLen;
+        };
 
         // END-ANCHORED (2026-07-19, re-applies 2e93c22): the stretched lead-in
         // ends AT the body join — [bodyStart - sl, bodyStart). Start-anchoring
@@ -140,67 +148,25 @@ inline void mixEntryToBuffer(
         if (entry.stretchedLeadIn)
         {
             int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0.0, liGainStart, 1.0f);
+            mixBuf(*entry.stretchedLeadIn, bodyStart - sl, bodyStart, 0.0, rampStart(sl), 1.0f);
         }
         else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
         {
-            mixBuf(src, leadInStart, bodyStart, 0.0, liGainStart, 1.0f);
+            mixBuf(src, leadInStart, bodyStart, 0.0, rampStart(leadInLen), 1.0f);
         }
         else
         {
             int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
             if (leadInTL > 0)
-                mixBuf(src, bodyStart - leadInTL, bodyStart, 0.0, liGainStart, 1.0f);
+                mixBuf(src, bodyStart - leadInTL, bodyStart, 0.0, rampStart(leadInTL), 1.0f);
         }
     }
 
     // ── Body ──────────────────────────────────────────────────────────────────
-    // Apply complementary cross‑fades with adjacent entries.
+    // JOINFIX: bodies ALWAYS play at gain exactly 1.0 — never attenuated.
+    // Overlapping neighbour lead-ins/tails mix on top at their own ramped gains.
     if (bodyLen > 0)
-    {
-        int64_t fadeInLen  = entry.prevTailLen;    // overlap with previous tail
-        int64_t fadeOutLen = entry.nextLeadInLen;  // overlap with next lead‑in
-
-        // Clamp to body length
-        fadeInLen  = juce::jmin(fadeInLen, bodyLen);
-        fadeOutLen = juce::jmin(fadeOutLen, bodyLen);
-
-        // If the fade regions overlap, scale them proportionally so they fit.
-        if (fadeInLen + fadeOutLen > bodyLen) {
-            float scale = (float)bodyLen / (float)(fadeInLen + fadeOutLen);
-            fadeInLen  = (int64_t)(fadeInLen * scale);
-            fadeOutLen = (int64_t)(fadeOutLen * scale);
-            // Re‑compute to ensure sum does not exceed bodyLen
-            if (fadeInLen + fadeOutLen > bodyLen) {
-                // If rounding caused an overflow, trim the longer one.
-                if (fadeInLen > fadeOutLen) fadeInLen = bodyLen - fadeOutLen;
-                else fadeOutLen = bodyLen - fadeInLen;
-            }
-        }
-
-        int64_t midStart = bodyStart + fadeInLen;
-        int64_t midEnd   = bodyEnd - fadeOutLen;
-
-        // Constant gain segment
-        if (midStart < midEnd) {
-            double clipOff = (double)startMark + (double)(midStart - bodyStart);
-            mixBuf(src, midStart, midEnd, clipOff, 1.0f, 1.0f);
-        }
-
-        // Fade‑in from 0 → 1 (overlap with previous tail)
-        if (fadeInLen > 0) {
-            int64_t fadeInEnd = bodyStart + fadeInLen;
-            double clipOff = (double)startMark;
-            mixBuf(src, bodyStart, fadeInEnd, clipOff, 0.0f, 1.0f);
-        }
-
-        // Fade‑out from 1 → 0 (overlap with next lead‑in)
-        if (fadeOutLen > 0) {
-            int64_t fadeOutStart = bodyEnd - fadeOutLen;
-            double clipOff = (double)startMark + (double)(fadeOutStart - bodyStart);
-            mixBuf(src, fadeOutStart, bodyEnd, clipOff, 1.0f, 0.0f);
-        }
-    }
+        mixBuf(src, bodyStart, bodyEnd, (double)startMark, 1.0f, 1.0f);
 
     // ── Tail ──────────────────────────────────────────────────────────────────
     if (tailLen > 0)

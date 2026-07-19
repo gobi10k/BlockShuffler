@@ -441,26 +441,9 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         }
     }
 
-    // ── 5b (RELOCATED after section 6, fix (b) 2026-07-19). Cross-fade lengths
-    // for the complementary body ramps. These must equal the ACTUAL overlap on
-    // the timeline — the RENDERED (post-stretch) tail / lead-in extents, which
-    // exist only after the stretch buffers above are built. Computing them from
-    // the unstretched lengths made every cross-tempo body ramp the wrong
-    // length (ramps misaligned with the real overlap: XTDIAG THD ~0.10).
-    // Only timeline-adjacent (non-simultaneous) neighbors form an overlap.
-    for (int i = 0; i < result.entries.size(); ++i) {
-        auto& entry = result.entries.getReference(i);
-        if (i > 0) {
-            auto& prev = result.entries.getReference(i - 1);
-            if (prev.timelinePos != entry.timelinePos)
-                entry.prevTailLen = renderedTailLength(prev);
-        }
-        if (i < result.entries.size() - 1) {
-            auto& next = result.entries.getReference(i + 1);
-            if (entry.timelinePos != next.timelinePos)
-                entry.nextLeadInLen = renderedLeadInLength(next);
-        }
-    }
+    // ── 5b REMOVED (JOINFIX 2026-07-19): the complementary body ramps are gone —
+    // bodies always play at gain 1 and each entry's own lead-in/tail ramps span
+    // their rendered extents, so no cross-entry fade lengths need syncing.
 
     // Extend total duration to include the (stretched) tail of the last entry
     if (!result.entries.isEmpty()) {

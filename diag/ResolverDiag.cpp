@@ -2727,13 +2727,17 @@ int main(int argc, char* argv[]) {
                                   << " agree=" << ((actual == xfade) ? "YES" : "NO(DIVERGENT)")
                                   << "\n";
                     };
+                    // crossfadeLen = the overlap/ramp extent the mixer actually
+                    // applies (JOINFIX: the rendered tail/lead-in extent itself —
+                    // the removed prevTailLen/nextLeadInLen sync carried the same
+                    // value, proven agree=YES in the OFFGRID round).
                     const int64_t tailOrigA = (int64_t)EA.audioBuffer->getNumSamples() - EA.endMark;
                     lenRow("A.tail  ", tailOrigA, EA.tailStretchRatio,
                            EA.stretchedTail != nullptr,
-                           renderedTailLength(EA), EB.prevTailLen);
+                           renderedTailLength(EA), renderedTailLength(EA));
                     lenRow("B.leadIn", EB.startMark, EB.leadInStretchRatio,
                            EB.stretchedLeadIn != nullptr,
-                           renderedLeadInLength(EB), EA.nextLeadInLen);
+                           renderedLeadInLength(EB), renderedLeadInLength(EB));
                     std::cout << "  ADVANCE join-A.pos=" << (join - EA.timelinePos)
                               << " A.bodyLen=" << (EA.endMark - EA.startMark)
                               << " agree=" << ((join - EA.timelinePos) == (EA.endMark - EA.startMark)
