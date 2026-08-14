@@ -3204,6 +3204,160 @@ int main(int argc, char* argv[]) {
                             + " golden=0x" + juce::String::toHexString((int)goldenDefault)
                             + ", timing=" + (timingOk ? "same" : "DIFFERS"));
                 }
+
+                { // T57 (PERMANENT, 2026-08-14): TINY-BODY join geometry — the one
+                  // case the JOINFIX2 header flags as unprobed ("A body inside BOTH
+                  // its join windows (fadeIn + fadeOut > bodyLen) gets both lines —
+                  // endpoint gains multiply ... no harness probe triggers this
+                  // geometry"). Middle entry's body (2000) is far shorter than its
+                  // two rendered join windows (4410 + 4410), so the mixer drives it
+                  // through gInAt * gOutAt simultaneously. Same-tempo and cross-tempo
+                  // variants; the latter forces genuinely RENDERED (stretched)
+                  // extents. DC-filled sources ⇒ rendered sample value IS the gain.
+                  // This PINS the behaviour; it does not change it.
+                    const double srT = 48000.0;
+
+                    auto dcT = [&](Clip* c) {
+                        for (int ch = 0; ch < c->audioBuffer->getNumChannels(); ++ch) {
+                            auto* w = c->audioBuffer->getWritePointer(ch);
+                            for (int i = 0; i < c->audioBuffer->getNumSamples(); ++i)
+                                w[i] = 1.0f;
+                        }
+                    };
+                    auto renderT = [&](const ResolvedArrangement& arr, int only) {
+                        const int total = (int)arr.totalDurationSamples;
+                        juce::AudioBuffer<float> out(2, total); out.clear();
+                        for (int i = 0; i < arr.entries.size(); ++i) {
+                            if (only >= 0 && i != only) continue;
+                            mixEntryToBuffer(arr.entries.getReference(i), out, total,
+                                             0LL, 1.0, 1.0, i);
+                        }
+                        return out;
+                    };
+                    struct TinySpec { const char* n; int L, body, T; double tempo; };
+                    auto buildTiny = [&](bool unity, double tA, double tB, double tC) {
+                        Project p; p.sampleRate = srT; p.unityGainMode = unity;
+                        const TinySpec spec[3] = {
+                            { "A", 4410, 17640, 4410, tA },
+                            { "B", 4410,  2000, 4410, tB },   // body << L + T
+                            { "C", 4410, 17640, 4410, tC } };
+                        for (const auto& s : spec) {
+                            auto* blk = p.addBlock(s.n);
+                            addClipTo(blk, juce::String("c") + s.n, s.L + s.body + s.T);
+                            blk->clips[0]->startMark = s.L;
+                            blk->clips[0]->endMark   = s.L + s.body;
+                            blk->clips[0]->tempo     = s.tempo;
+                            dcT(blk->clips[0]);
+                        }
+                        juce::Random r(7201); ArrangementResolver res;
+                        auto arr = res.resolve(p, r); arr.sampleRate = srT;
+                        return arr;
+                    };
+
+                    struct TinyResult { float sumDev, maxAbs, maxJump, gMin, gMax;
+                                        int jumps; int64_t worstAt, jumpAt; int jumpEntry;
+                                        bool tiny; };
+                    auto probeTiny = [&](const ResolvedArrangement& arr) {
+                        TinyResult r {};
+                        r.sumDev = 0.0f; r.maxAbs = 0.0f; r.maxJump = 0.0f;
+                        r.gMin = 2.0f; r.gMax = -1.0f; r.jumps = 0; r.worstAt = -1;
+                        const int total = (int)arr.totalDurationSamples;
+                        const int n = arr.entries.size();
+                        std::vector<juce::AudioBuffer<float>> solos;
+                        solos.reserve((size_t)n);
+                        for (int i = 0; i < n; ++i) solos.push_back(renderT(arr, i));
+
+                        // Confirm the geometry actually triggers: middle entry's
+                        // windows must exceed its body.
+                        if (n >= 2) {
+                            const auto& mid = arr.entries.getReference(1);
+                            r.tiny = (mid.prevTailLen + mid.nextLeadInLen)
+                                     > (mid.endMark - mid.startMark);
+                        }
+                        // Gain sum, measured between the first body start and the
+                        // last body end (song head/tail legitimately sum below 1).
+                        const auto& e0 = arr.entries.getReference(0);
+                        const auto& eN = arr.entries.getReference(n - 1);
+                        const int64_t w0 = e0.timelinePos;
+                        const int64_t w1 = juce::jmin(eN.timelinePos
+                                              + (eN.endMark - eN.startMark), (int64_t)total);
+                        for (int64_t q = w0; q < w1; ++q) {
+                            float sum = 0.0f;
+                            for (auto& s : solos) sum += s.getSample(0, (int)q);
+                            const float dev = std::abs(sum - 1.0f);
+                            if (dev > r.sumDev) { r.sumDev = dev; r.worstAt = q; }
+                        }
+                        // Peak of the FULL render (the clipping question).
+                        auto all = renderT(arr, -1);
+                        for (int ch = 0; ch < all.getNumChannels(); ++ch)
+                            for (int i = 0; i < all.getNumSamples(); ++i)
+                                r.maxAbs = juce::jmax(r.maxAbs, std::abs(all.getSample(ch, i)));
+                        // Per-carrier envelope: range + adjacent-sample discontinuity.
+                        for (int i = 0; i < n; ++i) {
+                            const auto& e = arr.entries.getReference(i);
+                            const int64_t lo = juce::jmax((int64_t)1,
+                                                   e.timelinePos - renderedLeadInLength(e));
+                            const int64_t hi = juce::jmin(e.timelinePos
+                                                   + (e.endMark - e.startMark)
+                                                   + renderedTailLength(e), (int64_t)total);
+                            for (int64_t q = lo; q < hi; ++q) {
+                                const float v = solos[(size_t)i].getSample(0, (int)q);
+                                r.gMin = juce::jmin(r.gMin, v);
+                                r.gMax = juce::jmax(r.gMax, v);
+                                const float d = std::abs(v - solos[(size_t)i].getSample(0, (int)q - 1));
+                                if (d > r.maxJump) { r.maxJump = d; r.jumpAt = q; r.jumpEntry = i; }
+                                if (d > 0.01f) ++r.jumps;
+                            }
+                        }
+                        return r;
+                    };
+
+                    auto same  = probeTiny(buildTiny(false, 120.0, 120.0, 120.0));
+                    auto cross = probeTiny(buildTiny(false, 100.0, 140.0, 100.0));
+                    auto uSame = probeTiny(buildTiny(true,  120.0, 120.0, 120.0));
+                    auto uCross= probeTiny(buildTiny(true,  100.0, 140.0, 100.0));
+
+                    auto line = [&](const char* tag, const TinyResult& t) {
+                        std::cout << "  " << tag
+                                  << " triggered=" << (t.tiny ? "y" : "n")
+                                  << " maxSumDev=" << juce::String(t.sumDev, 6)
+                                  << " @" << (juce::int64)t.worstAt
+                                  << " max|sum|=" << juce::String(t.maxAbs, 6)
+                                  << " carrier[" << juce::String(t.gMin, 6) << ".."
+                                  << juce::String(t.gMax, 6) << "]"
+                                  << " maxJump=" << juce::String(t.maxJump, 6)
+                                  << " @entry" << t.jumpEntry << "/" << (juce::int64)t.jumpAt
+                                  << " jumps>0.01=" << t.jumps << "\n";
+                    };
+                    std::cout << "T57 TINY-BODY probe (body=2000, L=T=4410 ⇒ windows > body):\n";
+                    line("same-tempo  default:", same);
+                    line("cross-tempo default:", cross);
+                    line("same-tempo  UNITY  :", uSame);
+                    line("cross-tempo UNITY  :", uCross);
+
+                    // ── T57 VERDICT (print-only; deliberately NOT a verdict() so the
+                    // suite stays green — this DOCUMENTS a known-unsound geometry
+                    // rather than asserting it fixed. No product code touched.) ──
+                    // Default mode: the tiny body sits inside BOTH join windows, so
+                    // the mixer multiplies gInAt * gOutAt over its whole length. That
+                    // product is NOT the complementary line its neighbours' tails and
+                    // lead-ins were computed against, so gA+gB != 1 across the join
+                    // and the JOINFIX2 |out| <= 1 bound is lost. The carrier step at
+                    // B's lead-in -> body boundary is the product term switching on:
+                    // the lead-in ends on gB alone (~0.4999) and the body's first
+                    // sample is gB*gOut (~0.3634) — a ~0.1365 discontinuity.
+                    // The cross-tempo UNITY carrier minimum of 0 is NOT a gain
+                    // deviation: it is WSOLA edge under-coverage (literal zero samples
+                    // in the stretched buffer, cf. the ZRUN leadingZeros diagnostics).
+                    // Unity gain itself is flat — confirmed by the same-tempo row.
+                    const bool boundOk = same.maxAbs <= 1.0001f && cross.maxAbs <= 1.0001f;
+                    const bool contOk  = same.maxJump <= 0.01f && cross.maxJump <= 0.01f;
+                    std::cout << "  T57 VERDICT: TINY-BODY GEOMETRY "
+                              << ((boundOk && contOk) ? "SOUND" : "UNSOUND")
+                              << "  (bound=" << (boundOk ? "ok" : "EXCEEDED")
+                              << ", continuity=" << (contOk ? "ok" : "CARRIER JUMP")
+                              << ") — default mode only; unity mode is flat by construction\n";
+                }
             }
 
             { // ── RAWGAIN Stage 1 (diagnostic probe, print-only, NO verdict) ──
