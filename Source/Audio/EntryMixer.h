@@ -62,6 +62,16 @@ inline void mixEntryToBuffer(
     const int dstCh  = buffer.getNumChannels();
     if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
 
+    // ── RAWGAIN (2026-08-14): raw-summing mode — see Project::unityGainMode ────
+    // When set, EVERY gain the fade law would apply — the lead-in/tail crossfade
+    // ramps, the complementary join law, and the per-entry stack attenuation
+    // carried in entry.gain — is bypassed at the single point below where gains
+    // reach the resampler. Lead-ins, bodies and tails therefore all play at unity
+    // and sum raw over whatever they overlap. Region boundaries, source offsets,
+    // lengths and timelinePos are computed IDENTICALLY in both modes: this flag
+    // changes only the gain applied, never what is played or when.
+    const bool raw = entry.unityGainMode;
+
     const int64_t startMark = entry.startMark;
     const int64_t endMark   = entry.endMark;
     const int64_t bodyLen   = endMark - startMark;
@@ -111,16 +121,24 @@ inline void mixEntryToBuffer(
             if (destCount <= 0 || srcSamples <= 0.0) return;
         }
 
-        const int64_t regLen = regionEnd - regionStart;
-        float gs = gainStart, ge = gainEnd;
-        if (regLen > 1) {
-            float t0 = (float)(pOvStart - (double)regionStart) / (float)regLen;
-            float t1 = (float)((double)pOvStart + srcSamples - (double)regionStart) / (float)regLen;
-            gs = gainStart + t0 * (gainEnd - gainStart);
-            ge = gainStart + t1 * (gainEnd - gainStart);
+        float gs, ge;
+        if (raw) {
+            // RAWGAIN: unity everywhere. The caller's gainStart/gainEnd (fade-law
+            // endpoints) and entry.gain (stack attenuation) are both discarded.
+            gs = 1.0f;
+            ge = 1.0f;
+        } else {
+            const int64_t regLen = regionEnd - regionStart;
+            gs = gainStart; ge = gainEnd;
+            if (regLen > 1) {
+                float t0 = (float)(pOvStart - (double)regionStart) / (float)regLen;
+                float t1 = (float)((double)pOvStart + srcSamples - (double)regionStart) / (float)regLen;
+                gs = gainStart + t0 * (gainEnd - gainStart);
+                ge = gainStart + t1 * (gainEnd - gainStart);
+            }
+            gs *= entry.gain;
+            ge *= entry.gain;
         }
-        gs *= entry.gain;
-        ge *= entry.gain;
 
         TempoStretcher::resampleAdd(s, srcStart, srcSamples, buffer, destOff, destCount, gs, ge);
     };

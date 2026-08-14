@@ -476,6 +476,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
 
     result.totalDurationSamples = cursor;
 
+    // RAWGAIN: stamp the project's raw-summing flag onto every entry. Done once
+    // here (rather than at each construction site) so no slot-building branch can
+    // forget it; the mixer reads it per entry, so playback and export agree.
+    for (auto& e : result.entries)
+        e.unityGainMode = project.unityGainMode;
+
     return result;
 }
 

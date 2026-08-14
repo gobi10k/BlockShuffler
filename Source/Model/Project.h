@@ -17,6 +17,13 @@ public:
     double sampleRate        = 48000.0;
     double defaultClipTempo  = 120.0;
 
+    /** RAWGAIN: raw-summing mode. When true the mixer applies NO crossfade
+     *  ramps, no complementary join law and no per-entry stack attenuation —
+     *  every entry sums at unity gain, lead-ins and tails included. Entry
+     *  timing, lengths and timelinePos are unaffected either way.
+     *  Default FALSE: existing sessions keep the fade law byte-identically. */
+    bool unityGainMode = false;
+
     // Content
     juce::OwnedArray<Block>     blocks;
     juce::OwnedArray<BlockLink> links;

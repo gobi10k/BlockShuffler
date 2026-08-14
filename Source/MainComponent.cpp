@@ -373,6 +373,7 @@ void MainComponent::playBlock(const juce::String& blockId) {
     entry.blockId            = blockId;
     entry.timelinePos        = clip->startMark;  // body starts after lead-in
     entry.gain               = 1.0f;
+    entry.unityGainMode      = project->unityGainMode;  // RAWGAIN: preview honours it too
 
     ResolvedArrangement single;
     single.sampleRate           = project->sampleRate;
@@ -406,6 +407,7 @@ void MainComponent::playClip(const juce::String& clipId) {
     entry.blockId            = foundBlockId;
     entry.timelinePos        = found->startMark;  // body starts after lead-in
     entry.gain               = 1.0f;
+    entry.unityGainMode      = project->unityGainMode;  // RAWGAIN: preview honours it too
 
     ResolvedArrangement single;
     single.sampleRate           = project->sampleRate;

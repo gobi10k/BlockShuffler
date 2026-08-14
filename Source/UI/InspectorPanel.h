@@ -211,6 +211,11 @@ private:
     juce::Label        projectTitle;
     juce::Label        defaultTempoLabel;
     DraggableNumberBox defaultTempoField { 20.0, 300.0, 1 };
+    /// RAWGAIN: project-wide raw-summing switch. Label is split across the
+    /// toggle and a wrapped hint because the full sentence does not fit the
+    /// 210px inspector; the tooltip carries it verbatim.
+    juce::ToggleButton unityGainToggle { "Raw summing" };
+    juce::Label        unityGainHint;
 
     // ── Stack settings section (only when block->stackGroup >= 0) ────────────
     juce::Label    stackSectionTitle;   ///< "STACK SETTINGS" heading

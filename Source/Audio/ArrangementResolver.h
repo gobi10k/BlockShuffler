@@ -41,6 +41,12 @@ struct ResolvedEntry {
     // nextLeadInLen = next entry's rendered lead-in (overlaps this body's end)
     int64_t prevTailLen   = 0;
     int64_t nextLeadInLen = 0;
+
+    /** RAWGAIN: copied from Project::unityGainMode at resolve time. Carried on
+     *  the entry because mixEntryToBuffer receives only the entry — this is what
+     *  makes playback AND export honour the flag through the one mixer path.
+     *  Default false so any entry built outside the resolver keeps the fade law. */
+    bool unityGainMode = false;
 };
 
 /** Concrete arrangement produced by resolving probabilities. */

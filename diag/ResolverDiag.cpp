@@ -2999,6 +2999,12 @@ int main(int argc, char* argv[]) {
                     };
                     auto buildHot = [&](bool dc) {
                         Project p; p.sampleRate = srO;
+                        // RAWGAIN scoping: T55's amplitude bound (maxAbs <= 1) and
+                        // gA+gB == 1 gain-sum assertion are invariants OF THE FADE
+                        // LAW, not of the mixer in general. Unity-gain mode removes
+                        // that law by design and legitimately exceeds both. Pin the
+                        // flag false so this test always measures the default path.
+                        p.unityGainMode = false;
                         auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
                         addClipTo(A, "cA", 172800);
                         addClipTo(B, "cB", 112857);
@@ -3051,6 +3057,402 @@ int main(int argc, char* argv[]) {
                             + ", sumDev=" + juce::String(sumDev, 6)
                             + ", z3max=" + juce::String(z3, 6)
                             + " bound=" + juce::String(bound, 6));
+                }
+
+                { // T56 (PERMANENT, RAWGAIN 2026-08-14): unity-gain mode.
+                  // (a) unityGainMode ON  → every entry mixes at EXACTLY 1.0 across
+                  //     its whole rendered extent (lead-in, body AND tail), both at a
+                  //     sequential join and across a simultaneous stack: no crossfade
+                  //     ramp, no complementary join law, no 1/playCount attenuation.
+                  //     Measured with DC-filled sources, where the rendered sample
+                  //     value IS the gain the mixer applied at that position.
+                  // (b) unityGainMode OFF → the fade law is untouched. The default
+                  //     render is locked to a golden FNV hash captured from the
+                  //     pre-RAWGAIN a48e072 binary (the 2b zero-diff check, made
+                  //     permanent), and the SIM stack still attenuates by 1/playCount.
+                  // (c) timing is mode-independent: totalDurationSamples must agree.
+                    const double srU = 48000.0;
+                    const int    LU = 4410, bodyU = 17640, TU = 4410;
+
+                    auto dcFillU = [&](Clip* c) {
+                        for (int ch = 0; ch < c->audioBuffer->getNumChannels(); ++ch) {
+                            auto* w = c->audioBuffer->getWritePointer(ch);
+                            for (int i = 0; i < c->audioBuffer->getNumSamples(); ++i)
+                                w[i] = 1.0f;
+                        }
+                    };
+                    auto renderU = [&](const ResolvedArrangement& arr, int only) {
+                        const int total = (int)arr.totalDurationSamples;
+                        juce::AudioBuffer<float> out(2, total); out.clear();
+                        for (int i = 0; i < arr.entries.size(); ++i) {
+                            if (only >= 0 && i != only) continue;
+                            mixEntryToBuffer(arr.entries.getReference(i), out, total,
+                                             0LL, 1.0, 1.0, i);
+                        }
+                        return out;
+                    };
+                    auto fnvOf = [&](const juce::AudioBuffer<float>& b) {
+                        juce::uint32 h = 2166136261u;
+                        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+                            for (int i = 0; i < b.getNumSamples(); ++i) {
+                                juce::uint32 bits; const float v = b.getSample(ch, i);
+                                std::memcpy(&bits, &v, sizeof(bits));
+                                h = (h ^ bits) * 16777619u;
+                            }
+                        return h;
+                    };
+                    auto buildJoinU = [&](bool unity) {
+                        Project p; p.sampleRate = srU; p.unityGainMode = unity;
+                        for (auto n : { "A", "B" }) {
+                            auto* blk = p.addBlock(n);
+                            addClipTo(blk, juce::String("c") + n, LU + bodyU + TU);
+                            blk->clips[0]->startMark = LU;
+                            blk->clips[0]->endMark   = LU + bodyU;
+                            dcFillU(blk->clips[0]);
+                        }
+                        juce::Random r(7101); ArrangementResolver res;
+                        auto arr = res.resolve(p, r); arr.sampleRate = srU;
+                        return arr;
+                    };
+                    auto buildSimU = [&](bool unity) {
+                        Project p; p.sampleRate = srU; p.unityGainMode = unity;
+                        auto* A = p.addBlock("A");
+                        auto* B = p.addBlock("B");
+                        auto* C = p.addBlock("C");
+                        for (auto* blk : { A, B, C }) {
+                            addClipTo(blk, juce::String("c") + blk->name, 8000);
+                            dcFillU(blk->clips[0]);
+                            blk->playChance = 1.0f;
+                        }
+                        p.stackBlocks(B->id, A->id);
+                        p.stackBlocks(C->id, A->id);
+                        A->stackPlayMode = StackPlayMode::Simultaneous;
+                        A->stackPlayCount.values.set(0, 3);
+                        p.propagateStackSettings(A->stackGroup, A);
+                        juce::Random r(7102); ArrangementResolver res;
+                        auto arr = res.resolve(p, r); arr.sampleRate = srU;
+                        return arr;
+                    };
+
+                    // (a) unity ON, sequential join: every entry unity over its FULL
+                    //     rendered extent = [bodyStart - renderedLeadIn, bodyEnd + renderedTail)
+                    auto uJoin = buildJoinU(true);
+                    float uJoinMin = 2.0f, uJoinMax = -1.0f;
+                    for (int i = 0; i < uJoin.entries.size(); ++i) {
+                        const auto& e = uJoin.entries.getReference(i);
+                        auto solo = renderU(uJoin, i);
+                        const int64_t lo = e.timelinePos - renderedLeadInLength(e);
+                        const int64_t hi = e.timelinePos + (e.endMark - e.startMark)
+                                           + renderedTailLength(e);
+                        for (int64_t q = juce::jmax((int64_t)0, lo);
+                             q < juce::jmin(hi, (int64_t)solo.getNumSamples()); ++q) {
+                            const float v = solo.getSample(0, (int)q);
+                            uJoinMin = juce::jmin(uJoinMin, v);
+                            uJoinMax = juce::jmax(uJoinMax, v);
+                        }
+                    }
+
+                    // (a) unity ON, simultaneous stack: each entry's body at 1.0
+                    auto uSim = buildSimU(true);
+                    float uSimMin = 2.0f, uSimMax = -1.0f;
+                    for (int i = 0; i < uSim.entries.size(); ++i) {
+                        const auto& e = uSim.entries.getReference(i);
+                        auto solo = renderU(uSim, i);
+                        const int mid = (int)(e.timelinePos + (e.endMark - e.startMark) / 2);
+                        const float v = solo.getSample(0, mid);
+                        uSimMin = juce::jmin(uSimMin, v);
+                        uSimMax = juce::jmax(uSimMax, v);
+                    }
+
+                    // (b) default mode: SIM stack still attenuates by 1/playCount
+                    auto dSim = buildSimU(false);
+                    float dSimMin = 2.0f, dSimMax = -1.0f;
+                    for (int i = 0; i < dSim.entries.size(); ++i) {
+                        const auto& e = dSim.entries.getReference(i);
+                        auto solo = renderU(dSim, i);
+                        const int mid = (int)(e.timelinePos + (e.endMark - e.startMark) / 2);
+                        const float v = solo.getSample(0, mid);
+                        dSimMin = juce::jmin(dSimMin, v);
+                        dSimMax = juce::jmax(dSimMax, v);
+                    }
+
+                    // (b) default-mode join render locked to the pre-RAWGAIN hash
+                    auto dJoin = buildJoinU(false);
+                    // Golden value produced by the PRE-RAWGAIN gain math: captured by
+                    // forcing this mixer down its original branch (raw := false) and
+                    // rendering this same geometry. Identical to the value the current
+                    // default path produces ⇒ the 2b zero-diff, locked permanently.
+                    const juce::uint32 goldenDefault = 0x605636a5u;
+                    const juce::uint32 gotDefault    = fnvOf(renderU(dJoin, -1));
+
+                    const bool unityJoinOk = std::abs(uJoinMin - 1.0f) < 1e-6f
+                                          && std::abs(uJoinMax - 1.0f) < 1e-6f;
+                    const bool unitySimOk  = std::abs(uSimMin - 1.0f) < 1e-6f
+                                          && std::abs(uSimMax - 1.0f) < 1e-6f;
+                    const bool defSimOk    = std::abs(dSimMin - 1.0f / 3.0f) < 1e-5f
+                                          && std::abs(dSimMax - 1.0f / 3.0f) < 1e-5f;
+                    const bool zeroDiffOk  = (gotDefault == goldenDefault);
+                    const bool timingOk    = (uJoin.totalDurationSamples == dJoin.totalDurationSamples)
+                                          && (uSim.totalDurationSamples == dSim.totalDurationSamples);
+
+                    verdict("T56 RAWGAIN unity mode: ON=1.0 across join+SIM stack, OFF unchanged (golden hash) + timing mode-independent",
+                            unityJoinOk && unitySimOk && defSimOk && zeroDiffOk && timingOk,
+                            "unityJoin[" + juce::String(uJoinMin, 6) + ".." + juce::String(uJoinMax, 6)
+                            + "], unitySim[" + juce::String(uSimMin, 6) + ".." + juce::String(uSimMax, 6)
+                            + "], defaultSim[" + juce::String(dSimMin, 6) + ".." + juce::String(dSimMax, 6)
+                            + "] (want 0.333333), defaultHash=0x" + juce::String::toHexString((int)gotDefault)
+                            + " golden=0x" + juce::String::toHexString((int)goldenDefault)
+                            + ", timing=" + (timingOk ? "same" : "DIFFERS"));
+                }
+            }
+
+            { // ── RAWGAIN Stage 1 (diagnostic probe, print-only, NO verdict) ──
+              // Measures the effective gain the mixer applies to each entry by
+              // rendering DC-filled (constant 1.0) sources: with a DC source the
+              // rendered sample value IS the applied gain at that position.
+              // Each entry is also rendered SOLO so per-entry gain is read
+              // directly rather than inferred from the sum.
+              //   1b: 3-block SIMULTANEOUS stack, playCount 3, identical clips,
+              //       zero lead-in/tail so no crossfade can confound the read.
+              //   1c: plain sequential join, L=4410 / T=4410.
+                const double srR = 48000.0;
+
+                auto renderSel = [&](const ResolvedArrangement& arr, int only) {
+                    const int total = (int)arr.totalDurationSamples;
+                    juce::AudioBuffer<float> out(2, total); out.clear();
+                    for (int i = 0; i < arr.entries.size(); ++i) {
+                        if (only >= 0 && i != only) continue;
+                        mixEntryToBuffer(arr.entries.getReference(i), out, total,
+                                         0LL, 1.0, 1.0, i);
+                    }
+                    return out;
+                };
+                auto dcFill = [&](Clip* c) {
+                    for (int ch = 0; ch < c->audioBuffer->getNumChannels(); ++ch) {
+                        auto* w = c->audioBuffer->getWritePointer(ch);
+                        for (int i = 0; i < c->audioBuffer->getNumSamples(); ++i)
+                            w[i] = 1.0f;
+                    }
+                };
+                auto peakOf = [&](const juce::AudioBuffer<float>& b) {
+                    float m = 0.0f;
+                    for (int ch = 0; ch < b.getNumChannels(); ++ch)
+                        for (int i = 0; i < b.getNumSamples(); ++i)
+                            m = juce::jmax(m, std::abs(b.getSample(ch, i)));
+                    return m;
+                };
+
+                { // 1b: 3-block SIMULTANEOUS stack, play 3
+                    const int bodyR = 8000;
+                    Project p; p.sampleRate = srR;
+                    auto* A = p.addBlock("A");
+                    auto* B = p.addBlock("B");
+                    auto* C = p.addBlock("C");
+                    for (auto* blk : { A, B, C }) {
+                        addClipTo(blk, juce::String("c") + blk->name, bodyR);
+                        dcFill(blk->clips[0]);   // startMark=0, endMark=bodyR: body only
+                        blk->playChance = 1.0f;
+                    }
+                    p.stackBlocks(B->id, A->id);
+                    p.stackBlocks(C->id, A->id);
+                    A->stackPlayMode = StackPlayMode::Simultaneous;
+                    A->stackPlayCount.values.set(0, 3);
+                    p.propagateStackSettings(A->stackGroup, A);
+
+                    juce::Random r(7001); ArrangementResolver res;
+                    auto arr = res.resolve(p, r); arr.sampleRate = srR;
+
+                    std::cout << "RAWGAIN 1b SIM stack play-3 (DC sources, L=0 T=0): entries="
+                              << arr.entries.size() << "\n";
+                    bool atten = false; float gsum = 0.0f;
+                    for (int i = 0; i < arr.entries.size(); ++i) {
+                        const auto& e = arr.entries.getReference(i);
+                        auto solo = renderSel(arr, i);
+                        const int mid = (int)(e.timelinePos + (e.endMark - e.startMark) / 2);
+                        const float g = solo.getSample(0, mid);
+                        gsum += g;
+                        if (std::abs(g - 1.0f) > 1e-3f) atten = true;
+                        auto* blk = p.getBlockById(e.blockId);
+                        std::cout << "  entry[" << i << "] "
+                                  << (blk ? blk->name : juce::String("?"))
+                                  << " entry.gain=" << juce::String(e.gain, 6)
+                                  << "  MEASURED body gain=" << juce::String(g, 6)
+                                  << "  timelinePos=" << (juce::int64)e.timelinePos << "\n";
+                    }
+                    const float maxAbs = peakOf(renderSel(arr, -1));
+                    std::cout << "  gain sum=" << juce::String(gsum, 6)
+                              << "   max|summed sample|=" << juce::String(maxAbs, 6) << "\n";
+                    std::cout << "  VERDICT SIM-ATTENUATION " << (atten ? "YES" : "NO") << "\n";
+                }
+
+                { // 1c: plain sequential join, L=4410 / T=4410
+                    const int L = 4410, bodyR = 17640, T = 4410;
+                    Project p; p.sampleRate = srR;
+                    for (auto n : { "A", "B" }) {
+                        auto* blk = p.addBlock(n);
+                        addClipTo(blk, juce::String("c") + n, L + bodyR + T);
+                        blk->clips[0]->startMark = L;
+                        blk->clips[0]->endMark   = L + bodyR;
+                        dcFill(blk->clips[0]);
+                    }
+                    juce::Random r(7002); ArrangementResolver res;
+                    auto arr = res.resolve(p, r); arr.sampleRate = srR;
+
+                    std::cout << "RAWGAIN 1c SEQ join (DC sources, L=" << L
+                              << " body=" << bodyR << " T=" << T << "): entries="
+                              << arr.entries.size() << "\n";
+                    for (int i = 0; i < arr.entries.size(); ++i) {
+                        const auto& e = arr.entries.getReference(i);
+                        auto solo = renderSel(arr, i);
+                        const int64_t bs = e.timelinePos;
+                        const int64_t be = bs + (e.endMark - e.startMark);
+                        std::cout << "  entry[" << i << "] " << e.clipName
+                                  << " entry.gain=" << juce::String(e.gain, 6)
+                                  << " prevTailLen=" << (juce::int64)e.prevTailLen
+                                  << " nextLeadInLen=" << (juce::int64)e.nextLeadInLen << "\n";
+                        const int64_t span = be - bs;
+                        const int64_t pts[5] = { bs, bs + span/4, bs + span/2,
+                                                 be - span/4, be - 1 };
+                        std::cout << "    body gain @[start,+1/4,mid,-1/4,end-1]: ";
+                        for (auto q : pts)
+                            std::cout << juce::String(solo.getSample(0, (int)q), 6) << " ";
+                        std::cout << "\n";
+                        float bMin = 2.0f, bMax = -1.0f;
+                        for (int64_t q = bs; q < be; ++q) {
+                            const float v = solo.getSample(0, (int)q);
+                            bMin = juce::jmin(bMin, v); bMax = juce::jmax(bMax, v);
+                        }
+                        std::cout << "    body gain min=" << juce::String(bMin, 6)
+                                  << " max=" << juce::String(bMax, 6)
+                                  << "  (1.0 throughout == no body attenuation)\n";
+                    }
+                    std::cout << "  max|summed sample| (DC) = "
+                              << juce::String(peakOf(renderSel(arr, -1)), 6) << "\n";
+                }
+
+                // ── RAWGAIN Stage 3: the SAME two geometries with unity mode ON ──
+                // Sums above full scale here are CORRECT for raw mode — it exists to
+                // remove the level compensation, so correlated full-scale sources add
+                // arithmetically. Nothing clamps or limits them in float.
+                { // 3a: unity ON, sequential join L=4410 / T=4410
+                    const int L = 4410, bodyR = 17640, T = 4410;
+                    Project p; p.sampleRate = srR; p.unityGainMode = true;
+                    for (auto n : { "A", "B" }) {
+                        auto* blk = p.addBlock(n);
+                        addClipTo(blk, juce::String("c") + n, L + bodyR + T);
+                        blk->clips[0]->startMark = L;
+                        blk->clips[0]->endMark   = L + bodyR;
+                        dcFill(blk->clips[0]);
+                    }
+                    juce::Random r(7003); ArrangementResolver res;
+                    auto arr = res.resolve(p, r); arr.sampleRate = srR;
+
+                    std::cout << "RAWGAIN 3a UNITY seq join (DC, L=" << L << " T=" << T
+                              << "): entries=" << arr.entries.size() << "\n";
+                    float gMin = 2.0f, gMax = -1.0f;
+                    for (int i = 0; i < arr.entries.size(); ++i) {
+                        const auto& e = arr.entries.getReference(i);
+                        auto solo = renderSel(arr, i);
+                        const int64_t lo = e.timelinePos - renderedLeadInLength(e);
+                        const int64_t hi = e.timelinePos + (e.endMark - e.startMark)
+                                           + renderedTailLength(e);
+                        for (int64_t q = juce::jmax((int64_t)0, lo);
+                             q < juce::jmin(hi, (int64_t)solo.getNumSamples()); ++q) {
+                            const float v = solo.getSample(0, (int)q);
+                            gMin = juce::jmin(gMin, v); gMax = juce::jmax(gMax, v);
+                        }
+                    }
+                    auto all = renderSel(arr, -1);
+                    const int64_t join = arr.entries.getReference(1).timelinePos;
+                    float joinPeak = 0.0f;
+                    for (int64_t q = juce::jmax((int64_t)0, join - T);
+                         q < juce::jmin(join + T, (int64_t)all.getNumSamples()); ++q)
+                        joinPeak = juce::jmax(joinPeak, std::abs(all.getSample(0, (int)q)));
+                    std::cout << "    gain over ALL rendered content: min="
+                              << juce::String(gMin, 6) << " max=" << juce::String(gMax, 6)
+                              << "  (want 1.0 throughout)\n"
+                              << "    max|sum| AT JOIN=" << juce::String(joinPeak, 6)
+                              << "   max|sum| whole render=" << juce::String(peakOf(all), 6)
+                              << "   (>1.0 EXPECTED for raw mode — correct, not a defect)\n";
+                }
+
+                { // 3b: unity ON, 3-block SIMULTANEOUS stack, play 3
+                    const int bodyR = 8000;
+                    Project p; p.sampleRate = srR; p.unityGainMode = true;
+                    auto* A = p.addBlock("A");
+                    auto* B = p.addBlock("B");
+                    auto* C = p.addBlock("C");
+                    for (auto* blk : { A, B, C }) {
+                        addClipTo(blk, juce::String("c") + blk->name, bodyR);
+                        dcFill(blk->clips[0]);
+                        blk->playChance = 1.0f;
+                    }
+                    p.stackBlocks(B->id, A->id);
+                    p.stackBlocks(C->id, A->id);
+                    A->stackPlayMode = StackPlayMode::Simultaneous;
+                    A->stackPlayCount.values.set(0, 3);
+                    p.propagateStackSettings(A->stackGroup, A);
+                    juce::Random r(7004); ArrangementResolver res;
+                    auto arr = res.resolve(p, r); arr.sampleRate = srR;
+
+                    std::cout << "RAWGAIN 3b UNITY SIM stack play-3 (DC): entries="
+                              << arr.entries.size() << "\n";
+                    for (int i = 0; i < arr.entries.size(); ++i) {
+                        const auto& e = arr.entries.getReference(i);
+                        auto solo = renderSel(arr, i);
+                        const int mid = (int)(e.timelinePos + (e.endMark - e.startMark) / 2);
+                        auto* blk = p.getBlockById(e.blockId);
+                        std::cout << "    entry[" << i << "] "
+                                  << (blk ? blk->name : juce::String("?"))
+                                  << " entry.gain=" << juce::String(e.gain, 6)
+                                  << " (stack attenuation IGNORED in raw mode)"
+                                  << "  MEASURED body gain="
+                                  << juce::String(solo.getSample(0, mid), 6) << "\n";
+                    }
+                    std::cout << "    max|sum| = "
+                              << juce::String(peakOf(renderSel(arr, -1)), 6)
+                              << "   (~3.0 EXPECTED for 3 correlated full-scale layers — "
+                                 "correct, deliberately NOT limited)\n";
+
+                    // 3d: 16-bit/FLAC caveat. The float render is unbounded; integer
+                    // formats are not. Render this SAME unity arrangement through the
+                    // real ExportRenderer to 16-bit FLAC and count what must clamp.
+                    {
+                        auto flacFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                            .getChildFile("rawgain_3d_unity.flac");
+                        flacFile.deleteFile();
+                        juce::FlacAudioFormat flacFmt;
+                        ExportRenderer ex;
+                        const bool wrote = ex.renderToFile(arr, flacFile, flacFmt, 16);
+
+                        auto full = renderSel(arr, -1);
+                        int64_t overFS = 0;
+                        for (int ch = 0; ch < full.getNumChannels(); ++ch)
+                            for (int i = 0; i < full.getNumSamples(); ++i)
+                                if (std::abs(full.getSample(ch, i)) > 1.0f) ++overFS;
+
+                        int64_t railed = -1;
+                        if (wrote) {
+                            juce::AudioFormatManager fm; fm.registerBasicFormats();
+                            if (auto* rdr = fm.createReaderFor(flacFile)) {
+                                std::unique_ptr<juce::AudioFormatReader> reader(rdr);
+                                juce::AudioBuffer<float> back((int)reader->numChannels,
+                                                              (int)reader->lengthInSamples);
+                                reader->read(&back, 0, (int)reader->lengthInSamples, 0, true, true);
+                                railed = 0;
+                                for (int ch = 0; ch < back.getNumChannels(); ++ch)
+                                    for (int i = 0; i < back.getNumSamples(); ++i)
+                                        if (std::abs(back.getSample(ch, i)) >= 0.9999f) ++railed;
+                            }
+                        }
+                        std::cout << "RAWGAIN 3d 16-bit FLAC of the 3b unity render: wrote="
+                                  << (wrote ? "yes" : "NO")
+                                  << "  float samples over full scale=" << (juce::int64)overFS
+                                  << "  read-back samples at the rail=" << (juce::int64)railed
+                                  << "\n    (nonzero EXPECTED — raw mode is unbounded in float, "
+                                     "integer formats clamp. Known, documented behaviour.)\n";
+                        flacFile.deleteFile();
+                    }
                 }
             }
 

@@ -11,6 +11,7 @@ juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
     root->setProperty("name", project.name);
     root->setProperty("sampleRate", project.sampleRate);
     root->setProperty("defaultClipTempo", project.defaultClipTempo);
+    root->setProperty("unityGainMode",    project.unityGainMode);
 
     // Blocks
     juce::Array<juce::var> blocksArray;
@@ -97,6 +98,8 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
     project.name             = json.getProperty("name",            "Untitled").toString();
     project.sampleRate       = (double)json.getProperty("sampleRate",       48000.0);
     project.defaultClipTempo = (double)json.getProperty("defaultClipTempo", 120.0);
+    // RAWGAIN: absent (every pre-existing .bsp) → false, i.e. the fade law.
+    project.unityGainMode    = (bool)json.getProperty("unityGainMode",      false);
 
     // Blocks
     if (auto* blocksArr = json.getProperty("blocks", juce::var()).getArray()) {

@@ -170,6 +170,20 @@ InspectorPanel::InspectorPanel()
     defaultTempoField.setTooltip("Project default tempo — blocks and clips without their own tempo follow it");
     addAndMakeVisible(defaultTempoField);
 
+    // ── RAWGAIN: raw-summing mode (project-wide) ─────────────────────────────
+    setupLabel(this, unityGainHint, "no automatic fades or level compensation", 11.0f, true);
+    unityGainHint.setJustificationType(juce::Justification::topLeft);
+    unityGainToggle.setTooltip("Raw summing (no automatic fades or level compensation) — "
+                               "clips sum at full level with no crossfades and no stack "
+                               "level reduction. Can exceed full scale.");
+    unityGainToggle.onClick = [this] {
+        if (updatingFromModel || !project) return;
+        auto pre = project->toJSON();  // local pre-snapshot immediately before mutation
+        project->unityGainMode = unityGainToggle.getToggleState();
+        project->applyExternalMutation(pre);  // recordMutation (suppressUndo-aware) + change message
+    };
+    addAndMakeVisible(unityGainToggle);
+
     // ── Links section ────────────────────────────────────────────────────────
     setupLabel(this, linksTitle, "LINKS", 11.0f, true);
 
@@ -246,7 +260,8 @@ int InspectorPanel::preferredHeight() const {
     h += sec - gap;
 
     // Project section (shown when no block selected)
-    if (projectTitle.isVisible()) h += rh + gap + rh + rh + gap;
+    // (+ rh toggle + 2*rh wrapped hint + gap for the RAWGAIN raw-summing switch)
+    if (projectTitle.isVisible()) h += rh + gap + rh + rh + gap + rh + rh * 2 + gap;
 
     // Links section
     h += rh + gap;
@@ -733,8 +748,12 @@ void InspectorPanel::updateFromModel() {
     projectTitle      .setVisible(showProject);
     defaultTempoLabel .setVisible(showProject);
     defaultTempoField .setVisible(showProject);
-    if (showProject && project)
+    unityGainToggle   .setVisible(showProject);
+    unityGainHint     .setVisible(showProject);
+    if (showProject && project) {
         defaultTempoField.setValue(project->defaultClipTempo, juce::dontSendNotification);
+        unityGainToggle.setToggleState(project->unityGainMode, juce::dontSendNotification);
+    }
 
     // ── Links section
     for (auto* row : linkRows) {
@@ -979,6 +998,9 @@ void InspectorPanel::resized() {
         projectTitle     .setBounds(area.removeFromTop(rh)); area.removeFromTop(gap);
         defaultTempoLabel.setBounds(area.removeFromTop(rh));
         defaultTempoField.setBounds(area.removeFromTop(rh));
+        area.removeFromTop(gap);
+        unityGainToggle  .setBounds(area.removeFromTop(rh));
+        unityGainHint    .setBounds(area.removeFromTop(rh * 2));  // wraps to 2 lines at 210px
         area.removeFromTop(gap);
     }
 
