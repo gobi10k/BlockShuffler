@@ -3358,6 +3358,160 @@ int main(int argc, char* argv[]) {
                               << ", continuity=" << (contOk ? "ok" : "CARRIER JUMP")
                               << ") — default mode only; unity mode is flat by construction\n";
                 }
+
+                { // T58 (PERMANENT, BACKCOMPAT 2026-08-14): old-schema stack
+                  // settings must survive load REGARDLESS of block order.
+                  // Pre-propagation saves carried a stack field on only ONE member;
+                  // load-time normalisation used to source ALL fields from the FIRST
+                  // member, so a defaulted first member overwrote the real saved
+                  // value (Issue B: "sequential play 3 plays 1"). Serialization.cpp
+                  // now resolves each field from the first member that ACTUALLY
+                  // carried it. Fixtures pin both orderings plus mixed presence.
+                    auto fixture = [&](const juce::String& nm) {
+                        const char* rel[] = { "diag/fixtures/", "../diag/fixtures/",
+                                              "../../diag/fixtures/", "../../../diag/fixtures/" };
+                        for (auto* r : rel) {
+                            auto f = juce::File::getCurrentWorkingDirectory()
+                                         .getChildFile(juce::String(r) + nm);
+                            if (f.existsAsFile()) return f;
+                        }
+                        return juce::File();
+                    };
+                    // Fixtures describe stack SCHEMA; audio is injected post-load so
+                    // a real resolve can run. Never touches the fields under test.
+                    auto inject = [&](Project& p) {
+                        for (auto* b : p.blocks)
+                            for (auto* c : b->clips) {
+                                const int n = (int)juce::jmax((int64_t)1, c->endMark);
+                                c->audioBuffer = std::make_shared<juce::AudioBuffer<float>>(2, n);
+                                c->audioBuffer->clear();
+                            }
+                    };
+                    struct LoadRes { bool loaded=false, counts3=false, picked3=false, zeroGap=false;
+                                     juce::String dump; };
+                    auto loadCase = [&](const juce::String& nm) {
+                        LoadRes r;
+                        auto f = fixture(nm);
+                        if (!f.existsAsFile()) return r;
+                        Project p;
+                        r.loaded = p.loadFromFile(f);
+                        if (!r.loaded) return r;
+                        r.counts3 = true;
+                        for (auto* b : p.blocks) {
+                            const bool is3 = b->stackPlayCount.values.size() == 1
+                                          && b->stackPlayCount.values[0] == 3;
+                            if (!is3) r.counts3 = false;
+                            r.dump << b->name << "=[";
+                            for (int i = 0; i < b->stackPlayCount.values.size(); ++i)
+                                r.dump << (i ? "," : "") << b->stackPlayCount.values[i];
+                            r.dump << "] ";
+                        }
+                        inject(p);
+                        std::vector<Block*> group;
+                        for (auto* b : p.blocks) if (b->stackGroup >= 0) group.push_back(b);
+                        juce::Random rr(9301); ArrangementResolver res;
+                        r.picked3 = true; r.zeroGap = true;
+                        for (int i = 0; i < 5; ++i) {
+                            juce::Random rp(9400 + i);
+                            auto sp = StackPicker::pick(group, p.blocks, rp);
+                            if ((int)sp.picked.size() != 3) r.picked3 = false;
+                            auto arr = res.resolve(p, rr);
+                            if (arr.entries.size() != 3) r.picked3 = false;
+                            for (int e = 0; e + 1 < arr.entries.size(); ++e) {
+                                const auto& cur = arr.entries.getReference(e);
+                                const auto& nxt = arr.entries.getReference(e + 1);
+                                if (cur.timelinePos + (cur.endMark - cur.startMark)
+                                    != nxt.timelinePos) r.zeroGap = false;
+                            }
+                        }
+                        return r;
+                    };
+
+                    auto first = loadCase("oldschema_seq3.json");
+                    auto last  = loadCase("oldschema_seq3_bearer_last.json");
+
+                    // Mixed presence: the mode bearer and the count bearer are
+                    // DIFFERENT members — each field must come from its own bearer.
+                    bool mixedOk = false; juce::String mixedDump;
+                    {
+                        auto f = fixture("oldschema_mixed_presence.json");
+                        if (f.existsAsFile()) {
+                            Project p;
+                            if (p.loadFromFile(f)) {
+                                mixedOk = true;
+                                for (auto* b : p.blocks) {
+                                    const bool c3 = b->stackPlayCount.values.size() == 1
+                                                 && b->stackPlayCount.values[0] == 3;
+                                    const bool sim = b->stackPlayMode == StackPlayMode::Simultaneous;
+                                    if (!c3 || !sim) mixedOk = false;
+                                    mixedDump << b->name << "=["
+                                              << (b->stackPlayCount.values.size() == 1
+                                                  ? juce::String(b->stackPlayCount.values[0])
+                                                  : juce::String("?"))
+                                              << "," << (sim ? "sim" : "seq") << "] ";
+                                }
+                            }
+                        }
+                    }
+
+                    // Current-schema control: built and saved through the CURRENT
+                    // paths — must be unaffected by the load-path change.
+                    bool ctrlOk = false; juce::String ctrlDump;
+                    {
+                        Project p;
+                        auto* A = p.addBlock("A"); auto* B = p.addBlock("B"); auto* C = p.addBlock("C");
+                        for (auto* blk : { A, B, C })
+                            addClipTo(blk, juce::String("c") + blk->name, 1000);
+                        p.stackBlocks(B->id, A->id);
+                        p.stackBlocks(C->id, A->id);
+                        A->stackPlayMode = StackPlayMode::Sequential;
+                        A->stackPlayCount.values.set(0, 3);
+                        p.propagateStackSettings(A->stackGroup, A);
+                        auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                       .getChildFile("t58_control_seq3.bsp");
+                        tmp.deleteFile();
+                        p.saveToFile(tmp);
+                        Project q;
+                        if (q.loadFromFile(tmp)) {
+                            ctrlOk = true;
+                            for (auto* b : q.blocks) {
+                                if (!(b->stackPlayCount.values.size() == 1
+                                      && b->stackPlayCount.values[0] == 3)) ctrlOk = false;
+                                ctrlDump << b->name << "=["
+                                         << (b->stackPlayCount.values.size() == 1
+                                             ? juce::String(b->stackPlayCount.values[0])
+                                             : juce::String("?")) << "] ";
+                            }
+                            inject(q);
+                            std::vector<Block*> group;
+                            for (auto* b : q.blocks) if (b->stackGroup >= 0) group.push_back(b);
+                            for (int i = 0; i < 5; ++i) {
+                                juce::Random rp(9500 + i);
+                                if ((int)StackPicker::pick(group, q.blocks, rp).picked.size() != 3)
+                                    ctrlOk = false;
+                            }
+                        }
+                        tmp.deleteFile();
+                    }
+
+                    std::cout << "T58 fixtures: first[" << first.dump << "] last[" << last.dump
+                              << "] mixed[" << mixedDump << "] control[" << ctrlDump << "]\n";
+
+                    verdict("T58 BACKCOMPAT old-schema stack settings survive load in ANY block order (per-field bearer) + mixed presence + current-schema control",
+                            first.loaded && first.counts3 && first.picked3 && first.zeroGap
+                            && last.loaded && last.counts3 && last.picked3 && last.zeroGap
+                            && mixedOk && ctrlOk,
+                            juce::String("bearerFirst(loaded=") + (first.loaded ? "y" : "n")
+                            + ",counts3=" + (first.counts3 ? "y" : "N")
+                            + ",picked3=" + (first.picked3 ? "y" : "N")
+                            + ",zeroGap=" + (first.zeroGap ? "y" : "N") + ")"
+                            + " bearerLast(loaded=" + (last.loaded ? "y" : "n")
+                            + ",counts3=" + (last.counts3 ? "y" : "N")
+                            + ",picked3=" + (last.picked3 ? "y" : "N")
+                            + ",zeroGap=" + (last.zeroGap ? "y" : "N") + ")"
+                            + " mixedPresence=" + (mixedOk ? "ok" : "BAD")
+                            + " currentSchemaControl=" + (ctrlOk ? "ok" : "BAD"));
+                }
             }
 
             { // ── RAWGAIN Stage 1 (diagnostic probe, print-only, NO verdict) ──

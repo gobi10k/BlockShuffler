@@ -1,6 +1,7 @@
 #include "Serialization.h"
 #include "Project.h"
 #include "../Utils/UuidGenerator.h"
+#include <map>
 
 namespace BlockShuffler {
 namespace Serialization {
@@ -101,21 +102,33 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
     // RAWGAIN: absent (every pre-existing .bsp) → false, i.e. the fade law.
     project.unityGainMode    = (bool)json.getProperty("unityGainMode",      false);
 
+    // BACKCOMPAT (2026-08-14): which stack-level fields each block ACTUALLY
+    // carried in the JSON, as opposed to falling back to a constructor default.
+    // Keyed by the loaded Block* (not an index, so pre-existing blocks in the
+    // target Project cannot misalign it). Function-scoped: it is consumed by the
+    // normalisation step below and never outlives this load. No model change, no
+    // new serialised field — presence is inferred from the parsed JSON only.
+    struct StackFieldPresence { bool count = false, mode = false, base = false; };
+    std::map<const Block*, StackFieldPresence> stackPresence;
+
     // Blocks
     if (auto* blocksArr = json.getProperty("blocks", juce::var()).getArray()) {
         for (auto& bVar : *blocksArr) {
             auto block = std::make_unique<Block>();
+            StackFieldPresence presence;
             block->id             = bVar.getProperty("id",   generateUuid()).toString();
             block->name           = bVar.getProperty("name", "Block").toString();
             block->color          = juce::Colour::fromString(
                                         bVar.getProperty("color", "FF5599FF").toString());
             block->position       = (int)   bVar.getProperty("position",    0);
             block->stackGroup     = (int)   bVar.getProperty("stackGroup",  -1);
+            presence.mode         = bVar.hasProperty("stackPlayMode");
             block->stackPlayMode  = bVar.getProperty("stackPlayMode", "sequential")
                                         .toString() == "simultaneous"
                                         ? StackPlayMode::Simultaneous
                                         : StackPlayMode::Sequential;
             // Missing key (pre-3B project) → false
+            presence.base         = bVar.hasProperty("alwaysPlayBase");
             block->alwaysPlayBase = (bool)  bVar.getProperty("alwaysPlayBase", false);
             block->probability    = (float)(double)bVar.getProperty("probability", 1.0);
             block->isDone         = (bool)  bVar.getProperty("isDone",         false);
@@ -134,6 +147,7 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
 
             // stackPlayCount
             auto spcVar = bVar.getProperty("stackPlayCount", juce::var());
+            presence.count = spcVar.isObject();   // only an object form is a real value
             if (spcVar.isObject()) {
                 block->stackPlayCount.values.clear();
                 block->stackPlayCount.weights.clear();
@@ -229,7 +243,9 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
                 }
             }
 
-            project.blocks.add(block.release());
+            auto* rawBlock = block.release();
+            project.blocks.add(rawBlock);
+            stackPresence[rawBlock] = presence;
         }
     }
 
@@ -244,15 +260,55 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
         }
     }
 
-    // Propagate stack settings from first block in each group to all others,
-    // fixing any inconsistency in saved files (e.g. from pre-propagation builds).
+    // Normalise stack settings across each group, fixing inconsistency in saved
+    // files (e.g. from pre-propagation builds).
+    //
+    // BACKCOMPAT (2026-08-14) — PER-FIELD BEARER SELECTION.
+    // This used to call propagateStackSettings(group) with sourceBlock = nullptr,
+    // which takes the FIRST member in blocks order as the source for ALL fields
+    // (Project.cpp:131-134). A pre-propagation save wrote a stack field on only
+    // ONE member of the group, so whenever that member was not the first one, the
+    // first member's CONSTRUCTOR DEFAULT (stackPlayCount {values:[1],weights:[1]},
+    // Block.h:25-26 — an absent key leaves it untouched, see the isObject() guard
+    // above) was propagated over the top of the genuinely saved value, silently
+    // turning the user's "play 3" into "play 1" before the resolver ever ran.
+    // That made the bug ORDER-DEPENDENT, which is why it reproduced on some
+    // presets and not others: fixtures diag/fixtures/oldschema_seq3.json (bearer
+    // first → value survived) vs oldschema_seq3_bearer_last.json (bearer last →
+    // value destroyed). Pinned by T58.
+    //
+    // Fix, confined to the LOAD path: resolve each field INDEPENDENTLY from the
+    // first member whose JSON actually contained it. If no member carried a
+    // field, every member already holds identical constructor defaults, so we
+    // leave them exactly as before. Project::propagateStackSettings itself is
+    // deliberately unchanged — the interactive call sites (InspectorPanel, and
+    // Project's own stack mutators) keep their existing source-block semantics.
     {
         juce::SortedSet<int> seen;
-        for (auto* b : project.blocks)
-            if (b->stackGroup >= 0 && !seen.contains(b->stackGroup)) {
-                seen.add(b->stackGroup);
-                project.propagateStackSettings(b->stackGroup);
+        for (auto* b : project.blocks) {
+            if (b->stackGroup < 0 || seen.contains(b->stackGroup)) continue;
+            seen.add(b->stackGroup);
+            const int group = b->stackGroup;
+
+            const Block* countSrc = nullptr;
+            const Block* modeSrc  = nullptr;
+            const Block* baseSrc  = nullptr;
+            for (auto* m : project.blocks) {
+                if (m->stackGroup != group) continue;
+                auto it = stackPresence.find(m);
+                if (it == stackPresence.end()) continue;   // not from this JSON
+                if (countSrc == nullptr && it->second.count) countSrc = m;
+                if (modeSrc  == nullptr && it->second.mode)  modeSrc  = m;
+                if (baseSrc  == nullptr && it->second.base)  baseSrc  = m;
             }
+
+            for (auto* m : project.blocks) {
+                if (m->stackGroup != group) continue;
+                if (countSrc != nullptr) m->stackPlayCount = countSrc->stackPlayCount;
+                if (modeSrc  != nullptr) m->stackPlayMode  = modeSrc->stackPlayMode;
+                if (baseSrc  != nullptr) m->alwaysPlayBase = baseSrc->alwaysPlayBase;
+            }
+        }
     }
 
     return true;

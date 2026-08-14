@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "name": "oldschema_seq3 (bearer FIRST)",
+  "sampleRate": 48000.0,
+  "defaultClipTempo": 120.0,
+  "blocks": [
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+      "name": "A_base",
+      "color": "ffe05252",
+      "position": 0,
+      "stackGroup": 0,
+      "stackPlayMode": "sequential",
+      "alwaysPlayBase": false,
+      "probability": 1.0,
+      "playChance": 1.0,
+      "tempo": 120.0,
+      "stackPlayCount": { "values": [3], "weights": [1.0] },
+      "clips": [
+        {
+          "id": "cccccccccccccccccccccccccccccca1",
+          "name": "cA",
+          "probability": 1.0,
+          "tempo": 120.0,
+          "retainLeadInTempo": false,
+          "retainTailTempo": false,
+          "isSongEnder": false,
+          "startMark": "0",
+          "endMark": "1000"
+        }
+      ]
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+      "name": "B_member",
+      "color": "ffe08840",
+      "position": 1,
+      "stackGroup": 0,
+      "stackPlayMode": "sequential",
+      "alwaysPlayBase": false,
+      "probability": 1.0,
+      "playChance": 1.0,
+      "tempo": 120.0,
+      "clips": [
+        {
+          "id": "cccccccccccccccccccccccccccccca2",
+          "name": "cB",
+          "probability": 1.0,
+          "tempo": 120.0,
+          "retainLeadInTempo": false,
+          "retainTailTempo": false,
+          "isSongEnder": false,
+          "startMark": "0",
+          "endMark": "1000"
+        }
+      ]
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3",
+      "name": "C_member",
+      "color": "ffccaa44",
+      "position": 2,
+      "stackGroup": 0,
+      "stackPlayMode": "sequential",
+      "alwaysPlayBase": false,
+      "probability": 1.0,
+      "playChance": 1.0,
+      "tempo": 120.0,
+      "clips": [
+        {
+          "id": "cccccccccccccccccccccccccccccca3",
+          "name": "cC",
+          "probability": 1.0,
+          "tempo": 120.0,
+          "retainLeadInTempo": false,
+          "retainTailTempo": false,
+          "isSongEnder": false,
+          "startMark": "0",
+          "endMark": "1000"
+        }
+      ]
+    }
+  ],
+  "links": []
+}
