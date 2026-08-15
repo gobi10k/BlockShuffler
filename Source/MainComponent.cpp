@@ -18,6 +18,7 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     blockStrip.onBlockSelected = [this](Block* block) {
         applyBlockSelection(block);
     };
+    waveformView.defaultTempo = project->defaultClipTempo;
 
     waveformView.onClipSelected = [this](Clip* clip) {
         inspectorPanel.setClip(clip, selectedBlock);
@@ -35,13 +36,50 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     transportBar.onSave   = [this] { saveProject(); };
     transportBar.onOpen   = [this] { openProject(); };
 
+    blockStrip.onClipDropped = [this](const juce::String& clipId, const juce::String& targetBlockId) {
+        if (!project) return;
+        // Find the clip and its source block
+        Block* sourceBlock = nullptr;
+        Clip*  movedClip   = nullptr;
+        for (auto* b : project->blocks) {
+            for (auto* c : b->clips) {
+                if (c->id == clipId) { sourceBlock = b; movedClip = c; break; }
+            }
+            if (movedClip) break;
+        }
+        auto* targetBlock = project->getBlockById(targetBlockId);
+        if (!movedClip || !sourceBlock || !targetBlock || sourceBlock == targetBlock) return;
+
+        auto pre = project->toJSON();
+        // Transfer ownership: take clip out of source, add to target.
+        // Also update the clip's tempo to match the target block so it plays on the
+        // correct grid, then fire change messages on both blocks so their waveform
+        // views rebuild immediately (the clip disappears from the source row and
+        // appears in the target row without waiting for a project-level rebuild).
+        bool moved = false;
+        for (int i = 0; i < sourceBlock->clips.size(); ++i) {
+            if (sourceBlock->clips[i] == movedClip) {
+                Clip* rawClip = sourceBlock->clips.removeAndReturn(i);
+                rawClip->tempo = targetBlock->tempo > 0.0 ? targetBlock->tempo : rawClip->tempo;
+                targetBlock->clips.add(rawClip);
+                moved = true;
+                break;
+            }
+        }
+        if (moved) {
+            sourceBlock->sendChangeMessage();  // source waveform view drops the clip row
+            targetBlock->sendChangeMessage();  // target waveform view gains the clip row
+        }
+        project->applyExternalMutation(pre);
+    };
+
     blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
         currentArrangement = resolver.resolve(*project, rng);
         // Find the body start of the target block in the resolved arrangement
         int64_t seekPos = 0;
         for (const auto& entry : currentArrangement.entries) {
             if (entry.blockId == blockId) {
-                seekPos = entry.timelinePos + entry.startMark;
+                seekPos = entry.timelinePos;  // timelinePos = body start
                 break;
             }
         }
@@ -143,6 +181,10 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
             ext == ".flac" || ext == ".ogg"  || ext == ".mp3") {
             auto clip = std::make_unique<Clip>();
             if (clip->loadFromFile(file, project->formatManager, project->sampleRate)) {
+                // Block tempo takes priority; fall back to project default.
+                clip->tempo = (selectedBlock->tempo > 0.0)
+                              ? selectedBlock->tempo
+                              : (project->defaultClipTempo > 0.0 ? project->defaultClipTempo : 120.0);
                 selectedBlock->addClip(std::move(clip));
                 anyAdded = true;
             }
@@ -153,6 +195,9 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
 }
 
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) {
+    // Keep waveformView in sync with project default tempo (may have changed via undo/redo)
+    waveformView.defaultTempo = project->defaultClipTempo;
+
     // Re-validate the selected block pointer — undo/redo may have deleted/recreated it.
     auto* found = project->getBlockById(selectedBlockId);
     if (found != selectedBlock) {
@@ -342,6 +387,8 @@ void MainComponent::loadProject(const juce::File& file) {
     if (!project->blocks.isEmpty()) {
         blockStrip.selectBlock(project->blocks.getFirst());  // fires onBlockSelected → applyBlockSelection
     }
+    waveformView.defaultTempo = project->defaultClipTempo;
+    project->sendChangeMessage();  // ensures BlockStrip runs its async rebuildBlocks()+resized()
 }
 
 void MainComponent::updateTimeDisplay() {
@@ -369,27 +416,27 @@ void MainComponent::updateTimeDisplay() {
             nowPlayingBlockId = firstEntry.blockId;
             nowPlayingClipId = firstEntry.clipId;
 
-            // After trimming: startMark=0, so bodyStart = timelinePos, bodyEnd = timelinePos + endMark
+            // timelinePos = body start; lead-in at [timelinePos - startMark, timelinePos)
             int64_t bodyStart = firstEntry.timelinePos;
-            int64_t bodyEnd   = firstEntry.timelinePos + firstEntry.endMark;
+            int64_t bodyEnd   = firstEntry.timelinePos + (firstEntry.endMark - firstEntry.startMark);
 
             if (headSamples >= bodyStart && headSamples < bodyEnd) {
                 // Currently within clip body - map to original clip position
                 int64_t posInTrimmed = headSamples - bodyStart;
-                clipSamplePos = firstEntry.originalStartMark + posInTrimmed;
+                clipSamplePos = firstEntry.startMark + posInTrimmed;
             } else if (headSamples < bodyStart) {
-                // Before clip starts - show at original start marker
-                clipSamplePos = firstEntry.originalStartMark;
+                // Before body starts (still in lead-in) - show at start marker
+                clipSamplePos = firstEntry.startMark;
             } else {
                 // After first clip - use normal tracking
                 for (const auto& entry : currentArrangement.entries) {
-                    int64_t eb = entry.timelinePos;  // startMark is 0 after trimming
-                    int64_t ee = entry.timelinePos + entry.endMark;
+                    int64_t eb = entry.timelinePos;
+                    int64_t ee = entry.timelinePos + (entry.endMark - entry.startMark);
                     if (headSamples >= eb && headSamples < ee) {
                         nowPlayingBlockId = entry.blockId;
                         nowPlayingClipId = entry.clipId;
                         int64_t posInTrimmed = headSamples - eb;
-                        clipSamplePos = entry.originalStartMark + posInTrimmed;
+                        clipSamplePos = entry.startMark + posInTrimmed;
                         break;
                     }
                 }
@@ -397,17 +444,6 @@ void MainComponent::updateTimeDisplay() {
         }
 
         blockStrip.setPlayingBlock(nowPlayingBlockId);
-
-        // Always switch waveform to show the playing block's clips
-        if (!nowPlayingBlockId.isEmpty()) {
-            selectedBlockId = nowPlayingBlockId;
-            selectedBlock = project->getBlockById(nowPlayingBlockId);
-            if (selectedBlock) {
-                waveformView.setBlock(selectedBlock, project->sampleRate, &project->formatManager);
-                inspectorPanel.setBlock(selectedBlock);
-            }
-        }
-
         waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, currentArrangement.sampleRate);
     }
 }

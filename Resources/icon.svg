@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background rounded square: Void Black -->
+  <rect width="512" height="512" rx="96" ry="96" fill="#0B0D10"/>
+
+  <!-- Graphite Blue inner panel — subtle depth -->
+  <rect x="32" y="32" width="448" height="448" rx="72" ry="72" fill="#121825"/>
+
+  <!-- ── Block arrangement strip ──────────────────────────────────────── -->
+  <!-- Block 1 (left): Neon Cyan — tall -->
+  <rect x="60"  y="148" width="96" height="160" rx="12" ry="12" fill="#25D7F2"/>
+  <rect x="68"  y="156" width="80" height="144" rx="8"  ry="8"  fill="#121825"/>
+  <!-- top accent bar -->
+  <rect x="60"  y="148" width="96" height="16"  rx="12" ry="12" fill="#25D7F2"/>
+
+  <!-- Block 2 (centre): Electric Violet — shorter -->
+  <rect x="208" y="178" width="96" height="100" rx="12" ry="12" fill="#7B5CFF"/>
+  <rect x="216" y="186" width="80" height="84"  rx="8"  ry="8"  fill="#121825"/>
+  <rect x="208" y="178" width="96" height="16"  rx="12" ry="12" fill="#7B5CFF"/>
+
+  <!-- Block 3 (right): Neon Cyan — tall (mirrors block 1) -->
+  <rect x="356" y="148" width="96" height="160" rx="12" ry="12" fill="#25D7F2"/>
+  <rect x="364" y="156" width="80" height="144" rx="8"  ry="8"  fill="#121825"/>
+  <rect x="356" y="148" width="96" height="16"  rx="12" ry="12" fill="#25D7F2"/>
+
+  <!-- ── Shuffle connector arrows (Hot Magenta) ───────────────────────── -->
+  <!-- Left arrow shaft: block 1 → block 2 -->
+  <line x1="162" y1="228" x2="202" y2="228" stroke="#FF4FB8" stroke-width="6" stroke-linecap="round"/>
+  <!-- Arrowhead -->
+  <polyline points="192,218 204,228 192,238" fill="none" stroke="#FF4FB8" stroke-width="6"
+            stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Right arrow shaft: block 2 → block 3 -->
+  <line x1="310" y1="228" x2="350" y2="228" stroke="#FF4FB8" stroke-width="6" stroke-linecap="round"/>
+  <polyline points="340,218 352,228 340,238" fill="none" stroke="#FF4FB8" stroke-width="6"
+            stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- ── Waveform hint below the blocks (Ice Blue) ────────────────────── -->
+  <polyline
+    points="60,352 84,334 108,360 132,324 156,368 180,338 204,356 228,330 252,360 276,336 300,352 324,328 348,360 372,338 396,350 420,330 452,352"
+    fill="none" stroke="#7EDCFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"
+    opacity="0.55"/>
+</svg>
