@@ -15,6 +15,7 @@
 #include "Audio/StackPicker.h"
 #include "UI/InspectorPanel.h"
 #include "Model/Serialization.h"
+#include "UI/SplitLayout.h"
 #include "Utils/GridSnap.h"
 #include "UI/BlockLinkOverlay.h"
 #include "UI/LookAndFeel_BlockShuffler.h"
@@ -3730,6 +3731,100 @@ int main(int argc, char* argv[]) {
                             + ", timing=" + (timingSame ? "same" : "DIFFERS"));
                 }
 
+                { // T60 (PERMANENT, SPLITTER 2026-08-21, Carter request 2): the
+                  // waveform/blocks divider must never be able to collapse a pane.
+                  // "Blocks invisible" has regressed three times, so this asserts the
+                  // clamp EXHAUSTIVELY rather than at a few sample points:
+                  // (a) for every content height 1..2000 and a spread of desired
+                  //     values including negatives, zero and absurdly large ones,
+                  //     BOTH panes come out >= 1px;
+                  // (b) whenever the content area is at least minTotalHeight(), both
+                  //     panes additionally get their full documented minimum;
+                  // (c) the default split reproduces the pre-splitter 360px strip;
+                  // (d) persisted-value handling: absent/garbage -> default split,
+                  //     sane-but-too-big -> clamped to fit the current window.
+                  // Pure geometry from UI/SplitLayout.h — the header MainComponent
+                  // lays out from — so it is covered headlessly here even though
+                  // MainComponent itself is not part of this harness.
+                    using namespace SplitLayout;
+
+                    // Content height at the SMALLEST allowed window: the 800x600 floor
+                    // (MainComponent::resized / MainWindow's constrainer) minus the
+                    // 56px transport bar. The inspector is removed horizontally and
+                    // never takes part in this split.
+                    const int minWinTotalH = 600 - 56;   // 544
+
+                    const int desireds[] = { -100000, -1, 0, 1, 2, blocksMinH - 1, blocksMinH,
+                                             blocksDefaultH, waveMinH, 1000, 100000, 1 << 24 };
+
+                    bool bothAlwaysPositive = true, minsHonoured = true;
+                    int  firstBadTotal = -1, firstBadDesired = 0, firstBadBlocks = 0, firstBadWave = 0;
+                    for (int totalH = 1; totalH <= 2000 && bothAlwaysPositive && minsHonoured; ++totalH) {
+                        for (int d : desireds) {
+                            const int b = clampBlocksHeight(d, totalH);
+                            const int w = waveHeightFor(b, totalH);
+                            if (totalH <= barH + 1) continue;   // no room for two panes at all
+                            if (b < 1 || w < 1) {
+                                bothAlwaysPositive = false;
+                                firstBadTotal = totalH; firstBadDesired = d;
+                                firstBadBlocks = b; firstBadWave = w;
+                                break;
+                            }
+                            if (totalH >= minTotalHeight() && (b < blocksMinH || w < waveMinH)) {
+                                minsHonoured = false;
+                                firstBadTotal = totalH; firstBadDesired = d;
+                                firstBadBlocks = b; firstBadWave = w;
+                                break;
+                            }
+                        }
+                    }
+
+                    // (c) default split at the smallest allowed window and at 1200x700.
+                    const int defAtMin   = clampBlocksHeight(blocksDefaultH, minWinTotalH);
+                    const int waveAtMin  = waveHeightFor(defAtMin, minWinTotalH);
+                    const int defAt700   = clampBlocksHeight(blocksDefaultH, 700 - 56);
+                    const bool defaultOk = defAtMin == blocksDefaultH && defAt700 == blocksDefaultH;
+
+                    // Extreme splits at the smallest allowed window: dragging the bar
+                    // to either stop must still leave both panes at their minimum.
+                    const int dragAllDown = clampBlocksHeight(1 << 20, minWinTotalH); // strip max
+                    const int dragAllUp   = clampBlocksHeight(0,       minWinTotalH); // strip min
+                    const bool extremesOk = dragAllUp   == blocksMinH
+                                         && waveHeightFor(dragAllUp,   minWinTotalH) >= waveMinH
+                                         && dragAllDown == minWinTotalH - barH - waveMinH
+                                         && waveHeightFor(dragAllDown, minWinTotalH) == waveMinH;
+
+                    // (d) persisted-value handling.
+                    const bool restoreOk =
+                           sanitizeStoredBlocksHeight(0)      == blocksDefaultH   // fresh install
+                        && sanitizeStoredBlocksHeight(-42)    == blocksDefaultH   // corrupt
+                        && sanitizeStoredBlocksHeight(1)      == blocksDefaultH   // below minimum
+                        && sanitizeStoredBlocksHeight(999999) == blocksDefaultH   // absurd
+                        && sanitizeStoredBlocksHeight(250)    == 250              // honoured
+                        && restoreBlocksHeight(3000, minWinTotalH) == minWinTotalH - barH - waveMinH
+                        && restoreBlocksHeight(0,    minWinTotalH) == blocksDefaultH;
+
+                    verdict("T60 SPLITTER clamp: neither pane can ever reach 0px (exhaustive 1..2000), minimums honoured >= minTotalHeight, default split == 360, restore sanitises",
+                            bothAlwaysPositive && minsHonoured && defaultOk && extremesOk && restoreOk,
+                            juce::String("bothPositive=") + (bothAlwaysPositive ? "y" : "N")
+                            + ", minsHonoured=" + (minsHonoured ? "y" : "N")
+                            + (firstBadTotal >= 0
+                                 ? " FIRSTBAD(totalH=" + juce::String(firstBadTotal)
+                                   + ",desired=" + juce::String(firstBadDesired)
+                                   + " -> blocks=" + juce::String(firstBadBlocks)
+                                   + ",wave=" + juce::String(firstBadWave) + ")"
+                                 : juce::String())
+                            + ", minWin544: blocks=" + juce::String(defAtMin)
+                            + "/wave=" + juce::String(waveAtMin)
+                            + ", extremes[up=" + juce::String(dragAllUp)
+                            + ",down=" + juce::String(dragAllDown) + "]="
+                            + (extremesOk ? "ok" : "BAD")
+                            + ", default360=" + (defaultOk ? "ok" : "BAD")
+                            + ", restore=" + (restoreOk ? "ok" : "BAD")
+                            + ", mins[wave=" + juce::String(waveMinH)
+                            + ",blocks=" + juce::String(blocksMinH)
+                            + ",bar=" + juce::String(barH) + "]");
+                }
             }
 
             { // ── RAWGAIN Stage 1 (diagnostic probe, print-only, NO verdict) ──

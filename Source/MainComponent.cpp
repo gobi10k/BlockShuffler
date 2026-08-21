@@ -106,6 +106,11 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     addAndMakeVisible(linkOverlay);
     addAndMakeVisible(transportBar);
 
+    // SPLITTER: restore the per-user divider (sanitised here, clamped in resized())
+    // and show the bar. The bar sets its own UpDownResizeCursor in its constructor.
+    loadSplitterPosition();
+    addAndMakeVisible(splitterBar);
+
     inspectorViewport.setViewedComponent(&inspectorPanel);
     inspectorViewport.setScrollBarsShown(true, false, false, false);
     inspectorViewport.setColour(juce::ScrollBar::backgroundColourId,
@@ -162,10 +167,78 @@ void MainComponent::resized() {
     inspectorPanel.setBounds(0, 0, inspectorWidth,
                              juce::jmax(panelFloor, inspectorPanel.preferredHeight()));
 
-    auto blockArea = area.removeFromBottom(blockStripHeight);
+    // ── SPLITTER: waveform (top) / resizer bar / block strip (bottom) ─────────
+    // `area` is everything left after the transport bar and the inspector viewport
+    // were removed, so the inspector's width and scrolling are decided ABOVE this
+    // point and are untouched by the divider (T49 is unaffected).
+    // Always re-derive the applied height from the user's INTENT, so a window that
+    // shrank (forcing a clamp) and grew again returns to the split they chose.
+    splitAreaHeight  = area.getHeight();
+    blocksPaneHeight = SplitLayout::clampBlocksHeight(desiredBlocksHeight, splitAreaHeight);
+
+    // Re-seed the drag transport from the clamped geometry, so a drag starts from
+    // what is actually on screen and the manager's own minimums match ours.
+    splitLayout.setItemLayout(0, SplitLayout::waveMinH,   SplitLayout::blocksSanityMaxH,
+                              (double)SplitLayout::waveHeightFor(blocksPaneHeight, splitAreaHeight));
+    splitLayout.setItemLayout(1, SplitLayout::barH,       SplitLayout::barH,
+                              (double)SplitLayout::barH);
+    splitLayout.setItemLayout(2, SplitLayout::blocksMinH, SplitLayout::blocksSanityMaxH,
+                              (double)blocksPaneHeight);
+    // Prime the manager's internal sizes/positions (getItemCurrent*() are only
+    // meaningful once it has laid out). setTotalSize() is private in JUCE 8, so we
+    // go through layOutComponents with a NULL component array — it null-checks each
+    // entry, so this updates state without touching any bounds. The real bounds are
+    // applied below from our own clamped numbers.
+    juce::Component* splitComps[3] = { nullptr, nullptr, nullptr };
+    splitLayout.layOutComponents(splitComps, 3,
+                                 area.getX(), area.getY(), area.getWidth(), splitAreaHeight,
+                                 true, false);
+
+    // Lay out from OUR clamped numbers, never from the manager: removeFromTop of a
+    // clamped waveform height leaves exactly barH + blocksPaneHeight behind, so the
+    // strip is guaranteed a non-zero on-screen rectangle at every window size.
+    waveformView.setBounds(area.removeFromTop(
+                               SplitLayout::waveHeightFor(blocksPaneHeight, splitAreaHeight)));
+    splitterBar .setBounds(area.removeFromTop(SplitLayout::barH));
+    auto blockArea = area;
     blockStrip .setBounds(blockArea);
     linkOverlay.setBounds(blockArea);
-    waveformView.setBounds(area);
+}
+
+void MainComponent::splitterMoved() {
+    // The bar has already pushed a position into splitLayout (which honours the two
+    // minimums itself); take the strip size back out, run it through the same clamp
+    // resized() uses, and relay out.
+    desiredBlocksHeight = SplitLayout::clampBlocksHeight(
+                              splitLayout.getItemCurrentAbsoluteSize(2), splitAreaHeight);
+    resized();
+}
+
+void MainComponent::loadSplitterPosition() {
+    // Per-user app properties — deliberately NOT the .bsp. The project format is
+    // byte-for-byte unchanged by this feature.
+    juce::PropertiesFile::Options opts;
+    opts.applicationName     = "BlockShuffler";
+    opts.filenameSuffix      = "settings";
+    opts.folderName          = "BlockShuffler";
+    opts.osxLibrarySubFolder = "Application Support";
+    appProps.setStorageParameters(opts);
+
+    // 0 => key absent (fresh install) => sanitize returns the default split.
+    // Only the window-INDEPENDENT half of the restore runs here: the real content
+    // height is not known until the first resized(), which applies the clamp.
+    const int stored = appProps.getUserSettings()->getIntValue("splitterBlocksHeight", 0);
+    desiredBlocksHeight = SplitLayout::sanitizeStoredBlocksHeight(stored);
+    blocksPaneHeight    = desiredBlocksHeight;   // resized() clamps it to the window
+}
+
+void MainComponent::saveSplitterPosition() {
+    if (auto* s = appProps.getUserSettings()) {
+        // Persist the INTENT, not the window-clamped value, so a session spent at a
+        // small window size cannot quietly shrink the saved preference.
+        s->setValue("splitterBlocksHeight", desiredBlocksHeight);
+        s->saveIfNeeded();
+    }
 }
 
 bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files) {

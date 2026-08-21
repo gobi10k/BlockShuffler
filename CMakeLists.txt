@@ -89,6 +89,7 @@ target_sources(BlockShuffler PRIVATE
     Source/UI/BlockLinkOverlay.cpp
     Source/UI/LookAndFeel_BlockShuffler.h
     Source/UI/LookAndFeel_BlockShuffler.cpp
+    Source/UI/SplitLayout.h
 
     # Utils
     Source/Utils/WeightedRandom.h
