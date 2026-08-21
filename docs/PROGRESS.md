@@ -25,11 +25,14 @@ Format: newest entry at the top. Each session appends a dated block. Keep the "C
 ### NEXT UP
 **DELIVERY-READY (updated 2026-07-16).** Windows slice CLOSED — all acceptance items PASS on both platforms. Remaining: (1) Carter ratification of the 3 BEYOND-SPEC items (`docs/CARTER_RATIFICATION.md`) — the ONLY open delivery item; (2) optional post-delivery: :340 clamp (TODO 7, parked one-liner, needs T27/T28 re-verify).
 
+**Updated 2026-08-21 (Carter round, committed 348c886 + 1a3377a):** (a) **UI GATE PENDING (Alec, by hand)** — drag the new blocks/waveform divider both ways at 1200x700 and at the 800x600 minimum: resize cursor over the bar, smooth drag, tiles + waveform render at extreme splits, split survives quit/relaunch. (b) **TWO RULINGS OPEN** — should legacy `.bsp` files that explicitly stored `unityGainMode: true` be force-migrated to OFF (today an explicit choice is preserved)? and should the SIM-stack join overshoot (TRACKED FINDINGS 5) be fixed? Raw summing itself was ALREADY off by default since e7e9d79 — no product change was needed for that request.
+
 ### TRACKED FINDINGS (non-blocking, 2026-07-13)
 1. Debug-only undo flicker on large (50-block) projects — deferred callAsync rebuild window stretched by ASan slowness; CLEAN on Release; pre-existing (undo code path byte-identical to baseline). Not a shipping defect.
 2. :340 colour assert (TODO 7) root-caused: ClipWaveformView.cpp:187 unclamped jmap → alpha >1.0 on long/zoomed clips. Parked one-line jlimit(0,1,…) fix (needs T27/T28 re-verify). Sporadic Debug noise.
 3. Export vs playback above 0 dBFS: 16-bit WAV export clamps where a crossfade sums past full scale, float playback doesn't — standard format quantization DOWNSTREAM of the single mixEntryToBuffer path, not a mixing divergence. Post-delivery: consider export limiting/headroom.
 4. juce_String.cpp:327 on non-UUID block ids — synthetic-test-only; real projects use UUIDs; benign.
+5. **SIM-stack join overshoot, peak 1.333 (+2.4 dB) (found 2026-08-21, PRE-EXISTING, NOT FIXED).** The complementary join law pairs an entry with its ARRAY NEIGHBOUR, but all N members of a simultaneous stack share one `timelinePos` — so for the 2nd..Nth members that neighbour is a stack SIBLING, not the preceding sequential entry. Only one member crossfades against the neighbouring entry; the rest enter and leave flat at 1/playCount, leaving an excess of (N-1)/N (2/3 for N=3). Purely sequential joins unaffected (dev 0.000000). Documented by the T59 print-only probe (T57 precedent). Carter's project contains exactly this shape. **Needs an Alec ruling before any fix — Source/Audio/ was out of scope for the 2026-08-21 round.**
 
 ---
 
@@ -109,6 +112,32 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 **STATUS (updated 2026-07-13):** Mac acceptance on 54ed7f8 (Release build): 1b drag safety PASS (ASan clean) · 1c positioning PASS (ground-truth, all drag types) · 1d undo PASS on Release · 2.9 scroll retention PASS · 7.6 rapid play/stop PASS · 13.1 colour PASS · 12.1 stress PASS. UI issue-1 (fit-to-window): NON-REPRODUCING, no code change (LAYDIAG fitsVisible=1). UI issue-2 (name legibility): FIXED (54ed7f8). Suite T1–T37 ALL PASS.
 
 ## SESSION LOG
+
+### 2026-08-21 — Carter round: raw summing already OFF by default (T59, no product change) + draggable blocks/waveform divider (T60) — COMMITTED, UI gate pending
+- Task (Carter, 2026-08-21, both UI/defaults — mixing math explicitly OUT OF SCOPE): (1) "raw summing" disabled by default, toggle kept; (2) draggable horizontal divider between the blocks strip and the clip/waveform area.
+- What I changed (files):
+  - `diag/ResolverDiag.cpp` — T59 (raw-summing default lock + Carter-arrangement render proof + SIM-stack join probe) and T60 (splitter clamp). Commits 348c886 / 1a3377a.
+  - `Source/UI/SplitLayout.h` — NEW. Pure `juce_core`-only free functions: `clampBlocksHeight`, `waveHeightFor`, `sanitizeStoredBlocksHeight`, `restoreBlocksHeight` + the min constants. Deliberately a testable header because MainComponent is NOT buildable headlessly and the clamp is the thing that must never break.
+  - `Source/MainComponent.h/.cpp` — splitter bar (`StretchableLayoutResizerBar` subclass), `splitLayout` drag transport, `desiredBlocksHeight`/`blocksPaneHeight`, per-user persistence via `juce::ApplicationProperties`. Removed the fixed `blockStripHeight = 360` constant.
+  - `CMakeLists.txt` — SplitLayout.h in target_sources.
+  - **`Source/Audio/` and `Source/Model/`: 0 files changed.** Mixing math and the .bsp format untouched.
+- What I proved (grep/tests, PASS/FAIL):
+  - **REQUEST 1 NEEDED NO CODE CHANGE — it was already done.** `Project.h:25` is `bool unityGainMode = false` and `Serialization.cpp:103` defaults the absent key to `false`; shipped that way in e7e9d79. I did NOT make a no-op edit; T59 pins the behaviour instead.
+  - T59 PASS: ctor default OFF · absent key OFF (actively set — field pre-dirtied to true before each load) · explicit `false` OFF · explicit `true` **KEPT** · a default project writes the key as `false` · every resolved entry carries the flag as false.
+  - T59 PASS (Carter's arrangement: all-120BPM, 9 blocks, one 3-block SIM stack, flag never touched): sequential joins sum to **1.0 (dev 0.000000)**, stack body **1.0** (1/playCount compensation), full render **1.333** where raw summing gives **4.0** ⇒ the complementary path demonstrably ran. Toggle ON still reaches 4.0; timing mode-independent.
+  - T60 PASS, EXHAUSTIVE (content heights 1..2000 x 12 desired values incl. negatives, 0, 1<<24): both panes always >= 1px; both get their full minimum whenever totalH >= minTotalHeight(). Mins: **waveMinH 166 · blocksMinH 140 · barH 6**. At the smallest allowed window (800x600 -> content 544): default 360/178, drag range **[140, 372]**.
+  - T49 PASS **unmodified and byte-identical to baseline** (visibleSliders=17, zeroHeight=0, panelH=1130) — the inspector viewport is decided before the split code and is untouched.
+  - Full suite **62 PASS / 0 FAIL / STEP6 RESULT: ALL PASS**. Clean Release rebuild (`--clean-first`, exit 0); binary mtime 13:56:57 > newest source mtime 13:55:58.
+  - Cross-tempo merge is **IN this tree** (asked): end-anchored lead-in (EntryMixer.h:192-210), fade lengths synced to stretched buffers (renderedLeadInLength/renderedTailLength, EntryMixer.h:13-33), time-reversed lead stretch (ArrangementResolver.cpp:403-425).
+- What regressed or surprised me:
+  - **NEW FINDING, PRE-EXISTING, NOT FIXED — SIM-stack join overshoot, peak 1.333 (+2.4 dB).** Carter's geometry exposes it. The complementary join law pairs an entry with its ARRAY NEIGHBOUR, but all N members of a simultaneous stack share one `timelinePos`, so for the 2nd..Nth members that neighbour is a stack SIBLING, not the preceding sequential entry. Only one member crossfades against the neighbouring entry; the rest enter and leave flat at 1/playCount, leaving an excess of **(N-1)/N** (2/3 for N=3). Purely sequential joins are unaffected (dev 0.000000). Recorded as a **print-only probe** (T57 precedent), NOT a failing verdict, because `Source/Audio/` was explicitly out of scope. **No fix without Alec's go-ahead.**
+  - `juce::StretchableLayoutManager::setTotalSize()` is PRIVATE in JUCE 8. State is primed via `layOutComponents` with a NULL component array (it null-checks each entry, touches no bounds). Noted so the next session doesn't re-discover it.
+  - The manager enforces the two minimums during a drag but **OVERFLOWS rather than clamps** when space < sum of minimums — precisely the "blocks invisible" failure mode that has regressed 3x. Hence SplitLayout is the layout authority and the manager is only the drag transport.
+  - Legacy `.bsp` files that explicitly stored `unityGainMode: true` **stay ON**. An explicit user choice is not silently flipped. **ALEC TO RULE** whether Carter wants those force-migrated to OFF.
+  - `ACCEPTANCE_TESTS.md` / `docs/ACCEPTANCE_TESTS.md` were already dirty at session start (not mine) — left uncommitted deliberately.
+- NEXT SESSION should:
+  1. **UI gate (Alec, by hand):** drag the divider both ways at 1200x700 and at the 800x600 minimum; confirm the resize cursor over the bar, smooth drag, block tiles and waveform both render at extreme splits, and that the split survives quit/relaunch (per-user prefs, `~/Library/Application Support/BlockShuffler/BlockShuffler.settings`).
+  2. Rule on the two open questions above: legacy explicit-ON migration, and whether to fix the SIM-stack join overshoot.
 
 ### 2026-07-20 — JOINFIX2: bodies-at-full-gain REPLACED by ONE continuous complementary crossfade — join bounded ≤ 1.0, seam still gone — COMMITTED, ear gate pending
 - Task (Alec's ruling, reinstating the OFFGRID candidate fix the previous round overruled): JOINFIX (36fd316) cured the carrier-swap seam but summed two full-gain sources at every join — C6-hot 1.879 FS = hard clip at any DAC / integer export. New topology, per join at B.timelinePos: single window [join−L, join+T), W=L+T, L/T = RENDERED lead-in/tail extents (resolver 5b RESTORED: prevTailLen/nextLeadInLen as the single source of truth). A (body-end→tail, contiguous) gA(p)=(W−1−p)/(W−1); B (lead-in→body-start, contiguous) gB(p)=p/(W−1). gA+gB≡1 ⇒ |out|≤1. LINEAR only (equal-power forfeits the bound). Entry-0 full-gain lead-in and no-successor tail (plain 1→0) unchanged and byte-locked.
