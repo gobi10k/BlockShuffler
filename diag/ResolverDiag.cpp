@@ -67,6 +67,83 @@ static void addClipTo(Block* blk, const juce::String& nm, int bodyLen = 1000) {
     blk->addClip(std::move(c));
 }
 
+// ── PFH NON-REGRESSION BASELINE (2026-08-22) ─────────────────────────────────
+// One deliberately busy project — mixed playChance, a simultaneous stack, a
+// sequential stack, links and a song ender — resolved over 100 fixed seeds with
+// forceInclude left at its nullptr default. Threading the play-from-here pin
+// through resolve() must leave this dump byte-identical; any change means the
+// RNG draw order shifted. Shared by the PFHBASE probe (writes the dump to a
+// file for an external diff) and by permanent test T62 (golden hash).
+// Blocks are identified by NAME + model index, never by juce::Uuid — ids are
+// regenerated every process run and could never compare across builds.
+static juce::uint32 pfhBaselineDump(juce::String& dumpOut) {
+    Project p;
+    p.sampleRate = 48000.0;
+    auto mk = [&](const char* nm, float chance, int len) {
+        auto* b = p.addBlock(nm);
+        addClipTo(b, juce::String(nm) + "_c1", len);
+        addClipTo(b, juce::String(nm) + "_c2", len + 1200);
+        b->clips[0]->probability = 0.7f;
+        b->clips[1]->probability = 0.3f;
+        b->playChance = chance;
+        return b;
+    };
+    auto* A  = mk("A",  1.0f,  9600);
+    auto* B  = mk("B",  0.5f, 12000);
+    auto* C  = mk("C",  0.8f, 14400);
+    auto* S1 = mk("S1", 1.0f, 16800);
+    auto* S2 = mk("S2", 0.6f, 16800);
+    auto* S3 = mk("S3", 0.4f, 16800);
+    auto* Q1 = mk("Q1", 1.0f, 10800);
+    auto* Q2 = mk("Q2", 0.9f, 10800);
+    auto* D  = mk("D",  1.0f,  9600);
+    auto* E  = mk("E",  0.3f,  8400);
+    p.stackBlocks(S2->id, S1->id);                 // simultaneous stack, 2 of 3
+    p.stackBlocks(S3->id, S1->id);
+    S1->stackPlayMode = StackPlayMode::Simultaneous;
+    S1->stackPlayCount.values.set(0, 2);
+    p.propagateStackSettings(S1->stackGroup, S1);
+    p.stackBlocks(Q2->id, Q1->id);                 // sequential stack, 1 of 2
+    Q1->stackPlayMode = StackPlayMode::Sequential;
+    Q1->stackPlayCount.values.set(0, 1);
+    p.propagateStackSettings(Q1->stackGroup, Q1);
+    p.addLink(A->id, C->id, 0.5f);                 // swap rolls consume randomness
+    p.addLink(D->id, E->id, 0.35f);
+    D->clips[0]->isSongEnder = true;               // ender partway through
+    juce::ignoreUnused(B);
+
+    juce::uint32 h = 2166136261u;
+    dumpOut.clear();
+    for (int seed = 0; seed < 100; ++seed) {
+        juce::Random rb(1000 + seed * 7);
+        ArrangementResolver resB;
+        auto arr = resB.resolve(p, rb);             // forceInclude defaulted
+        juce::String line;
+        line << "seed=" << seed
+             << " entries=" << arr.entries.size()
+             << " total=" << juce::String(arr.totalDurationSamples) << " [";
+        for (const auto& e : arr.entries) {
+            auto* blk = p.getBlockById(e.blockId);
+            line << (blk ? blk->name : juce::String("?"))
+                 << ":#" << p.blocks.indexOf(blk)
+                 << "@" << juce::String(e.timelinePos)
+                 << "g" << juce::String(e.gain, 6)
+                 << "|" << e.clipName
+                 << "|s" << juce::String(e.startMark)
+                 << "e" << juce::String(e.endMark) << " ";
+        }
+        line << "]\n";
+        dumpOut << line;
+        for (auto c : line) h = (h ^ (juce::uint32)c) * 16777619u;
+    }
+    return h;
+}
+
+/** GOLDEN: captured from the PRE-PIN binary (this step, 2026-08-22) — the
+ *  resolver with last round's song-ender fix in place and no forceInclude
+ *  parameter at all. Locks the default path against any future RNG-order drift. */
+static constexpr juce::uint32 kPfhBaselineGolden = 0x52c063dfu;
+
 static void runResolves(Project& p, ArrangementResolver& r, juce::Random& rng,
                         const char* label) {
     std::cout << "--- " << label << " ---\n";
@@ -3965,6 +4042,346 @@ int main(int argc, char* argv[]) {
                             + juce::String((caseOk[0] ? 1 : 0) + (caseOk[1] ? 1 : 0) + (caseOk[2] ? 1 : 0))
                             + "/3 cases PASS, total==body+tail=" + juce::String(expTotal61)
                             + firstBad61);
+                }
+
+// ── PFHDIAG (2026-08-26, DIAGNOSIS ONLY — print-only, no verdict, no product
+//    change): "Play from Here" reportedly falls back to the start of the song.
+//    This probe replicates the handler's mapping step VERBATIM (see the copy of
+//    MainComponent.cpp:88-101 below) and reports, per invocation, whether the
+//    clicked block was present in the freshly resolved arrangement, what start
+//    position came out, and which code path produced it.
+#define PFHDIAG 1
+#if PFHDIAG
+                {
+                    std::cout << "\n=== PFHDIAG: 'Play from Here' start-position mapping ===\n";
+
+                    // VERBATIM replica of the FIXED handler (MainComponent.cpp:88-115;
+                    // engine calls elided, they cannot change which position is chosen):
+                    //     auto* target = project->getBlockById(blockId);
+                    //     currentArrangement = resolver.resolve(*project, rng, target);
+                    //     const ResolvedEntry* hit = nullptr;
+                    //     for (const auto& entry : currentArrangement.entries)
+                    //         if (entry.blockId == blockId) { hit = &entry; break; }
+                    //     if (hit == nullptr) return;            // NOT-FOUND IS NOT ZERO
+                    //     engine.play(...); engine.seekTo(hit->timelinePos);
+                    struct PfhOutcome { bool present; int64_t seekPos; const char* path; int entries; };
+                    auto playFromHere = [&](const ResolvedArrangement& arr,
+                                            const juce::String& blockId) {
+                        PfhOutcome o { false, -1, "NO PLAYBACK (empty arrangement)",
+                                       arr.entries.size() };
+                        if (arr.entries.isEmpty()) return o;
+                        o.path = "NO PLAYBACK (not found — backstop, never plays from 0)";
+                        const ResolvedEntry* hit = nullptr;
+                        for (const auto& entry : arr.entries) {
+                            if (entry.blockId == blockId) { hit = &entry; break; }
+                        }
+                        if (hit != nullptr) {
+                            o.present = true;
+                            o.seekPos = hit->timelinePos;
+                            o.path = "MATCH (entry.timelinePos)";
+                        }
+                        return o;
+                    };
+
+                    const double srP = 48000.0;
+                    const int    bodyP = 24000;               // 0.5 s bodies, no lead-in/tail
+                    const int    RUNS  = 20;
+
+                    // Every scenario puts a plain block "A" FIRST, so a correct seek
+                    // to the clicked block is ALWAYS > 0 and a reported 0 is
+                    // unambiguously the fallback (never a legitimate seek to the top).
+                    auto addPlain = [&](Project& p, const char* nm, float chance) {
+                        auto* b = p.addBlock(nm);
+                        addClipTo(b, juce::String(nm) + "_c", bodyP);
+                        b->playChance = chance;
+                        return b;
+                    };
+
+                    auto runScenario = [&](const char* label, const char* detail,
+                                           std::function<juce::String(Project&)> build) {
+                        Project p; p.sampleRate = srP;
+                        const juce::String clicked = build(p);
+                        std::cout << "\n" << label << "\n  " << detail
+                                  << "\n  run | inArrangement | seekPos | path\n"
+                                  << "  ----+---------------+---------+"
+                                     "--------------------------------------\n";
+                        int nPresent = 0, nFallback = 0, nEmpty = 0;
+                        juce::Array<int64_t> seenPos;
+                        for (int i = 0; i < RUNS; ++i) {
+                            juce::Random rp(5000 + i * 101);
+                            ArrangementResolver resP;
+                            // The handler passes the clicked block as forceInclude.
+                            auto arr = resP.resolve(p, rp, p.getBlockById(clicked));
+                            arr.sampleRate = srP;
+                            auto o = playFromHere(arr, clicked);
+                            if (o.entries == 0) ++nEmpty;
+                            else if (o.present) ++nPresent; else ++nFallback;
+                            seenPos.addIfNotAlreadyThere(o.seekPos);
+                            std::cout << "  " << (i < 9 ? " " : "") << (i + 1)
+                                      << "  |      " << (o.present ? "YES" : "no ")
+                                      << "      | " << (o.seekPos < 0 ? juce::String("      -")
+                                                     : juce::String(o.seekPos).paddedLeft(' ', 7))
+                                      << " | " << o.path << "\n";
+                        }
+                        std::cout << "  => " << nPresent << "/" << RUNS << " played from the clicked block, "
+                                  << nFallback << "/" << RUNS << " did not play";
+                        if (nEmpty) std::cout << ", " << nEmpty << " empty";
+                        std::cout << "   distinct seekPos values=" << seenPos.size() << "\n";
+                    };
+
+                    // (a) standalone block, playChance 1.0 — clicked = B (second slot).
+                    runScenario("(a) STANDALONE, playChance 1.0  [click B]",
+                                "A(1.0) B(1.0) C(1.0) — B is the 2nd slot, correct seek = 24000",
+                                [&](Project& p) {
+                                    addPlain(p, "A", 1.0f);
+                                    auto* B = addPlain(p, "B", 1.0f);
+                                    addPlain(p, "C", 1.0f);
+                                    return B->id;
+                                });
+
+                    // (b) standalone block, playChance < 1.0.
+                    runScenario("(b) STANDALONE, playChance 0.5  [click B]",
+                                "A(1.0) B(0.5) C(1.0) — resolver gate: "
+                                "`if (rng.nextFloat() >= block->playChance) continue;`",
+                                [&](Project& p) {
+                                    addPlain(p, "A", 1.0f);
+                                    auto* B = addPlain(p, "B", 0.5f);
+                                    addPlain(p, "C", 1.0f);
+                                    return B->id;
+                                });
+
+                    auto buildStack = [&](Project& p, int playCount, StackPlayMode mode) {
+                        addPlain(p, "A", 1.0f);                     // plain first slot
+                        auto* S1 = addPlain(p, "S1", 1.0f);
+                        auto* S2 = addPlain(p, "S2", 1.0f);
+                        auto* S3 = addPlain(p, "S3", 1.0f);
+                        p.stackBlocks(S2->id, S1->id);
+                        p.stackBlocks(S3->id, S1->id);
+                        S1->stackPlayMode = mode;
+                        S1->stackPlayCount.values.set(0, playCount);
+                        S1->alwaysPlayBase = false;
+                        p.propagateStackSettings(S1->stackGroup, S1);
+                        return S2->id;                              // click the MIDDLE member
+                    };
+
+                    // (c) member of a 3-stack, playCount 1 (fewer than all members).
+                    runScenario("(c) 3-STACK, playCount 1  [click S2, a non-base member]",
+                                "A + stack{S1,S2,S3} simultaneous, only 1 of 3 is picked per resolve",
+                                [&](Project& p) { return buildStack(p, 1, StackPlayMode::Simultaneous); });
+
+                    // (d) member of a 3-stack, playCount 3 (all members play).
+                    runScenario("(d) 3-STACK, playCount 3  [click S2, a non-base member]",
+                                "A + stack{S1,S2,S3} simultaneous, all 3 picked every resolve",
+                                [&](Project& p) { return buildStack(p, 3, StackPlayMode::Simultaneous); });
+
+                    // (e) supplementary: a SONG ENDER in an earlier block truncates the
+                    //     arrangement before the clicked block is ever reached — a second,
+                    //     independent way for the same lookup to miss.
+                    runScenario("(e) SUPPLEMENTARY: earlier SONG ENDER  [click C]",
+                                "A B(ender) C — the resolver truncates at B, so C is never in the arrangement",
+                                [&](Project& p) {
+                                    addPlain(p, "A", 1.0f);
+                                    auto* B = addPlain(p, "B", 1.0f);
+                                    B->clips[0]->isSongEnder = true;
+                                    auto* C = addPlain(p, "C", 1.0f);
+                                    return C->id;
+                                });
+
+                    // (f) clicked block has NO clips (or only 0%-weight clips). The pin
+                    //     cannot rescue it — the resolver still `continue`s. UNREACHABLE
+                    //     VIA THE MENU since 2026-08-22: BlockComponent greys "Play from
+                    //     Here" out for exactly these blocks. Kept to exercise Part 1's
+                    //     backstop: no entry now means NO PLAYBACK, never play-from-0.
+                    runScenario("(f) UNREACHABLE VIA MENU (item greyed out): block has an empty clip list  [click B]",
+                                "A B(no clips) C — resolver: `if (block->clips.isEmpty()) continue;`",
+                                [&](Project& p) {
+                                    addPlain(p, "A", 1.0f);
+                                    auto* B = p.addBlock("B");      // deliberately no clip
+                                    B->playChance = 1.0f;
+                                    addPlain(p, "C", 1.0f);
+                                    return B->id;
+                                });
+
+                    std::cout << "\n  PFHDIAG NOTE: every scenario puts a block BEFORE the clicked one, so a\n"
+                                 "  correct seek is always > 0. The old handler reported 0 here (its\n"
+                                 "  `int64_t seekPos = 0` initialiser doubling as the not-found value);\n"
+                                 "  the fixed handler pins the block, and on a miss plays nothing at all.\n";
+                }
+#endif // PFHDIAG
+
+// ── PFHBASE (2026-08-22): writes the shared 100-seed non-regression dump (see
+//    pfhBaselineDump above) to a file so it can be diffed against a dump taken
+//    from a pre-change binary. Print-only; the permanent lock is T62's golden hash.
+#define PFHBASE 1
+#if PFHBASE
+                {
+                    juce::String dump;
+                    const juce::uint32 h = pfhBaselineDump(dump);
+                    auto outFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                       .getChildFile("pfh_baseline_dump.txt");
+                    outFile.replaceWithText(dump);
+                    std::cout << "\nPFHBASE 100-seed resolve dump (forceInclude=nullptr): "
+                              << outFile.getFullPathName()
+                              << "\n  lines=" << juce::StringArray::fromLines(dump).size() - 1
+                              << "  chars=" << dump.length()
+                              << "  FNV=0x" << juce::String::toHexString((int)h)
+                              << "  golden=0x" << juce::String::toHexString((int)kPfhBaselineGolden)
+                              << "  " << (h == kPfhBaselineGolden ? "MATCH" : "DIVERGED") << "\n";
+                }
+#endif // PFHBASE
+
+                { // T62 (PERMANENT, PIN/play-from-here 2026-08-22): forceInclude
+                  // GUARANTEES the clicked block appears in the resolved arrangement.
+                  //  (a) a standalone block at playChance 0.0 — normally never
+                  //      selected — is present in all 20 resolves;
+                  //  (b) a non-base member of a 3-stack at playCount 1 is present in
+                  //      all 20, and the stack slot still contributes exactly
+                  //      playCount entries (the pin REPLACES a sampled pick, never
+                  //      adds — the resolver's `entries <= playCount` jassert is live
+                  //      in this Debug build and would abort the run if it fired);
+                  //  (c) alwaysPlayBase + playCount 1 + a pinned NON-base member: the
+                  //      pin wins the single slot, and the base branch must not try to
+                  //      erase a block the pin already removed from the pool;
+                  //  (d) a block sitting after an EARLIER song ender is present in all
+                  //      20 — enders before the pinned block do not truncate (Carter/
+                  //      Alec ruling 2026-08-22). Probe case (e) was 20/20 fallback;
+                  //  (e) THE CRITICAL GATE: with forceInclude == nullptr the resolver
+                  //      is bit-identical to the pre-pin build — 100 seeds of a busy
+                  //      project (mixed playChance, sim stack, seq stack, links, an
+                  //      ender) hash to the golden value captured from that binary.
+                    const double sr62 = 48000.0;
+                    const int    body62 = 24000;
+                    const int    RUNS62 = 20;
+
+                    auto addP62 = [&](Project& p, const char* nm, float chance) {
+                        auto* b = p.addBlock(nm);
+                        addClipTo(b, juce::String(nm) + "_c", body62);
+                        b->playChance = chance;
+                        return b;
+                    };
+                    // Runs one scenario RUNS62 times with the pin set; returns
+                    // {times the pinned block was present, max entries in its slot}.
+                    auto pinRuns = [&](Project& p, const juce::String& pinId,
+                                       const std::vector<juce::String>& slotIds) {
+                        int present = 0, maxSlotEntries = 0;
+                        for (int i = 0; i < RUNS62; ++i) {
+                            juce::Random r62(7100 + i * 53);
+                            ArrangementResolver res62;
+                            auto arr = res62.resolve(p, r62, p.getBlockById(pinId));
+                            int slotEntries = 0;
+                            bool found = false;
+                            for (const auto& e : arr.entries) {
+                                if (e.blockId == pinId) found = true;
+                                for (const auto& sid : slotIds)
+                                    if (e.blockId == sid) ++slotEntries;
+                            }
+                            if (found) ++present;
+                            maxSlotEntries = juce::jmax(maxSlotEntries, slotEntries);
+                        }
+                        return std::make_pair(present, maxSlotEntries);
+                    };
+
+                    // (a) standalone, playChance 0.0 — the gate would always skip it.
+                    int presentZeroChance = 0;
+                    {
+                        Project p; p.sampleRate = sr62;
+                        addP62(p, "A", 1.0f);
+                        auto* B = addP62(p, "B", 0.0f);
+                        addP62(p, "C", 1.0f);
+                        presentZeroChance = pinRuns(p, B->id, {}).first;
+                    }
+
+                    // (b) non-base member of a 3-stack at playCount 1 of 3.
+                    int presentStack1 = 0, maxStackEntries = 0;
+                    {
+                        Project p; p.sampleRate = sr62;
+                        addP62(p, "A", 1.0f);
+                        auto* S1 = addP62(p, "S1", 1.0f);
+                        auto* S2 = addP62(p, "S2", 1.0f);
+                        auto* S3 = addP62(p, "S3", 1.0f);
+                        p.stackBlocks(S2->id, S1->id);
+                        p.stackBlocks(S3->id, S1->id);
+                        S1->stackPlayMode = StackPlayMode::Simultaneous;
+                        S1->stackPlayCount.values.set(0, 1);
+                        S1->alwaysPlayBase = false;
+                        p.propagateStackSettings(S1->stackGroup, S1);
+                        auto r = pinRuns(p, S2->id, { S1->id, S2->id, S3->id });
+                        presentStack1 = r.first; maxStackEntries = r.second;
+                    }
+
+                    // (c) alwaysPlayBase ON, playCount 1, pin a NON-base member.
+                    int presentBaseClash = 0, maxBaseClashEntries = 0;
+                    {
+                        Project p; p.sampleRate = sr62;
+                        addP62(p, "A", 1.0f);
+                        auto* S1 = addP62(p, "S1", 1.0f);   // base (first in model order)
+                        auto* S2 = addP62(p, "S2", 1.0f);
+                        auto* S3 = addP62(p, "S3", 1.0f);
+                        p.stackBlocks(S2->id, S1->id);
+                        p.stackBlocks(S3->id, S1->id);
+                        S1->stackPlayMode = StackPlayMode::Simultaneous;
+                        S1->stackPlayCount.values.set(0, 1);
+                        S1->alwaysPlayBase = true;
+                        p.propagateStackSettings(S1->stackGroup, S1);
+                        auto r = pinRuns(p, S3->id, { S1->id, S2->id, S3->id });
+                        presentBaseClash = r.first; maxBaseClashEntries = r.second;
+                    }
+
+                    // (d) pinned block sitting AFTER an earlier song ender.
+                    int presentAfterEnder = 0;
+                    {
+                        Project p; p.sampleRate = sr62;
+                        addP62(p, "A", 1.0f);
+                        auto* B = addP62(p, "B", 1.0f);
+                        B->clips[0]->isSongEnder = true;
+                        auto* C = addP62(p, "C", 1.0f);
+                        presentAfterEnder = pinRuns(p, C->id, {}).first;
+                    }
+
+                    // (d2) control: an ender AT/AFTER the pinned block still truncates.
+                    bool enderAfterPinStillTruncates = true;
+                    {
+                        Project p; p.sampleRate = sr62;
+                        addP62(p, "A", 1.0f);
+                        auto* B = addP62(p, "B", 1.0f);
+                        auto* C = addP62(p, "C", 1.0f);
+                        auto* D = addP62(p, "D", 1.0f);
+                        C->clips[0]->isSongEnder = true;
+                        for (int i = 0; i < RUNS62; ++i) {
+                            juce::Random r62(7100 + i * 53);
+                            ArrangementResolver res62;
+                            auto arr = res62.resolve(p, r62, p.getBlockById(B->id));
+                            bool sawD = false, sawB = false;
+                            for (const auto& e : arr.entries) {
+                                if (e.blockId == D->id) sawD = true;
+                                if (e.blockId == B->id) sawB = true;
+                            }
+                            if (sawD || !sawB) enderAfterPinStillTruncates = false;
+                        }
+                    }
+
+                    // (e) THE CRITICAL GATE — default path bit-identical.
+                    juce::String dump62;
+                    const juce::uint32 baseHash = pfhBaselineDump(dump62);
+                    const bool defaultPathUntouched = (baseHash == kPfhBaselineGolden);
+
+                    verdict("T62 PIN play-from-here: pinned block ALWAYS resolves (playChance 0.0, stack playCount 1 of 3, alwaysPlayBase clash, after an earlier song ender), stack slots still contribute <= playCount entries, enders at/after the pin still truncate, and forceInclude==nullptr stays BIT-IDENTICAL (100-seed golden dump)",
+                            presentZeroChance == RUNS62
+                            && presentStack1 == RUNS62 && maxStackEntries <= 1
+                            && presentBaseClash == RUNS62 && maxBaseClashEntries <= 1
+                            && presentAfterEnder == RUNS62
+                            && enderAfterPinStillTruncates
+                            && defaultPathUntouched,
+                            juce::String("playChance0.0=") + juce::String(presentZeroChance) + "/" + juce::String(RUNS62)
+                            + ", stackPlayCount1=" + juce::String(presentStack1) + "/" + juce::String(RUNS62)
+                            + " (maxSlotEntries=" + juce::String(maxStackEntries) + ", playCount=1)"
+                            + ", alwaysPlayBaseClash=" + juce::String(presentBaseClash) + "/" + juce::String(RUNS62)
+                            + " (maxSlotEntries=" + juce::String(maxBaseClashEntries) + ")"
+                            + ", afterEarlierEnder=" + juce::String(presentAfterEnder) + "/" + juce::String(RUNS62)
+                            + ", enderAtOrAfterPinTruncates=" + (enderAfterPinStillTruncates ? "y" : "N")
+                            + ", defaultPathHash=0x" + juce::String::toHexString((int)baseHash)
+                            + " golden=0x" + juce::String::toHexString((int)kPfhBaselineGolden)
+                            + " " + (defaultPathUntouched ? "BIT-IDENTICAL" : "DIVERGED(BUG)"));
                 }
             }
 

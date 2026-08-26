@@ -37,7 +37,8 @@ static std::shared_ptr<juce::AudioBuffer<float>> trimBuffer(
 }
 
 ResolvedArrangement ArrangementResolver::resolve(const Project& project,
-                                                  juce::Random& rng) const {
+                                                  juce::Random& rng,
+                                                  const Block* forceInclude) const {
     ResolvedArrangement result;
     result.sampleRate = project.sampleRate;
 
@@ -191,7 +192,25 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
     bool    songEnded     = false;
     bool    firstEntryAdded = false;  // used to offset cursor so first clip's lead-in starts at t=0
 
+    // ── PIN (play-from-here, 2026-08-22) ─────────────────────────────────────
+    // hasPin == false reproduces the pre-pin resolver exactly: both flags below
+    // start true, so every `&& pinnedSlotReached` / `&& pinnedEntryAdded` guard
+    // is a no-op and no extra randomness is consumed anywhere.
+    const bool hasPin = (forceInclude != nullptr);
+    bool pinnedSlotReached = !hasPin;   // has the pinned block's SLOT been entered?
+    bool pinnedEntryAdded  = !hasPin;   // has the pinned block's ENTRY been added?
+
     for (auto& slot : slots) {
+        // RULING (Carter 2026-08-22, Alec): a song ender BEFORE the pinned block
+        // must not truncate — otherwise the pinned block could never exist and
+        // play-from-here would fall back to the top of the song. Enders at or
+        // after the pinned block truncate normally, so the flag flips as soon as
+        // the pinned block's own slot is entered.
+        if (hasPin && !pinnedSlotReached) {
+            for (auto* pb : slot.blocks)
+                if (pb->id == forceInclude->id) { pinnedSlotReached = true; break; }
+        }
+
         if (songEnded) break;
 
         const auto& allBlocks = slot.blocks;
@@ -199,7 +218,12 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
         if (allBlocks.size() == 1) {
             // ── Simple standalone block ───────────────────────────────────
             auto* block = allBlocks[0];
-            if (rng.nextFloat() >= block->playChance) continue;  // block skipped this time
+            // PIN: the pinned block bypasses the playChance gate. The roll is still
+            // DRAWN unconditionally — consuming it either way keeps the RNG draw
+            // order identical to the pre-pin resolver for every other block.
+            const bool blockIsPinned = (hasPin && block->id == forceInclude->id);
+            const float chanceRoll = rng.nextFloat();
+            if (!blockIsPinned && chanceRoll >= block->playChance) continue;  // block skipped this time
             if (block->clips.isEmpty()) continue;
             auto* clip = pickClip(*block, rng);
             if (!clip) continue;
@@ -223,14 +247,20 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
             });
 
             cursor += bodyLen;
-            if (clip->isSongEnder) songEnded = true;
+            if (blockIsPinned) pinnedEntryAdded = true;
+            if (clip->isSongEnder && pinnedSlotReached) songEnded = true;
 
         } else {
             // ── Stack slot ────────────────────────────────────────────────
             // Selection (playCount draw + clamp, base-block branch, weighted
             // sample without replacement) lives in the shared StackPicker so
             // the inspector's effective-% display uses the identical routine.
-            auto stackPick = StackPicker::pick(allBlocks, project.blocks, rng);
+            // PIN: StackPicker pre-picks the pinned member (REPLACING one of the
+            // weighted-sampled blocks, never adding to them — `picked` is still
+            // filled only up to playCount, so the guard below cannot fire).
+            // Consumes no randomness of its own; a pin that is not a member of
+            // this group is ignored.
+            auto stackPick = StackPicker::pick(allBlocks, project.blocks, rng, forceInclude);
             const int playCount = stackPick.playCount;
             std::vector<Block*>& picked = stackPick.picked;
 
@@ -274,6 +304,7 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, stackGain, b->id
                     });
                     maxBodyLen = std::max(maxBodyLen, bodyLen);
+                    if (hasPin && b->id == forceInclude->id) pinnedEntryAdded = true;
                     // SONGEND-SIM (Carter 2026-08-22): a simultaneous stack slot is
                     // INDIVISIBLE — every picked member's body starts at the same
                     // timelinePos (bodyStart), so ending the song "at" one member
@@ -283,7 +314,8 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                     // song after this slot (its tails included). Breaking here
                     // instead made a 3-block sim stack play 1/2/3 blocks depending
                     // on which member happened to hold the ender.
-                    if (clip->isSongEnder) songEnded = true;   // NO break — finish the slot
+                    if (clip->isSongEnder && pinnedSlotReached)
+                        songEnded = true;                      // NO break — finish the slot
                 }
 
                 if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid
@@ -315,7 +347,11 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                 }
 
                 for (auto* b : picked) {
-                    if (songEnded) break;
+                    // PIN: never break out before the pinned member has had its
+                    // entry — a sequential stack orders its picked blocks freely,
+                    // so an ender on an earlier-ordered member of the SAME slot
+                    // must not strand the block the user actually clicked.
+                    if (songEnded && pinnedEntryAdded) break;
                     if (b->clips.isEmpty()) continue;
                     auto* clip = pickClip(*b, rng);
                     if (!clip) continue;
@@ -339,7 +375,13 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, 1.0f, b->id
                     });
                     cursor += bodyLen;
-                    if (clip->isSongEnder) { songEnded = true; break; }
+                    if (hasPin && b->id == forceInclude->id) pinnedEntryAdded = true;
+                    // Sequential: each picked block owns its own time slot, so the
+                    // break IS correct here (unlike the simultaneous branch above).
+                    if (clip->isSongEnder && pinnedSlotReached) {
+                        songEnded = true;
+                        if (pinnedEntryAdded) break;
+                    }
                 }
             }
 

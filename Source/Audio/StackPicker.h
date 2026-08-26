@@ -40,12 +40,21 @@ struct Result {
  *  groupBlocks   — the stack group's blocks (resolver passes them in slot order).
  *  projectBlocks — all project blocks in model order; defines the base block
  *                  (the FIRST block of this group in project order).
+ *  forceInclude  — PIN (play-from-here, 2026-08-22): if this block is a member
+ *                  of the group it is PRE-PICKED before the weighted sampling,
+ *                  exactly as the alwaysPlayBase branch does, and consumes no
+ *                  randomness. It REPLACES one of the sampled picks rather than
+ *                  adding to them: the sampling loop below starts from
+ *                  picked.size(), so the total is still exactly playCount.
+ *                  nullptr (the default) reproduces the pre-pin routine
+ *                  bit-identically, RNG draw order included.
  *  RNG call order is part of the contract: playCount draw, then the sampling
  *  loop (one weight roll or one uniform draw per pick). The base branch does
  *  not consume randomness. */
 inline Result pick(const std::vector<Block*>& groupBlocks,
                    const juce::OwnedArray<Block>& projectBlocks,
-                   juce::Random& rng)
+                   juce::Random& rng,
+                   const Block* forceInclude = nullptr)
 {
     Result out;
     if (groupBlocks.empty()) return out;
@@ -64,11 +73,27 @@ inline Result pick(const std::vector<Block*>& groupBlocks,
     // Without-replacement weighted sampling: each pick reduces the pool by one.
     std::vector<Block*> pool = groupBlocks;
 
+    // PIN (play-from-here): pre-pick the clicked member, if it belongs to this
+    // group, before anything else. Consumes no randomness. It goes FIRST so that
+    // when playCount leaves room for only one pick it is the pin that survives —
+    // an explicit user action outranks the standing alwaysPlayBase preference.
+    if (forceInclude != nullptr) {
+        auto pit = std::find_if(pool.begin(), pool.end(),
+                                [&](Block* b) { return b->id == forceInclude->id; });
+        if (pit != pool.end()) {
+            out.picked.push_back(*pit);
+            pool.erase(pit);
+        }
+    }
+
     // "Always play base block" (simultaneous stacks only): the base — the
     // FIRST block of this stack group in project->blocks order — is
     // pre-picked; the remaining (playCount - 1) are weighted-sampled from
     // the rest. With playCount == 1 only the base plays.
-    if (isSimultaneous && groupBlocks[0]->alwaysPlayBase) {
+    // The two guards below are no-ops without a pin: picked is empty (so the
+    // room check always passes) and the base is always still in the pool.
+    if (isSimultaneous && groupBlocks[0]->alwaysPlayBase
+        && (int)out.picked.size() < out.playCount) {
         Block* baseBlock = findStackBase(projectBlocks, groupBlocks[0]->stackGroup);
         if (baseBlock == nullptr
             || std::find(groupBlocks.begin(), groupBlocks.end(), baseBlock) == groupBlocks.end()) {
@@ -84,8 +109,14 @@ inline Result pick(const std::vector<Block*>& groupBlocks,
             }
         }
         if (baseBlock != nullptr) {
-            out.picked.push_back(baseBlock);
-            pool.erase(std::find(pool.begin(), pool.end(), baseBlock));
+            // A base that is no longer in the pool IS the pinned block — already
+            // pre-picked above, so there is nothing left to do (and erasing an
+            // end() iterator would be undefined behaviour).
+            auto bit = std::find(pool.begin(), pool.end(), baseBlock);
+            if (bit != pool.end()) {
+                out.picked.push_back(baseBlock);
+                pool.erase(bit);
+            }
         }
     }
 

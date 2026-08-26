@@ -384,11 +384,20 @@ void BlockComponent::showContextMenu() {
     for (int i = 0; i < palette.size() && i < colourNames.size(); ++i)
         colourMenu.addItem(20 + i, colourNames[i], true, block && block->color == palette[i]);
 
+    // PIN/UNPLAYABLE (2026-08-22 ruling): "Play from Here" is DISABLED for a block
+    // that can never produce an arrangement entry — no clips at all, or every clip
+    // at 0% weight (ArrangementResolver::pickClip returns nullptr for those, so the
+    // resolver skips the block even when it is pinned). Greyed out, no dialog.
+    bool canPlayFromHere = false;
+    if (block != nullptr)
+        for (auto* c : block->clips)
+            if (c->probability > 0.0f) { canPlayFromHere = true; break; }
+
     juce::PopupMenu menu;
     menu.addItem(1, "Rename");
     menu.addSubMenu("Set Color", colourMenu);
     menu.addSeparator();
-    menu.addItem(8, "Play from Here");
+    menu.addItem(8, "Play from Here", canPlayFromHere);
     menu.addItem(10, "Play Block");
     menu.addSeparator();
     menu.addItem(2, "Link to...");

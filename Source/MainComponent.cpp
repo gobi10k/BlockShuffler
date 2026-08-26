@@ -86,18 +86,33 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     };
 
     blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
-        currentArrangement = resolver.resolve(*project, rng);
+        // PIN (2026-08-22): resolve() is a fresh random draw, so the clicked block
+        // is not otherwise guaranteed to be in it — pass it as forceInclude and the
+        // resolver pins it (playChance bypassed, pre-picked into its stack, earlier
+        // song enders suppressed). See ArrangementResolver::resolve.
+        auto* target = project->getBlockById(blockId);
+        if (target == nullptr) return;
+        currentArrangement = resolver.resolve(*project, rng, target);
         if (currentArrangement.entries.isEmpty()) return;  // FIX H5: nothing to play
-        // Find the body start of the target block in the resolved arrangement
-        int64_t seekPos = 0;
+
+        // Find the body start of the target block in the resolved arrangement.
+        // NOT-FOUND IS NOT ZERO: the old code seeded seekPos with 0 and let the
+        // initialiser double as the not-found value, so a miss silently played the
+        // whole song from the top. With the pin a miss should now be unreachable
+        // (and the menu item is disabled for blocks that can never produce an
+        // entry), but if it ever happens we play nothing rather than the wrong thing.
+        const ResolvedEntry* hit = nullptr;
         for (const auto& entry : currentArrangement.entries) {
-            if (entry.blockId == blockId) {
-                seekPos = entry.timelinePos;  // timelinePos = body start
-                break;
-            }
+            if (entry.blockId == blockId) { hit = &entry; break; }
         }
+        if (hit == nullptr) {
+            DBG("Play from Here: block " + blockId + " absent from the resolved "
+                "arrangement even though it was pinned — not playing.");
+            return;
+        }
+
         engine.play(currentArrangement);
-        engine.seekTo(seekPos);
+        engine.seekTo(hit->timelinePos);  // timelinePos = body start (lead-in deferred)
         transportBar.setIsPlaying(true);
     };
 

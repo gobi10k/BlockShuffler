@@ -65,7 +65,24 @@ struct ResolvedArrangement {
 class ArrangementResolver {
 public:
     ArrangementResolver() = default;
-    ResolvedArrangement resolve(const Project& project, juce::Random& rng) const;
+
+    /** Resolves the project's probabilistic model into a concrete arrangement.
+     *
+     *  PIN (play-from-here, 2026-08-22): when @p forceInclude is non-null, that
+     *  block is GUARANTEED to appear in the result — its playChance gate is
+     *  bypassed, it is pre-picked into its stack's selection (REPLACING one of
+     *  the sampled members, never adding to them), and song enders in EARLIER
+     *  slots do not truncate the arrangement before it is reached. Enders at or
+     *  after the pinned block truncate normally.
+     *
+     *  The pin cannot rescue a block with no clips or with every clip at 0%
+     *  weight — the UI disables "Play from Here" for those (BlockComponent).
+     *
+     *  With @p forceInclude left at nullptr the result is bit-identical to the
+     *  pre-pin resolver, RNG draw order included (locked by T62's golden dump
+     *  hash over 100 seeds). */
+    ResolvedArrangement resolve(const Project& project, juce::Random& rng,
+                                const Block* forceInclude = nullptr) const;
     static Clip* pickClip(const Block& block, juce::Random& rng);
 };
 
