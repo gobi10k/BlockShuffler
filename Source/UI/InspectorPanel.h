@@ -10,7 +10,15 @@ namespace BlockShuffler {
 
 // A number box that supports text input (single click) and click-drag to change value.
 // Single click opens an inline TextEditor in-place — no popup window.
-class DraggableNumberBox : public juce::Component {
+// TOOLTIPS (2026-08-26): must inherit juce::SettableTooltipClient. The class
+// previously declared its OWN setTooltip() storing to a private member that was
+// never read, so juce::TooltipWindow — which finds tips by dynamic_cast'ing the
+// component under the mouse to juce::TooltipClient — could never see them, and
+// the tooltips on all three DraggableNumberBox instances (block tempo, project
+// default tempo, clip tempo) silently did nothing. The base class supplies both
+// setTooltip() and getTooltip(), so every existing call site is unchanged.
+class DraggableNumberBox : public juce::Component,
+                           public juce::SettableTooltipClient {
 public:
     DraggableNumberBox(double rMin = 0.0, double rMax = 1000.0, int decimals = 1)
         : rMin(rMin), rMax(rMax), decimals(decimals)
@@ -45,7 +53,6 @@ public:
     }
 
     double getValue() const { return value; }
-    void setTooltip(const juce::String& tip) { tooltip = tip; }
 
     std::function<void(double)> onValueChanged;
 
@@ -53,7 +60,6 @@ private:
     double value = 0.0;
     double rMin, rMax;
     int decimals;
-    juce::String tooltip;
     bool startDragging = false;
     int dragStartY = 0;
     double dragStartValue = 0.0;

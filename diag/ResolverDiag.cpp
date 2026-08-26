@@ -4556,24 +4556,26 @@ int main(int argc, char* argv[]) {
                                 break;
                             }
 
-                    // (a) the raw-summing tooltip ASCII-ified this round, by exact text.
-                    //     COVERAGE GAP, stated deliberately: the OTHER tooltip fixed this
-                    //     round (defaultTempoField, InspectorPanel.cpp:170) is NOT covered
-                    //     here, because DraggableNumberBox declares its own
-                    //     `setTooltip(...)` member and does NOT implement
-                    //     juce::SettableTooltipClient — so nothing, this walk included,
-                    //     can read it back. (That also means JUCE's TooltipWindow never
-                    //     DISPLAYS it: the tooltips on the three DraggableNumberBox
-                    //     instances at :82, :170 and :192 are dead. Pre-existing, reported,
-                    //     NOT fixed in a cosmetic round.)
-                    // Match the TOOLTIP, not the toggle's button text — the button is
-                    // also labelled "Raw summing", and a looser prefix silently latched
-                    // onto it, which would let a mojibaked tooltip pass this check.
-                    juce::String tipRaw;
-                    for (const auto& s : visible)
-                        if (s.startsWith("Raw summing (no automatic")) tipRaw = s;
-                    const bool rawFound = tipRaw.isNotEmpty();
-                    const bool rawAscii = rawFound && isPureAscii(tipRaw);
+                    // (a) the tooltips ASCII-ified in the cosmetic round, by exact text.
+                    //     REACHABILITY (2026-08-26): DraggableNumberBox now inherits
+                    //     juce::SettableTooltipClient, so its tooltips are visible to the
+                    //     same dynamic_cast<TooltipClient*> that juce::TooltipWindow uses
+                    //     to display them — which is exactly what this walk performs.
+                    //     Asserting they are FOUND therefore also proves they can be shown;
+                    //     before the fix the tooltip text was stored in a private member
+                    //     that nothing could read and TooltipWindow never displayed.
+                    //     Match the TOOLTIP, not the toggle's button text — the button is
+                    //     also labelled "Raw summing", and a looser prefix silently latched
+                    //     onto it, which would let a mojibaked tooltip pass this check.
+                    juce::String tipRaw, tipTempo;
+                    for (const auto& s : visible) {
+                        if (s.startsWith("Raw summing (no automatic"))  tipRaw   = s;
+                        if (s.startsWith("Project default tempo - "))   tipTempo = s;
+                    }
+                    const bool rawFound   = tipRaw.isNotEmpty();
+                    const bool rawAscii   = rawFound   && isPureAscii(tipRaw);
+                    const bool tempoFound = tipTempo.isNotEmpty();   // reachable == displayable
+                    const bool tempoAscii = tempoFound && isPureAscii(tipTempo);
 
                     // (c) every reachable string is either pure ASCII or contains only
                     //     DELIBERATE non-ASCII glyphs (bullet, arrow, middle dot) — never
@@ -4581,13 +4583,13 @@ int main(int argc, char* argv[]) {
                     int nonAsciiButLegit = 0;
                     for (const auto& s : visible) if (!isPureAscii(s)) ++nonAsciiButLegit;
 
-                    verdict("T64 ASCII/MOJIBAKE: no user-visible InspectorPanel string carries a CP1252-mojibake marker (legit UTF-8-decoded glyphs still allowed), and the raw-summing tooltip is pure 7-bit ASCII",
-                            mojibake == 0 && rawFound && rawAscii,
+                    verdict("T64 ASCII/MOJIBAKE + TOOLTIP REACHABILITY: no user-visible InspectorPanel string carries a CP1252-mojibake marker (legit UTF-8-decoded glyphs still allowed); the raw-summing AND project-default-tempo tooltips are both REACHABLE via TooltipClient (so TooltipWindow can display them) and pure 7-bit ASCII",
+                            mojibake == 0 && rawFound && rawAscii && tempoFound && tempoAscii,
                             juce::String("strings scanned=") + juce::String(visible.size())
                             + ", mojibakeMarkers=" + juce::String(mojibake) + offenders
                             + ", nonAsciiButLegit=" + juce::String(nonAsciiButLegit)
-                            + ", rawSummingTooltip=" + (rawFound ? (rawAscii ? "ASCII" : "NON-ASCII(BUG)") : "NOT FOUND")
-                            + ", defaultTempoTooltip=UNREACHABLE(DraggableNumberBox is not a SettableTooltipClient)");
+                            + ", rawSummingTooltip=" + (rawFound ? (rawAscii ? "REACHABLE+ASCII" : "REACHABLE but NON-ASCII(BUG)") : "NOT REACHABLE(BUG)")
+                            + ", defaultTempoTooltip=" + (tempoFound ? (tempoAscii ? "REACHABLE+ASCII" : "REACHABLE but NON-ASCII(BUG)") : "NOT REACHABLE(BUG)"));
                 }
 
 // ── TITLEDIAG (2026-08-26, DIAGNOSIS ONLY — print-only, no verdict, no fix) ──
