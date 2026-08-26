@@ -167,13 +167,13 @@ InspectorPanel::InspectorPanel()
         if (!updatingFromModel && project && t > 0.0)
             project->setDefaultTempo(t);
     };
-    defaultTempoField.setTooltip("Project default tempo — blocks and clips without their own tempo follow it");
+    defaultTempoField.setTooltip("Project default tempo - blocks and clips without their own tempo follow it");
     addAndMakeVisible(defaultTempoField);
 
     // ── RAWGAIN: raw-summing mode (project-wide) ─────────────────────────────
     setupLabel(this, unityGainHint, "no automatic fades or level compensation", 11.0f, true);
     unityGainHint.setJustificationType(juce::Justification::topLeft);
-    unityGainToggle.setTooltip("Raw summing (no automatic fades or level compensation) — "
+    unityGainToggle.setTooltip("Raw summing (no automatic fades or level compensation) - "
                                "clips sum at full level with no crossfades and no stack "
                                "level reduction. Can exceed full scale.");
     unityGainToggle.onClick = [this] {

@@ -107,7 +107,7 @@ MainComponent::MainComponent(PlaybackEngine& eng)
         }
         if (hit == nullptr) {
             DBG("Play from Here: block " + blockId + " absent from the resolved "
-                "arrangement even though it was pinned — not playing.");
+                "arrangement even though it was pinned - not playing.");
             return;
         }
 

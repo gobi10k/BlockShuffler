@@ -4496,6 +4496,168 @@ int main(int argc, char* argv[]) {
                             + ", inBounds=" + (labelsInBounds ? "y" : "N"));
                 }
 
+                { // T64 (PERMANENT, ASCII/MOJIBAKE 2026-08-26): user-visible strings
+                  // must not carry a code-page mojibake. BACKGROUND: the build passes
+                  // no /utf-8 to MSVC and the sources have no UTF-8 BOM, so MSVC reads
+                  // narrow literals in the ACTIVE CODE PAGE — a raw UTF-8 em-dash in a
+                  // char* literal becomes three CP1252 characters on Windows (the
+                  // "mojibake boxes" the Windows slice reported, and the pre-15b0b58
+                  // window title "BlockShuffler <e2 80 94> "). The fix, per 15b0b58, is
+                  // plain ASCII for typographic decoration and escaped bytes through
+                  // juce::CharPointer_UTF8 for glyphs whose MEANING needs the character
+                  // (the bullet / arrow / middle dot at InspectorPanel.cpp:476/481/688).
+                  //  (a) the two inspector tooltips ASCII-ified this round are pure
+                  //      7-bit ASCII;
+                  //  (b) NO user-visible string anywhere in a populated InspectorPanel
+                  //      contains a mojibake marker. Legitimately decoded glyphs are
+                  //      non-ASCII and must still be ALLOWED, so the assertion keys on
+                  //      the characters that only ever appear when UTF-8 bytes have been
+                  //      read as CP1252/Latin-1: U+00C2, U+00C3, U+00E2, U+20AC, U+FFFD.
+                    Project p;
+                    auto* blk = p.addBlock("Block 1");
+                    addClipTo(blk, "clip", 1000);
+                    InspectorPanel panel;
+                    panel.setProject(&p);
+                    panel.setBounds(0, 0, 210, 844);
+                    panel.setBlock(blk);
+
+                    auto isMojibakeMarker = [](juce::juce_wchar c) {
+                        return c == 0x00C2 || c == 0x00C3 || c == 0x00E2
+                            || c == 0x20AC || c == 0xFFFD;
+                    };
+                    auto isPureAscii = [](const juce::String& s) {
+                        for (auto c : s) if ((int)c > 127) return false;
+                        return true;
+                    };
+
+                    // Walk the whole component tree: tooltips, button texts, label texts.
+                    juce::StringArray visible;
+                    std::function<void(juce::Component&)> walk = [&](juce::Component& c) {
+                        if (auto* t = dynamic_cast<juce::SettableTooltipClient*>(&c)) {
+                            auto tip = t->getTooltip();
+                            if (tip.isNotEmpty()) visible.add(tip);
+                        }
+                        if (auto* b = dynamic_cast<juce::Button*>(&c))
+                            if (b->getButtonText().isNotEmpty()) visible.add(b->getButtonText());
+                        if (auto* l = dynamic_cast<juce::Label*>(&c))
+                            if (l->getText().isNotEmpty()) visible.add(l->getText());
+                        for (int i = 0; i < c.getNumChildComponents(); ++i)
+                            walk(*c.getChildComponent(i));
+                    };
+                    walk(panel);
+
+                    juce::String offenders;
+                    int mojibake = 0;
+                    for (const auto& s : visible)
+                        for (auto c : s)
+                            if (isMojibakeMarker(c)) {
+                                ++mojibake;
+                                offenders << " [" << s.substring(0, 48) << "]";
+                                break;
+                            }
+
+                    // (a) the raw-summing tooltip ASCII-ified this round, by exact text.
+                    //     COVERAGE GAP, stated deliberately: the OTHER tooltip fixed this
+                    //     round (defaultTempoField, InspectorPanel.cpp:170) is NOT covered
+                    //     here, because DraggableNumberBox declares its own
+                    //     `setTooltip(...)` member and does NOT implement
+                    //     juce::SettableTooltipClient — so nothing, this walk included,
+                    //     can read it back. (That also means JUCE's TooltipWindow never
+                    //     DISPLAYS it: the tooltips on the three DraggableNumberBox
+                    //     instances at :82, :170 and :192 are dead. Pre-existing, reported,
+                    //     NOT fixed in a cosmetic round.)
+                    // Match the TOOLTIP, not the toggle's button text — the button is
+                    // also labelled "Raw summing", and a looser prefix silently latched
+                    // onto it, which would let a mojibaked tooltip pass this check.
+                    juce::String tipRaw;
+                    for (const auto& s : visible)
+                        if (s.startsWith("Raw summing (no automatic")) tipRaw = s;
+                    const bool rawFound = tipRaw.isNotEmpty();
+                    const bool rawAscii = rawFound && isPureAscii(tipRaw);
+
+                    // (c) every reachable string is either pure ASCII or contains only
+                    //     DELIBERATE non-ASCII glyphs (bullet, arrow, middle dot) — never
+                    //     a mojibake marker. Counted so the evidence line shows the split.
+                    int nonAsciiButLegit = 0;
+                    for (const auto& s : visible) if (!isPureAscii(s)) ++nonAsciiButLegit;
+
+                    verdict("T64 ASCII/MOJIBAKE: no user-visible InspectorPanel string carries a CP1252-mojibake marker (legit UTF-8-decoded glyphs still allowed), and the raw-summing tooltip is pure 7-bit ASCII",
+                            mojibake == 0 && rawFound && rawAscii,
+                            juce::String("strings scanned=") + juce::String(visible.size())
+                            + ", mojibakeMarkers=" + juce::String(mojibake) + offenders
+                            + ", nonAsciiButLegit=" + juce::String(nonAsciiButLegit)
+                            + ", rawSummingTooltip=" + (rawFound ? (rawAscii ? "ASCII" : "NON-ASCII(BUG)") : "NOT FOUND")
+                            + ", defaultTempoTooltip=UNREACHABLE(DraggableNumberBox is not a SettableTooltipClient)");
+                }
+
+// ── TITLEDIAG (2026-08-26, DIAGNOSIS ONLY — print-only, no verdict, no fix) ──
+//    Window-title mojibake "BlockShuffler <?> God". Reproduces updateWindowTitle's
+//    EXACT string headlessly — MainComponent.cpp:627-629 builds it as
+//        "BlockShuffler - " + file.getFileNameWithoutExtension()
+//    (the two callers at :567 and :616 both pass the FILE NAME, never the JSON
+//    "name" field) — and hex-dumps the bytes. Headless rather than a DBG in
+//    updateWindowTitle because DBG is compiled out of Release, while this runs in
+//    both and needs no GUI. Also dumps the .bsp's own stored name bytes so a
+//    corruption on load can be told apart from one already in the file.
+#define TITLEDIAG 1
+#if TITLEDIAG
+                {
+                    std::cout << "\n=== TITLEDIAG: window-title bytes ===\n";
+                    auto hexOf = [](const juce::String& s) {
+                        juce::String h;
+                        auto utf8 = s.toRawUTF8();
+                        for (int i = 0; utf8[i] != 0; ++i)
+                            h << juce::String::toHexString((int)(juce::uint8)utf8[i]).paddedLeft('0', 2) << " ";
+                        return h.trim();
+                    };
+                    auto report = [&](const juce::String& what, const juce::String& s) {
+                        bool ascii = true;
+                        for (auto c : s) if ((int)c > 127) ascii = false;
+                        std::cout << "  " << what << " = \"" << s << "\"\n"
+                                  << "      hex: " << hexOf(s) << "\n"
+                                  << "      " << (ascii ? "PURE ASCII" : "CONTAINS NON-ASCII") << "\n";
+                    };
+
+                    // Alec's project, if it is sitting next to the repo root.
+                    juce::File bsp = juce::File::getCurrentWorkingDirectory().getChildFile("God.bsp");
+                    if (!bsp.existsAsFile())
+                        bsp = juce::File::getCurrentWorkingDirectory()
+                                  .getParentDirectory().getChildFile("God.bsp");
+
+                    if (bsp.existsAsFile()) {
+                        std::cout << "  file: " << bsp.getFullPathName() << "\n";
+                        report("file-name-without-extension (what the title uses)",
+                               bsp.getFileNameWithoutExtension());
+                        report("TITLE as updateWindowTitle builds it",
+                               "BlockShuffler - " + bsp.getFileNameWithoutExtension());
+
+                        Project loaded;
+                        auto parsed = juce::JSON::parse(bsp.loadFileAsString());
+                        if (Serialization::projectFromJSON(parsed, loaded, bsp.getParentDirectory()))
+                            report("project.name stored INSIDE the .bsp (not used by the title)",
+                                   loaded.name);
+
+                        auto blob = bsp.loadFileAsString().toRawUTF8();
+                        int nonAscii = 0;
+                        for (int i = 0; blob[i] != 0; ++i)
+                            if ((juce::uint8)blob[i] > 127) ++nonAscii;
+                        std::cout << "  non-ASCII bytes in the whole .bsp: " << nonAscii << "\n";
+                    } else {
+                        std::cout << "  God.bsp not found next to the working directory —"
+                                     " skipping the real-project dump.\n";
+                    }
+
+                    // Control: what the PRE-15b0b58 separator produced, for comparison.
+                    const char* oldSep = "BlockShuffler \xe2\x80\x94 God";   // raw UTF-8 em-dash
+                    std::cout << "  CONTROL, pre-15b0b58 separator (raw UTF-8 em-dash) bytes: ";
+                    for (int i = 0; oldSep[i] != 0; ++i)
+                        std::cout << juce::String::toHexString((int)(juce::uint8)oldSep[i])
+                                        .paddedLeft('0', 2).toStdString() << " ";
+                    std::cout << "\n      -> read as CP1252 on Windows this renders as"
+                                 " \"BlockShuffler a<EUR>\" + quote, i.e. the reported mojibake.\n";
+                }
+#endif // TITLEDIAG
+
             }
 
             { // ── RAWGAIN Stage 1 (diagnostic probe, print-only, NO verdict) ──
