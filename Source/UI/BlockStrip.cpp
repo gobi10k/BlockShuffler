@@ -34,6 +34,12 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
     addButton.setTooltip("Add a new block");
     addAndMakeVisible(addButton);
 
+    // Clicking empty space (the strip's padding, or blank content next to the
+    // tiles) leaves link/stack mode. Blocks are children of contentArea, and with
+    // wantsEventsForAllNestedChildComponents = false their own clicks are NOT
+    // forwarded here — so this only ever fires on genuinely empty space.
+    contentArea.addMouseListener(this, false);
+
     // Mode label renders on top of the viewport
     modeLabel.setJustificationType(juce::Justification::centred);
     modeLabel.setFont(LookAndFeel_BlockShuffler::uiFont(12.0f));
@@ -368,6 +374,14 @@ void BlockStrip::deleteBlock(const juce::String& blockId) {
     project->removeBlock(blockId);
 }
 
+void BlockStrip::mouseDown(const juce::MouseEvent&) {
+    // Empty-space click: the third way out of link/stack mode, alongside Esc and
+    // completing the link. cancelPendingMode() hides modeLabel, drops the source
+    // line and repaints, so the banner region always clears.
+    if (pendingMode != PendingMode::None)
+        cancelPendingMode();
+}
+
 bool BlockStrip::keyPressed(const juce::KeyPress& key) {
     if (key == juce::KeyPress(juce::KeyPress::escapeKey) &&
         pendingMode != PendingMode::None) {
@@ -401,6 +415,10 @@ void BlockStrip::enterLinkMode(const juce::String& fromBlockId) {
 void BlockStrip::enterStackMode(const juce::String& fromBlockId) {
     pendingMode    = PendingMode::Stack;
     pendingBlockId = fromBlockId;
+    // Switching straight from link mode to stack mode (right-click a second block
+    // without pressing Esc first) used to leave the link source's vertical line
+    // painted under the stack banner. Stack mode has no source line of its own.
+    if (overlay) overlay->setLinkingSourceX(-1);
     for (auto* bc : blockComponents) {
         auto* bPtr = bc->getBlock();
         bc->setHighlighted(bPtr && bPtr->id != fromBlockId);
@@ -440,15 +458,23 @@ void BlockStrip::completePendingMode(const juce::String& targetBlockId) {
 
 void BlockStrip::updateOverlay() {
     if (!overlay || !project) return;
-    juce::HashMap<juce::String, int> positions;
+    // Full tile rects, converted from contentArea coordinates to strip-local ones
+    // (the overlay is given exactly the strip's bounds by MainComponent::resized,
+    // so strip-local and overlay-local are the same space). The centre X matches
+    // what the old centre-only path produced; the rect additionally carries each
+    // tile's Y, which same-column link arcs need.
+    juce::HashMap<juce::String, juce::Rectangle<int>> bounds;
     for (int i = 0; i < project->blocks.size(); ++i) {
-        if (i >= blockCentreXCache.size()) break;
-        int cx = viewport.getX() + blockCentreXCache[i]
-                 - viewport.getViewPositionX() + padding;
-        positions.set(project->blocks[i]->id, cx);
+        if (i >= originalBounds.size()) break;
+        auto b = originalBounds[i];
+        bounds.set(project->blocks[i]->id,
+                   juce::Rectangle<int>(viewport.getX() + b.getX()
+                                            - viewport.getViewPositionX() + padding,
+                                        viewport.getY() + b.getY(),
+                                        b.getWidth(), b.getHeight()));
     }
     overlay->setProject(project);
-    overlay->setBlockPositions(positions);
+    overlay->setBlockAnchors(bounds);
 }
 
 void BlockStrip::setPlayingBlock(const juce::String& blockId) {

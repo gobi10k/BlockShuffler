@@ -18,6 +18,7 @@
 #include "UI/SplitLayout.h"
 #include "Utils/GridSnap.h"
 #include "UI/BlockLinkOverlay.h"
+#include "UI/LinkArcLayout.h"
 #include "UI/LookAndFeel_BlockShuffler.h"
 #include <cmath>
 
@@ -4383,6 +4384,118 @@ int main(int argc, char* argv[]) {
                             + " golden=0x" + juce::String::toHexString((int)kPfhBaselineGolden)
                             + " " + (defaultPathUntouched ? "BIT-IDENTICAL" : "DIVERGED(BUG)"));
                 }
+
+                { // T63 (PERMANENT, LINKUI 2026-08-22, Carter screenshots): link arc /
+                  // label geometry, asserted headlessly against the PURE layout pass
+                  // (Source/UI/LinkArcLayout.h) that BlockLinkOverlay::paint consumes.
+                  // Scenario: one 3-block stack (S1/S2/S3, identical centre X) plus a
+                  // standalone block X in the next column; links S1<->S2 and S2<->S3
+                  // are SAME-COLUMN, link S1<->X is cross-column.
+                  //  (a) same-column links are detected as such and bow OUT to the
+                  //      side — apex clear of the tile column, never a vertical line
+                  //      through the tiles (the reported defect);
+                  //  (b) the two same-column links do not trace the same bracket;
+                  //  (c) no two label boxes intersect;
+                  //  (d) no label box lands on a block tile (i.e. on a block's name);
+                  //  (e) every label box is fully inside the strip bounds.
+                    using namespace LinkArcLayout;
+
+                    const float stripW = 640.0f, stripH = 260.0f;
+                    const float colX   = 180.0f, tileW = 100.0f, tileH = 64.0f;
+
+                    Config cfg;
+                    cfg.width = stripW; cfg.height = stripH; cfg.cy = stripH * 0.5f;
+                    cfg.colHalfW = tileW * 0.5f;
+
+                    // 3-block stack in one column + one standalone block to its right.
+                    auto tileRect = [&](float cx, float cyy) {
+                        return juce::Rectangle<float>(cx - tileW * 0.5f, cyy - tileH * 0.5f,
+                                                      tileW, tileH);
+                    };
+                    const juce::Rectangle<float> tS1 = tileRect(colX,  60.0f);
+                    const juce::Rectangle<float> tS2 = tileRect(colX, 130.0f);
+                    const juce::Rectangle<float> tS3 = tileRect(colX, 200.0f);
+                    const juce::Rectangle<float> tX  = tileRect(colX + 140.0f, 130.0f);
+                    std::vector<juce::Rectangle<float>> reserved { tS1, tS2, tS3, tX };
+
+                    auto anchorOf = [](const juce::Rectangle<float>& r) {
+                        Anchor a; a.x = r.getCentreX(); a.y = r.getCentreY(); a.valid = true;
+                        return a;
+                    };
+                    auto mkLink = [&](const juce::Rectangle<float>& ra,
+                                      const juce::Rectangle<float>& rb) {
+                        LinkIn in;
+                        in.a = anchorOf(ra); in.b = anchorOf(rb);
+                        in.labelW = 96.0f;   // ~ "Block 3 <-> Block 4" at 10pt
+                        in.pillW  = 34.0f;   // ~ "50%"
+                        return in;
+                    };
+                    std::vector<LinkIn> links {
+                        mkLink(tS1, tS2),          // same column
+                        mkLink(tS2, tS3),          // same column
+                        mkLink(tS1, tX)            // cross column
+                    };
+
+                    const auto placed = layout(links, cfg, reserved);
+
+                    const bool allVisible = placed.size() == 3
+                                         && placed[0].visible && placed[1].visible
+                                         && placed[2].visible;
+                    const bool sameColFlags = allVisible
+                                           && placed[0].sameColumn && placed[1].sameColumn
+                                           && !placed[2].sameColumn;
+
+                    // (a) the bow apex must clear the tile column on one side, and the
+                    //     arc endpoints must sit on the column EDGE, not its centre.
+                    bool bowsOutside = true;
+                    for (int i = 0; i < 2; ++i) {
+                        const auto& p = placed[(size_t)i];
+                        if (std::abs(p.apexX - colX) <= cfg.colHalfW) bowsOutside = false;
+                        if (std::abs(std::abs(p.anchorX1 - colX) - cfg.colHalfW) > 0.01f)
+                            bowsOutside = false;
+                        if (std::abs(p.anchorY1 - p.anchorY2) < 1.0f)  // distinct endpoint Ys
+                            bowsOutside = false;
+                    }
+                    // (b) two same-column links must not coincide.
+                    const bool bracketsDiffer = allVisible
+                        && std::abs(placed[0].apexX - placed[1].apexX) > 1.0f;
+
+                    // (c) no two label boxes intersect.
+                    bool labelsDisjoint = true;
+                    juce::String overlapDetail;
+                    for (size_t i = 0; i < placed.size(); ++i)
+                        for (size_t j = i + 1; j < placed.size(); ++j)
+                            if (placed[i].labelBox.intersects(placed[j].labelBox)) {
+                                labelsDisjoint = false;
+                                overlapDetail << " OVERLAP(" << (int)i << "," << (int)j << ")";
+                            }
+
+                    // (d) no label box sits on a block tile.
+                    bool labelsClearOfTiles = true;
+                    for (auto& p : placed)
+                        for (auto& r : reserved)
+                            if (p.visible && p.labelBox.intersects(r)) labelsClearOfTiles = false;
+
+                    // (e) every label box is inside the strip.
+                    const juce::Rectangle<float> stripBounds(0.0f, 0.0f, stripW, stripH);
+                    bool labelsInBounds = true;
+                    for (auto& p : placed)
+                        if (p.visible && !stripBounds.contains(p.labelBox)) labelsInBounds = false;
+
+                    verdict("T63 LINKUI arcs/labels: same-column links bow OUT to the side of the stack (never a vertical line through the tiles), two same-stack brackets differ, no two labels intersect, no label lands on a block tile, all labels clamped inside the strip",
+                            allVisible && sameColFlags && bowsOutside && bracketsDiffer
+                            && labelsDisjoint && labelsClearOfTiles && labelsInBounds,
+                            juce::String("sameColumnFlags=") + (sameColFlags ? "y" : "N")
+                            + ", apexX=[" + juce::String(placed[0].apexX, 1) + ","
+                            + juce::String(placed[1].apexX, 1) + "] colX="
+                            + juce::String(colX, 1) + " halfW=" + juce::String(cfg.colHalfW, 1)
+                            + ", bowsOutsideColumn=" + (bowsOutside ? "y" : "N")
+                            + ", bracketsDiffer=" + (bracketsDiffer ? "y" : "N")
+                            + ", labelsDisjoint=" + (labelsDisjoint ? "y" : "N") + overlapDetail
+                            + ", clearOfTiles=" + (labelsClearOfTiles ? "y" : "N")
+                            + ", inBounds=" + (labelsInBounds ? "y" : "N"));
+                }
+
             }
 
             { // ── RAWGAIN Stage 1 (diagnostic probe, print-only, NO verdict) ──
@@ -4973,9 +5086,15 @@ int main(int argc, char* argv[]) {
                 BlockLinkOverlay ov;
                 ov.setProject(&p);
                 ov.setBounds(0, 0, 600, 600);
-                juce::HashMap<juce::String, int> pos;   // clustered centres force collisions
-                pos.set(A->id, 280); pos.set(B->id, 300); pos.set(C->id, 320); pos.set(D->id, 340);
-                ov.setBlockPositions(pos);
+                // Clustered centres force collisions. Rects (not bare centres) since
+                // 2026-08-22 — the overlay needs each tile's Y for same-column arcs.
+                juce::HashMap<juce::String, juce::Rectangle<int>> pos;
+                auto tile = [](int centreX) {
+                    return juce::Rectangle<int>(centreX - 50, 250, 100, 100);
+                };
+                pos.set(A->id, tile(280)); pos.set(B->id, tile(300));
+                pos.set(C->id, tile(320)); pos.set(D->id, tile(340));
+                ov.setBlockAnchors(pos);
                 juce::Image img(juce::Image::RGB, 600, 600, true);
                 { juce::Graphics g(img); g.fillAll(juce::Colours::black); ov.paint(g); }
                 // Pill fill = bgLight @ alpha 0.88 over black.

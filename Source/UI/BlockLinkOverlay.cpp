@@ -1,12 +1,13 @@
 #include "BlockLinkOverlay.h"
+#include "LinkArcLayout.h"
 #include "LookAndFeel_BlockShuffler.h"
 
 namespace BlockShuffler {
 
-void BlockLinkOverlay::setBlockPositions(const juce::HashMap<juce::String, int>& positions) {
-    blockCentreX.clear();
-    for (auto it = positions.begin(); it != positions.end(); ++it)
-        blockCentreX.set(it.getKey(), it.getValue());
+void BlockLinkOverlay::setBlockAnchors(const juce::HashMap<juce::String, juce::Rectangle<int>>& bounds) {
+    blockBounds.clear();
+    for (auto it = bounds.begin(); it != bounds.end(); ++it)
+        blockBounds.set(it.getKey(), it.getValue());
     repaint();
 }
 
@@ -19,27 +20,39 @@ void BlockLinkOverlay::setLinkingSourceX(int x) {
 void BlockLinkOverlay::paint(juce::Graphics& g) {
     if (!project) return;
 
-    const float cy       = (float)(getHeight() / 2);
-    const float arcHBase = 36.0f;
-    const float arcHStep = 22.0f;
+    auto labelFont = LookAndFeel_BlockShuffler::uiFont(10.0f);
+    auto probFont  = LookAndFeel_BlockShuffler::monoFont(10.0f);
 
-    const float nameRowH    = 14.0f;
-    const float pillH       = 15.0f;
-    const float rowGap      =  2.0f;
-    const float totalLabelH = nameRowH + rowGap + pillH;
+    LinkArcLayout::Config cfg;
+    cfg.width  = (float)getWidth();
+    cfg.height = (float)getHeight();
+    cfg.cy     = (float)(getHeight() / 2);
 
-    // Track placed label bounds so we can push new ones upward to avoid overlap.
-    juce::Array<juce::Rectangle<float>> placedLabels;
+    // Collect the inputs the pure layout pass needs, and the tile rects labels
+    // must keep clear of so a link label never lands on a block's name.
+    std::vector<LinkArcLayout::LinkIn> ins;
+    std::vector<juce::Rectangle<float>> reserved;
+    juce::StringArray labelTexts, probTexts;
 
-    int linkIndex = 0;
+    for (auto it = blockBounds.begin(); it != blockBounds.end(); ++it)
+        reserved.push_back(it.getValue().toFloat());
+
+    auto anchorFor = [&](const juce::String& id) {
+        LinkArcLayout::Anchor a;
+        if (blockBounds.contains(id)) {
+            auto r = blockBounds[id].toFloat();
+            a.x = r.getCentreX();
+            a.y = r.getCentreY();
+            a.valid = true;
+            cfg.colHalfW = r.getWidth() * 0.5f;   // tiles are uniform width
+        }
+        return a;
+    };
+
     for (auto* link : project->links) {
-        bool hasA = blockCentreX.contains(link->blockA);
-        bool hasB = blockCentreX.contains(link->blockB);
-        if (!hasA || !hasB) { ++linkIndex; continue; }
-
-        float x1   = (float)blockCentreX[link->blockA];
-        float x2   = (float)blockCentreX[link->blockB];
-        float midX = (x1 + x2) * 0.5f;
+        LinkArcLayout::LinkIn in;
+        in.a = anchorFor(link->blockA);
+        in.b = anchorFor(link->blockB);
 
         juce::String nameA = "?", nameB = "?";
         if (auto* ba = project->getBlockById(link->blockA)) nameA = ba->name;
@@ -48,76 +61,73 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         juce::String labelText = nameA + " <-> " + nameB;
         juce::String probText  = juce::String((int)(link->swapProbability * 100)) + "%";
 
-        auto  labelFont = LookAndFeel_BlockShuffler::uiFont(10.0f);
-        auto  probFont  = LookAndFeel_BlockShuffler::monoFont(10.0f);
-        float labelW    = LookAndFeel_BlockShuffler::measureTextWidth(labelFont, labelText) + 10.0f;
-        float pillW     = LookAndFeel_BlockShuffler::measureTextWidth(probFont,  probText)  + 12.0f;
-        float boxW      = juce::jmax(labelW, pillW);
+        in.labelW = LookAndFeel_BlockShuffler::measureTextWidth(labelFont, labelText) + 10.0f;
+        in.pillW  = LookAndFeel_BlockShuffler::measureTextWidth(probFont,  probText)  + 12.0f;
 
-        // Start label at the arc peak for this link index, then resolve collisions.
-        float arcH     = arcHBase + (float)linkIndex * arcHStep;
-        float labelTop = cy - arcH - totalLabelH - 4.0f;
+        ins.push_back(in);
+        labelTexts.add(labelText);
+        probTexts.add(probText);
+    }
 
-        juce::Rectangle<float> labelBox(midX - boxW * 0.5f, labelTop, boxW, totalLabelH);
+    const auto placed = LinkArcLayout::layout(ins, cfg, reserved);
 
-        // Push upward (18 px per step) until no overlap with previously placed labels.
-        for (int attempt = 0; attempt < 25; ++attempt) {
-            bool collides = false;
-            for (auto& placed : placedLabels) {
-                if (labelBox.intersects(placed.expanded(2.0f, 2.0f))) {
-                    labelBox.translate(0.0f, -18.0f);
-                    collides = true;
-                    break;
-                }
-            }
-            if (!collides) break;
-        }
-        placedLabels.add(labelBox);
-
-        // Arc control points anchor just below the label so the arc rises to meet it.
-        float arcControlY = labelBox.getBottom() + 4.0f;
+    int linkIndex = 0;
+    for (auto* link : project->links) {
+        const auto& p = placed[(size_t)linkIndex];
+        if (!p.visible) { ++linkIndex; continue; }
 
         auto col = juce::Colour(LookAndFeel_BlockShuffler::accentCol)
                        .withAlpha(0.4f + 0.6f * link->swapProbability);
-
-        // Draw arc
-        juce::Path arc;
-        arc.startNewSubPath(x1, cy);
-        arc.cubicTo(x1, arcControlY, x2, arcControlY, x2, cy);
         g.setColour(col);
-        g.strokePath(arc, juce::PathStrokeType(2.0f,
-                          juce::PathStrokeType::curved,
-                          juce::PathStrokeType::rounded));
 
-        // Name label row
+        juce::Path arc;
+        if (p.sameColumn) {
+            // Both endpoints are members of one stack: bracket OUT to the side of
+            // the column instead of drawing a straight line down through the tiles.
+            arc.startNewSubPath(p.anchorX1, p.anchorY1);
+            arc.cubicTo(p.apexX, p.anchorY1, p.apexX, p.anchorY2, p.anchorX2, p.anchorY2);
+            g.strokePath(arc, juce::PathStrokeType(2.0f,
+                              juce::PathStrokeType::curved,
+                              juce::PathStrokeType::rounded));
+            // Leader from the bow apex up to the label it belongs to.
+            g.setColour(col.withMultipliedAlpha(0.65f));
+            g.drawLine(p.apexX, p.apexY,
+                       p.labelBox.getCentreX(), p.labelBox.getBottom() + 2.0f, 1.0f);
+        } else {
+            arc.startNewSubPath(p.anchorX1, p.anchorY1);
+            arc.cubicTo(p.anchorX1, p.arcControlY, p.anchorX2, p.arcControlY,
+                        p.anchorX2, p.anchorY2);
+            g.strokePath(arc, juce::PathStrokeType(2.0f,
+                              juce::PathStrokeType::curved,
+                              juce::PathStrokeType::rounded));
+        }
+
+        // Name row — backed so it stays readable over an arc passing behind it.
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgDark).withAlpha(0.82f));
+        g.fillRoundedRectangle(p.nameRect.expanded(2.0f, 1.0f), 3.0f);
         g.setColour(col.withAlpha(1.0f));
         g.setFont(labelFont);
-        g.drawText(labelText,
-                   juce::Rectangle<float>(midX - labelW * 0.5f, labelBox.getY(), labelW, nameRowH),
-                   juce::Justification::centred);
+        g.drawText(labelTexts[linkIndex], p.nameRect, juce::Justification::centred);
 
         // Probability pill
-        juce::Rectangle<float> pill(midX - pillW * 0.5f,
-                                     labelBox.getY() + nameRowH + rowGap,
-                                     pillW, pillH);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgLight).withAlpha(0.88f));
-        g.fillRoundedRectangle(pill, 5.5f);
+        g.fillRoundedRectangle(p.pillRect, 5.5f);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
         g.setFont(probFont);
-        g.drawText(probText, pill, juce::Justification::centred);
+        g.drawText(probTexts[linkIndex], p.pillRect, juce::Justification::centred);
 
         ++linkIndex;
     }
 
-    // Linking mode indicator
+    // Linking-mode indicator: the vertical line marking the SOURCE block only.
+    // The instruction text used to be drawn here too — it is now owned solely by
+    // BlockStrip::modeLabel, which also covers stack mode and the Esc hint. Two
+    // centred strings at the top of the same rectangle rendered on top of each
+    // other (Carter 2026-08-22 screenshot).
     if (linkingSourceX >= 0) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.8f));
         g.drawLine((float)linkingSourceX, 0.0f,
                    (float)linkingSourceX, (float)getHeight(), 2.0f);
-        g.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
-        g.drawText("Click another block to link",
-                   getLocalBounds().removeFromTop(16),
-                   juce::Justification::centred);
     }
 }
 

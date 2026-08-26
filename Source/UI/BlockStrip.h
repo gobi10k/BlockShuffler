@@ -53,6 +53,9 @@ public:
     /** Cancels any pending link/stack mode (e.g. when Esc is pressed). */
     void cancelPendingMode();
 
+    /** Empty-space click leaves link/stack mode (see the ctor's addMouseListener). */
+    void mouseDown(const juce::MouseEvent&) override;
+
     // ── Block drag callbacks — called by BlockComponent ──────────────────────────
     /** Called every frame during a block drag with the dragged component and its
      *  current centre in contentArea-local coordinates. Updates drop feedback.
