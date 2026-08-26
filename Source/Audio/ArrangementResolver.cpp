@@ -274,7 +274,16 @@ ResolvedArrangement ArrangementResolver::resolve(const Project& project,
                         tPos, stackGain, b->id
                     });
                     maxBodyLen = std::max(maxBodyLen, bodyLen);
-                    if (clip->isSongEnder) { songEnded = true; break; }
+                    // SONGEND-SIM (Carter 2026-08-22): a simultaneous stack slot is
+                    // INDIVISIBLE — every picked member's body starts at the same
+                    // timelinePos (bodyStart), so ending the song "at" one member
+                    // means ending it after the whole slot. Flag the end but KEEP
+                    // GOING so all remaining picked blocks still get their entry;
+                    // the outer slot loop's `if (songEnded) break;` then stops the
+                    // song after this slot (its tails included). Breaking here
+                    // instead made a 3-block sim stack play 1/2/3 blocks depending
+                    // on which member happened to hold the ender.
+                    if (clip->isSongEnder) songEnded = true;   // NO break — finish the slot
                 }
 
                 if (bodyStart < 0) bodyStart = cursor;  // all clips were empty/invalid

@@ -113,6 +113,16 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-08-22/26 — Carter round A: song ender in a SIMULTANEOUS stack + raw-summing default flipped back ON
+- Task (Carter 2026-08-22, two precise fixes, no diagnosis needed).
+- **FIX 1 — song ender truncated a simultaneous stack mid-slot.** `ArrangementResolver.cpp` sim branch had `if (clip->isSongEnder) { songEnded = true; break; }`. The `break` abandoned the remaining PICKED members, so a 3-block sim stack played 1/2/3 blocks depending on which member held the ender. All sim bodies share ONE `timelinePos`, so the slot is indivisible: now the flag is set and the loop CONTINUES; the outer slot loop's existing `if (songEnded) break;` ends the song after the slot (tails included).
+  - The SEQUENTIAL branch's `break` was deliberately LEFT ALONE — there each picked block owns its own time slot, so continuing would append blocks after the ender. Same for the standalone branch.
+  - The `entries added <= playCount` jassert is unchanged and does not fire: the loop still iterates `picked`, whose size is already <= playCount.
+- **FIX 2 — raw summing (`unityGainMode`) ENABLED by default.** Carter RETRACTED the 2026-08-21 request (he had been testing with an old project file). Default is now a single named constant `Project::kDefaultUnityGainMode = true`, and the loader's absent-key fallback points at that same constant (previously a hard-coded `false` in `Serialization.cpp`) — one source of truth instead of two literals that can drift. Fresh project / fresh install = raw summing ON; absent-key legacy files follow the new default; an EXPLICITLY stored true/false is read back verbatim and never overridden; the inspector toggle stays user-switchable both ways.
+- Tests: **T61 NEW** (ender in member 1/2/3 of a 3-block sim stack at playCount 3, 24 seeds each -> exactly 3 entries sharing one timelinePos, total == body+tail, trailing block never plays). Negative control run: restoring the old `break` gives entries 2/3/1 — the exact reported symptom. **T59 REWRITTEN** for the flipped default (ctor/absent-key ON, explicit false and explicit true both kept, fresh project saves the key as true, default render is the raw sum 4.0, toggling OFF still runs the complementary law). **T38 re-pinned** to `unityGainMode = false` — it measures the CROSSFADE ENVELOPE, which only exists under the fade law; same scoping T55/T56 already use. No product code involved in that pin.
+- Suite: STEP6 RESULT ALL PASS.
+- **HEADS-UP for Carter:** the flip is audible on every existing project that never stored the key — the T59 probe shows his 9-block/3-SIM arrangement peaking at 4.0 by default where the fade law gave 1.333. That is what he asked for, but it will clip on material without headroom.
+
 ### 2026-08-21 — Carter round: raw summing already OFF by default (T59, no product change) + draggable blocks/waveform divider (T60) — COMMITTED, UI gate pending
 - Task (Carter, 2026-08-21, both UI/defaults — mixing math explicitly OUT OF SCOPE): (1) "raw summing" disabled by default, toggle kept; (2) draggable horizontal divider between the blocks strip and the clip/waveform area.
 - What I changed (files):

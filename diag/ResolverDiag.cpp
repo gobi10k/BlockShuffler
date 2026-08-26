@@ -2357,6 +2357,12 @@ int main(int argc, char* argv[]) {
                 const double sr = 44100.0;
                 const int L = 4410, body = 17640;
                 Project p; p.sampleRate = sr;
+                // RAWGAIN scoping (same rationale as T55/T56, re-pinned 2026-08-22
+                // when the default flipped to ON): this test measures the CROSSFADE
+                // ENVELOPE, which only exists under the fade law. Raw summing removes
+                // that law by design (flat 1.0 everywhere), so pin the flag false to
+                // keep measuring the path under test rather than the default.
+                p.unityGainMode = false;
                 auto* A = p.addBlock("A"); auto* B = p.addBlock("B");
                 addClipTo(A, "cA", L + body + L);   // lead-in + body + tail
                 addClipTo(B, "cB", L + body);       // lead-in + body
@@ -3515,22 +3521,23 @@ int main(int argc, char* argv[]) {
                             + " currentSchemaControl=" + (ctrlOk ? "ok" : "BAD"));
                 }
 
-                { // T59 (PERMANENT, RAWGAIN-DEFAULT 2026-08-21, Carter request 1):
-                  // raw summing must be OFF unless the user explicitly turned it on.
-                  // (a) a default-constructed Project has unityGainMode == false;
-                  // (b) a .bsp with the key ABSENT (every pre-RAWGAIN save) loads as
-                  //     false — actively set, not merely left alone, so the field is
-                  //     pre-dirtied to true before each load;
-                  // (c) a .bsp that explicitly stored TRUE keeps TRUE. An explicit
-                  //     user choice is never silently flipped by the new default;
+                { // T59 (PERMANENT, RAWGAIN-DEFAULT — flipped 2026-08-22 when Carter
+                  // RETRACTED the 2026-08-21 request): raw summing is ON by default.
+                  // (a) a default-constructed Project has unityGainMode == true, so a
+                  //     fresh project / fresh install starts with raw summing ON;
+                  // (b) a .bsp with the key ABSENT (every pre-RAWGAIN save) follows the
+                  //     new default and loads as true — actively set, not merely left
+                  //     alone, so the field is pre-dirtied to false before each load;
+                  // (c) a .bsp that explicitly stored FALSE keeps FALSE (and explicit
+                  //     TRUE keeps TRUE). An explicitly stored user choice is never
+                  //     silently overridden by the default, in either direction;
                   // (d) Carter's arrangement (all-120BPM, 9 blocks, one 3-block
-                  //     simultaneous stack), built WITHOUT ever touching the flag,
-                  //     renders down the COMPLEMENTARY path: DC-filled sources sum to
-                  //     1.0 at every sequential join and the whole render never
-                  //     overshoots (raw summing would give 2.0 at a join, 3.0 across
-                  //     the SIM stack);
-                  // (e) the toggle still WORKS when turned on: the same geometry with
-                  //     unityGainMode = true does reach 3.0 across the SIM stack.
+                  //     simultaneous stack), built WITHOUT ever touching the flag, now
+                  //     renders down the RAW-SUMMING path: DC-filled sources sum
+                  //     un-attenuated, reaching 4.0 where four sources overlap;
+                  // (e) the toggle still WORKS in the other direction: the same
+                  //     geometry with unityGainMode = false runs the COMPLEMENTARY law
+                  //     (sequential joins == 1.0, stack body == 1.0, no raw sum).
                     auto rootWith = [&](int mode) {          // -1 absent, 0 false, 1 true
                         auto* o = new juce::DynamicObject();
                         o->setProperty("version", 1);
@@ -3543,22 +3550,22 @@ int main(int argc, char* argv[]) {
                     };
                     auto loadFlag = [&](int mode) {
                         Project p;
-                        p.unityGainMode = true;   // pre-dirty: load must ACTIVELY set it
+                        p.unityGainMode = false;  // pre-dirty: load must ACTIVELY set it
                         Serialization::projectFromJSON(rootWith(mode), p, juce::File());
                         return p.unityGainMode;
                     };
 
-                    const bool ctorDefaultOff = (Project().unityGainMode == false);
-                    const bool absentKeyOff   = (loadFlag(-1) == false);
-                    const bool explicitOffOff = (loadFlag(0)  == false);
+                    const bool ctorDefaultOn  = (Project().unityGainMode == true);
+                    const bool absentKeyOn    = (loadFlag(-1) == true);
+                    const bool explicitOffOff = (loadFlag(0)  == false);   // explicit choice kept
                     const bool explicitOnKept = (loadFlag(1)  == true);
 
-                    // Save-side: a default project must WRITE the key as false, so a
-                    // resave of a legacy file pins the complementary law explicitly.
+                    // Save-side: a default project must WRITE the key as true, so a
+                    // resave of a legacy file pins raw summing explicitly.
                     Project fresh;
-                    const bool savesFalse =
+                    const bool savesTrue =
                         (bool)Serialization::projectToJSON(fresh, juce::File())
-                                  .getProperty("unityGainMode", true) == false;
+                                  .getProperty("unityGainMode", false) == true;
 
                     // ── Carter's arrangement ────────────────────────────────────
                     const double srC = 48000.0;
@@ -3602,19 +3609,32 @@ int main(int argc, char* argv[]) {
                     };
 
                     // (d) DEFAULT project — unityGainMode never assigned anywhere.
+                    // Since 2026-08-22 that means raw summing ON.
                     auto pDef = buildCarter(-1);
-                    const bool builtAtDefaultOff = (pDef->unityGainMode == false);
+                    const bool builtAtDefaultOn = (pDef->unityGainMode == true);
                     ArrangementResolver resC; juce::Random rC(8210);
                     auto arrDef = resC.resolve(*pDef, rC); arrDef.sampleRate = srC;
                     auto outDef = renderAll(arrDef);
-                    // Every entry carried the flag through the resolver as false.
-                    bool entriesOff = true;
-                    for (auto& e : arrDef.entries) if (e.unityGainMode) entriesOff = false;
+                    // Every entry carried the flag through the resolver as true.
+                    bool entriesOn = true;
+                    for (auto& e : arrDef.entries) if (!e.unityGainMode) entriesOn = false;
 
                     float defMax = 0.0f;
                     for (int ch = 0; ch < 2; ++ch)
                         for (int s = 0; s < outDef.getNumSamples(); ++s)
                             defMax = juce::jmax(defMax, std::abs(outDef.getSample(ch, s)));
+
+                    // (e) same geometry, toggle explicitly OFF: the complementary law
+                    // must still run and be measurable. All join / body deviations
+                    // below are measured on THIS render.
+                    auto pOff = buildCarter(0);
+                    ArrangementResolver resF; juce::Random rF(8210);
+                    auto arrOff = resF.resolve(*pOff, rF); arrOff.sampleRate = srC;
+                    auto outOff = renderAll(arrOff);
+                    float offMax = 0.0f;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int s = 0; s < outOff.getNumSamples(); ++s)
+                            offMax = juce::jmax(offMax, std::abs(outOff.getSample(ch, s)));
 
                     // Classify each distinct body-start on the timeline. A join is
                     // PURELY SEQUENTIAL when exactly one entry ends its body there and
@@ -3622,12 +3642,12 @@ int main(int argc, char* argv[]) {
                     // written for. A simultaneous stack's boundaries are NOT that shape
                     // (N entries start at one position) and are measured separately.
                     juce::Array<int64_t> seqJoins, stackJoins;
-                    for (int i = 0; i < arrDef.entries.size(); ++i) {
-                        const auto tp = arrDef.entries.getReference(i).timelinePos;
+                    for (int i = 0; i < arrOff.entries.size(); ++i) {
+                        const auto tp = arrOff.entries.getReference(i).timelinePos;
                         if (tp <= 0 || seqJoins.contains(tp) || stackJoins.contains(tp)) continue;
                         int nStart = 0, nEnd = 0;
-                        for (int j = 0; j < arrDef.entries.size(); ++j) {
-                            const auto& f = arrDef.entries.getReference(j);
+                        for (int j = 0; j < arrOff.entries.size(); ++j) {
+                            const auto& f = arrOff.entries.getReference(j);
                             if (f.timelinePos == tp) ++nStart;
                             if (f.timelinePos + (f.endMark - f.startMark) == tp) ++nEnd;
                         }
@@ -3638,8 +3658,8 @@ int main(int argc, char* argv[]) {
                     auto devAround = [&](int64_t jp, int w) {
                         float d = 0.0f;
                         for (int64_t q = jp - w; q < jp + w; ++q) {
-                            if (q < 0 || q >= outDef.getNumSamples()) continue;
-                            d = juce::jmax(d, std::abs(outDef.getSample(0, (int)q) - 1.0f));
+                            if (q < 0 || q >= outOff.getNumSamples()) continue;
+                            d = juce::jmax(d, std::abs(outOff.getSample(0, (int)q) - 1.0f));
                         }
                         return d;
                     };
@@ -3653,22 +3673,27 @@ int main(int argc, char* argv[]) {
                         const int64_t a = juce::jmin(stackJoins[0], stackJoins[1]) + LC + 64;
                         const int64_t b = juce::jmax(stackJoins[0], stackJoins[1]) - TC - 64;
                         for (int64_t q = a; q < b; ++q)
-                            if (q >= 0 && q < outDef.getNumSamples())
+                            if (q >= 0 && q < outOff.getNumSamples())
                                 stackBodyDev = juce::jmax(stackBodyDev,
-                                                   std::abs(outDef.getSample(0, (int)q) - 1.0f));
+                                                   std::abs(outOff.getSample(0, (int)q) - 1.0f));
                     }
 
-                    // (e) same geometry, toggle ON: raw summing must actually sum raw.
-                    // Four sources overlap at a stack join (the preceding entry's tail
-                    // plus three lead-ins), so unity mode reaches 4.0 there.
+                    // Explicitly-ON control: forcing the flag true must be byte-for-byte
+                    // the same render as leaving it at the (now ON) default.
                     auto pOn = buildCarter(1);
                     ArrangementResolver resO; juce::Random rO(8210);
                     auto arrOn = resO.resolve(*pOn, rO); arrOn.sampleRate = srC;
                     auto outOn = renderAll(arrOn);
-                    float onMax = 0.0f;
+                    float onMax = 0.0f, defVsOn = 0.0f;
                     for (int ch = 0; ch < 2; ++ch)
-                        for (int s = 0; s < outOn.getNumSamples(); ++s)
+                        for (int s = 0; s < outOn.getNumSamples(); ++s) {
                             onMax = juce::jmax(onMax, std::abs(outOn.getSample(ch, s)));
+                            if (s < outDef.getNumSamples())
+                                defVsOn = juce::jmax(defVsOn,
+                                    std::abs(outOn.getSample(ch, s) - outDef.getSample(ch, s)));
+                        }
+                    const bool defaultIsExplicitOn =
+                        (outDef.getNumSamples() == outOn.getNumSamples()) && defVsOn == 0.0f;
 
                     // ── PROBE (print-only, T57 precedent): SIM-STACK JOIN GEOMETRY ──
                     // PRE-EXISTING, untouched by the 2026-08-21 default/UI work: no
@@ -3685,7 +3710,8 @@ int main(int argc, char* argv[]) {
                     // (2/3 here => peak 4/3) instead of summing to 1.
                     float stackJoinDev = 0.0f;
                     for (auto jp : stackJoins) stackJoinDev = juce::jmax(stackJoinDev, devAround(jp, LC));
-                    std::cout << "T59 PROBE SIM-stack join geometry (9 blocks, 3-block SIM stack, all 120BPM):\n"
+                    std::cout << "T59 PROBE SIM-stack join geometry (9 blocks, 3-block SIM stack, all 120BPM;\n"
+                              << "               measured on the toggle-OFF render — the complementary law):\n"
                               << "  sequential joins=" << seqJoins.size()
                               << " maxDevFrom1=" << juce::String(seqDev, 6) << " (complementary: want ~0)\n"
                               << "  stack joins=" << stackJoins.size()
@@ -3693,41 +3719,46 @@ int main(int argc, char* argv[]) {
                               << " (expected excess (N-1)/N = " << juce::String(2.0f / 3.0f, 6) << ")\n"
                               << "  stack body interior maxDevFrom1=" << juce::String(stackBodyDev, 6)
                               << " (1/playCount compensation)\n"
-                              << "  full-render max: default=" << juce::String(defMax, 6)
-                              << "  unity=" << juce::String(onMax, 6) << "\n"
+                              << "  full-render max: DEFAULT(raw)=" << juce::String(defMax, 6)
+                              << "  toggled OFF=" << juce::String(offMax, 6) << "\n"
                               << "  T59 PROBE VERDICT: SIM-STACK JOIN "
                               << ((stackJoinDev <= 0.01f) ? "SOUND" : "OVERSHOOTS BY (N-1)/N")
                               << " — PRE-EXISTING, mixing math deliberately untouched\n";
 
-                    // Verdict scope = Carter request 1 only: which gain law RAN, and
-                    // that the toggle still works. The stack-join excess above is a
-                    // property of the fade law itself, identical before and after this
-                    // change, so it is probe output rather than a verdict.
+                    // Verdict scope = the DEFAULT only: which gain law runs when the
+                    // user never touches the flag, and that the toggle still works in
+                    // both directions. The stack-join excess above is a property of
+                    // the fade law itself, unchanged by this flip, so it stays probe
+                    // output rather than a verdict.
                     const bool seqJoinsUnity  = seqJoins.size() >= 3 && seqDev <= 0.01f;
                     const bool stackBodyUnity = stackBodyDev <= 0.01f;
-                    // Complementary path RAN: the render is nothing like the raw sum
-                    // (4.0), and is bounded by the known (N-1)/N stack-join excess.
-                    const bool notRawSum      = defMax <= 1.0f + 2.0f / 3.0f + 1e-3f
-                                             && defMax < onMax - 1.0f;
-                    const bool toggleWorks    = onMax >= 3.9999f;
-                    const bool timingSame     = (arrDef.totalDurationSamples
-                                                 == arrOn.totalDurationSamples);
+                    // Default path IS the raw sum: four sources overlap at a stack join
+                    // (the preceding entry's tail plus three lead-ins) ⇒ 4.0.
+                    const bool defaultIsRawSum = defMax >= 3.9999f;
+                    // Toggling OFF really runs the complementary law: bounded by the
+                    // known (N-1)/N stack-join excess, nothing like the raw sum.
+                    const bool toggleOffWorks  = offMax <= 1.0f + 2.0f / 3.0f + 1e-3f
+                                              && offMax < defMax - 1.0f;
+                    const bool timingSame      = (arrDef.totalDurationSamples
+                                                  == arrOff.totalDurationSamples);
 
-                    verdict("T59 RAWGAIN default OFF: ctor/absent-key/explicit-false=OFF, explicit-TRUE kept, Carter 9-block+3-SIM renders via COMPLEMENTARY law (seq joins==1.0, stack body==1.0, not raw sum), toggle ON still raw",
-                            ctorDefaultOff && absentKeyOff && explicitOffOff && explicitOnKept
-                            && savesFalse && builtAtDefaultOff && entriesOff
-                            && seqJoinsUnity && stackBodyUnity && notRawSum && toggleWorks && timingSame,
-                            juce::String("ctorDefault=") + (ctorDefaultOff ? "OFF" : "ON(BUG)")
-                            + ", absentKey=" + (absentKeyOff ? "OFF" : "ON(BUG)")
-                            + ", explicitFalse=" + (explicitOffOff ? "OFF" : "ON(BUG)")
+                    verdict("T59 RAWGAIN default ON (Carter retraction 2026-08-22): ctor/absent-key=ON, explicit FALSE and explicit TRUE both kept verbatim, fresh project saves the key as true, Carter 9-block+3-SIM renders RAW by default (4.0), toggling OFF still runs the COMPLEMENTARY law (seq joins==1.0, stack body==1.0)",
+                            ctorDefaultOn && absentKeyOn && explicitOffOff && explicitOnKept
+                            && savesTrue && builtAtDefaultOn && entriesOn && defaultIsExplicitOn
+                            && seqJoinsUnity && stackBodyUnity && defaultIsRawSum
+                            && toggleOffWorks && timingSame,
+                            juce::String("ctorDefault=") + (ctorDefaultOn ? "ON" : "OFF(BUG)")
+                            + ", absentKey=" + (absentKeyOn ? "ON" : "OFF(BUG)")
+                            + ", explicitFalse=" + (explicitOffOff ? "KEPT-OFF" : "FLIPPED(BUG)")
                             + ", explicitTrue=" + (explicitOnKept ? "KEPT" : "FLIPPED(BUG)")
-                            + ", savesKeyFalse=" + (savesFalse ? "y" : "N")
-                            + ", entriesCarryOff=" + (entriesOff ? "y" : "N")
+                            + ", savesKeyTrue=" + (savesTrue ? "y" : "N")
+                            + ", entriesCarryOn=" + (entriesOn ? "y" : "N")
+                            + ", default==explicitON=" + (defaultIsExplicitOn ? "identical" : "DIFFERS(BUG)")
                             + ", seqJoins=" + juce::String(seqJoins.size())
                             + " dev=" + juce::String(seqDev, 6)
                             + ", stackBodyDev=" + juce::String(stackBodyDev, 6)
                             + ", defaultMax=" + juce::String(defMax, 6)
-                            + " vs unityMax=" + juce::String(onMax, 6)
+                            + " (raw, want 4.0) vs toggledOffMax=" + juce::String(offMax, 6)
                             + ", timing=" + (timingSame ? "same" : "DIFFERS"));
                 }
 
@@ -3824,6 +3855,116 @@ int main(int argc, char* argv[]) {
                             + ", mins[wave=" + juce::String(waveMinH)
                             + ",blocks=" + juce::String(blocksMinH)
                             + ",bar=" + juce::String(barH) + "]");
+                }
+
+                { // T61 (PERMANENT, SONGEND-SIM 2026-08-22, Carter fix 1): a song
+                  // ender inside a SIMULTANEOUS stack must end the song AFTER the
+                  // whole slot, never mid-slot. Every picked member of a sim stack
+                  // shares ONE timelinePos, so the slot is indivisible: the old
+                  // `break` abandoned the remaining picked blocks and a 3-block
+                  // stack played 1, 2 or 3 blocks depending on which member
+                  // happened to hold the ender (and where it landed in the random
+                  // pick order). All three placements are asserted here, each over
+                  // many seeds so every pick ordering is exercised.
+                  //   geometry: startMark 0 (no lead-in), body 12000, tail 4800.
+                  //   expected: 3 entries, one shared timelinePos == 0,
+                  //             total == body + tail, trailing block D never plays.
+                    const double sr61  = 48000.0;
+                    const int    body61 = 12000, tail61 = 4800;
+
+                    auto buildSim3 = [&](int enderIdx) {      // 0,1,2 = member 1,2,3
+                        auto p = std::make_unique<Project>();
+                        p->sampleRate = sr61;
+                        juce::Array<Block*> bs;
+                        for (int i = 0; i < 3; ++i) {
+                            auto* b = p->addBlock("S" + juce::String(i + 1));
+                            addClipTo(b, "c" + juce::String(i + 1), body61 + tail61);
+                            auto* c = b->clips[0];
+                            c->startMark  = 0;                 // no lead-in
+                            c->endMark    = body61;            // 4800-sample tail
+                            c->isSongEnder = (i == enderIdx);
+                            b->playChance = 1.0f;
+                            bs.add(b);
+                        }
+                        // S1/S2/S3 -> one 3-block SIMULTANEOUS stack, all three play.
+                        p->stackBlocks(bs[1]->id, bs[0]->id);
+                        p->stackBlocks(bs[2]->id, bs[0]->id);
+                        bs[0]->stackPlayMode = StackPlayMode::Simultaneous;
+                        bs[0]->stackPlayCount.values.set(0, 3);
+                        bs[0]->alwaysPlayBase = false;
+                        p->propagateStackSettings(bs[0]->stackGroup, bs[0]);
+                        // Trailing sequential block: must NEVER play (truncation proof).
+                        auto* d = p->addBlock("D");
+                        addClipTo(d, "cD", body61);
+                        d->playChance = 1.0f;
+                        return p;
+                    };
+
+                    const int64_t expTotal61 = (int64_t)body61 + tail61;
+                    int   entriesSeen[3] = { -1, -1, -1 };   // per case, first seed
+                    bool  caseOk[3]      = { true, true, true };
+                    juce::String firstBad61;
+
+                    for (int k = 0; k < 3; ++k) {
+                        auto p61 = buildSim3(k);
+                        auto stackIds = juce::Array<juce::Uuid>();
+                        for (int i = 0; i < 3; ++i) stackIds.add(p61->blocks[i]->id);
+                        const auto dId = p61->blocks[3]->id;
+
+                        for (int seed = 0; seed < 24; ++seed) {
+                            juce::Random r61(9000 + seed * 37);
+                            ArrangementResolver res61;
+                            auto arr = res61.resolve(*p61, r61);
+                            arr.sampleRate = sr61;
+                            if (seed == 0) entriesSeen[k] = arr.entries.size();
+
+                            const bool countOk = (arr.entries.size() == 3);
+                            // INVARIANT (guard at ArrangementResolver.cpp): entries
+                            // added for the slot must never exceed playCount.
+                            const bool leqPlayCount = (arr.entries.size() <= 3);
+                            bool sharedPos = countOk;
+                            bool membersOk = countOk;
+                            bool noD       = true;
+                            juce::Array<juce::Uuid> got;
+                            for (const auto& e : arr.entries) {
+                                if (countOk && e.timelinePos != arr.entries[0].timelinePos)
+                                    sharedPos = false;
+                                if (e.blockId == dId) noD = false;
+                                got.addIfNotAlreadyThere(e.blockId);
+                            }
+                            if (countOk) {
+                                if (got.size() != 3) membersOk = false;
+                                for (auto& id : stackIds) if (!got.contains(id)) membersOk = false;
+                            }
+                            const bool startsAtZero = countOk && arr.entries[0].timelinePos == 0;
+                            const bool truncOk = (arr.totalDurationSamples == expTotal61);
+
+                            if (!(countOk && leqPlayCount && sharedPos && membersOk
+                                  && noD && startsAtZero && truncOk)) {
+                                if (caseOk[k]) firstBad61 +=
+                                      " [ender=member" + juce::String(k + 1)
+                                    + " seed=" + juce::String(seed)
+                                    + " entries=" + juce::String(arr.entries.size())
+                                    + " sharedPos=" + (sharedPos ? "y" : "N")
+                                    + " members=" + juce::String(got.size())
+                                    + " D=" + (noD ? "absent" : "PLAYED")
+                                    + " total=" + juce::String(arr.totalDurationSamples)
+                                    + " want=" + juce::String(expTotal61) + "]";
+                                caseOk[k] = false;
+                            }
+                        }
+                    }
+
+                    verdict("T61 SONGEND-SIM: ender in member 1/2/3 of a 3-block SIMULTANEOUS stack (playCount 3) -> exactly 3 entries sharing ONE timelinePos in every case, song truncates AFTER the slot (tail included), trailing block never plays",
+                            caseOk[0] && caseOk[1] && caseOk[2],
+                            juce::String("entries[ender=m1,m2,m3]=")
+                            + juce::String(entriesSeen[0]) + "/"
+                            + juce::String(entriesSeen[1]) + "/"
+                            + juce::String(entriesSeen[2]) + " (want 3/3/3)"
+                            + ", 24 seeds x 3 placements: "
+                            + juce::String((caseOk[0] ? 1 : 0) + (caseOk[1] ? 1 : 0) + (caseOk[2] ? 1 : 0))
+                            + "/3 cases PASS, total==body+tail=" + juce::String(expTotal61)
+                            + firstBad61);
                 }
             }
 

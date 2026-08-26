@@ -21,8 +21,14 @@ public:
      *  ramps, no complementary join law and no per-entry stack attenuation —
      *  every entry sums at unity gain, lead-ins and tails included. Entry
      *  timing, lengths and timelinePos are unaffected either way.
-     *  Default FALSE: existing sessions keep the fade law byte-identically. */
-    bool unityGainMode = false;
+     *  Default TRUE (Carter 2026-08-22, retracting the 2026-08-21 request):
+     *  a fresh project / fresh install starts with raw summing ON. The single
+     *  source of truth for the default — the loader falls back to this same
+     *  constant for a .bsp with the key ABSENT, so legacy files follow the new
+     *  default while an EXPLICITLY stored choice is never silently overridden.
+     *  The inspector toggle stays user-switchable in both directions. */
+    static constexpr bool kDefaultUnityGainMode = true;
+    bool unityGainMode = kDefaultUnityGainMode;
 
     // Content
     juce::OwnedArray<Block>     blocks;

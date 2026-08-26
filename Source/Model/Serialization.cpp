@@ -99,8 +99,11 @@ bool projectFromJSON(const juce::var& json, Project& project, const juce::File& 
     project.name             = json.getProperty("name",            "Untitled").toString();
     project.sampleRate       = (double)json.getProperty("sampleRate",       48000.0);
     project.defaultClipTempo = (double)json.getProperty("defaultClipTempo", 120.0);
-    // RAWGAIN: absent (every pre-existing .bsp) → false, i.e. the fade law.
-    project.unityGainMode    = (bool)json.getProperty("unityGainMode",      false);
+    // RAWGAIN: absent (every pre-existing .bsp) → the current default, i.e.
+    // raw summing ON since 2026-08-22. An explicitly stored true/false is read
+    // back verbatim and never overridden by the default.
+    project.unityGainMode    = (bool)json.getProperty("unityGainMode",
+                                                      Project::kDefaultUnityGainMode);
 
     // BACKCOMPAT (2026-08-14): which stack-level fields each block ACTUALLY
     // carried in the JSON, as opposed to falling back to a constructor default.
