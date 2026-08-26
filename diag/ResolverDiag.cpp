@@ -4496,6 +4496,95 @@ int main(int argc, char* argv[]) {
                             + ", inBounds=" + (labelsInBounds ? "y" : "N"));
                 }
 
+                { // T65 (PERMANENT, LINKUI-DENSITY 2026-08-26, Carter screenshot on
+                  // 86cc4b6): CROSS-COLUMN link labels must not overlap each other when
+                  // several links crowd one strip. T63's scenario (2 same-column + 1
+                  // cross-column) was too sparse to catch this.
+                  //   Exact screenshot scenario: 5 single-block columns, links
+                  //   2<->3, 2<->5, 3<->5, 4<->5, all at 50%. Single-block columns make
+                  //   each tile fill the whole strip height, which is what starves the
+                  //   old push-up loop of headroom.
+                  //   (a) no two label GROUPS intersect — the group is name row + pill
+                  //       + backing plate as ONE rect, not just the name row;
+                  //   (b) every label stays inside the strip;
+                  //   (c) DENSER CASE, 6 links, to check the lane rule scales.
+                    using namespace LinkArcLayout;
+
+                    const float sW = 900.0f, sH = 360.0f;
+                    const float tW = 100.0f, tGap = 10.0f, pad = 8.0f;
+                    const float tTop = 0.0f, tH = 340.0f;      // single-block column: full height
+
+                    Config cfg65;
+                    cfg65.width = sW; cfg65.height = sH; cfg65.cy = sH * 0.5f;
+                    cfg65.colHalfW = tW * 0.5f;
+
+                    std::vector<juce::Rectangle<float>> tiles65;
+                    for (int i = 0; i < 5; ++i)
+                        tiles65.push_back({ pad + (float)i * (tW + tGap), tTop, tW, tH });
+                    auto centreOf = [&](int oneBased) {
+                        return tiles65[(size_t)(oneBased - 1)].getCentreX();
+                    };
+                    auto anchorAt = [&](int oneBased) {
+                        Anchor a;
+                        a.x = centreOf(oneBased);
+                        a.y = tiles65[(size_t)(oneBased - 1)].getCentreY();
+                        a.valid = true;
+                        return a;
+                    };
+                    // "Block 2 <-> Block 3" at 10pt ~ 96px incl. padding; "50%" ~ 34px.
+                    auto mk65 = [&](int a, int b) {
+                        LinkIn in; in.a = anchorAt(a); in.b = anchorAt(b);
+                        in.labelW = 96.0f; in.pillW = 34.0f;
+                        return in;
+                    };
+
+                    auto worstOverlap = [&](const std::vector<Placed>& placed,
+                                            juce::String& detail) {
+                        int pairs = 0;
+                        for (size_t i = 0; i < placed.size(); ++i)
+                            for (size_t j = i + 1; j < placed.size(); ++j) {
+                                if (!placed[i].visible || !placed[j].visible) continue;
+                                if (placed[i].labelBox.intersects(placed[j].labelBox)) {
+                                    ++pairs;
+                                    auto ov = placed[i].labelBox.getIntersection(placed[j].labelBox);
+                                    detail << " (" << (int)i << "," << (int)j << ")="
+                                           << juce::String((int)ov.getWidth()) << "x"
+                                           << juce::String((int)ov.getHeight());
+                                }
+                            }
+                        return pairs;
+                    };
+                    const juce::Rectangle<float> strip65(0.0f, 0.0f, sW, sH);
+                    auto allInBounds = [&](const std::vector<Placed>& placed) {
+                        for (auto& p : placed)
+                            if (p.visible && !strip65.contains(p.labelBox)) return false;
+                        return true;
+                    };
+
+                    // ── (a)(b) the screenshot's four links ──────────────────────────
+                    std::vector<LinkIn> links65 { mk65(2,3), mk65(2,5), mk65(3,5), mk65(4,5) };
+                    auto placed65 = layout(links65, cfg65, tiles65);
+                    juce::String detail4;
+                    const int overlaps4  = worstOverlap(placed65, detail4);
+                    const bool inBounds4 = allInBounds(placed65);
+
+                    // ── (c) denser: 6 links over the same 5 columns ─────────────────
+                    std::vector<LinkIn> dense65 {
+                        mk65(1,5), mk65(2,5), mk65(3,5), mk65(4,5), mk65(1,3), mk65(2,4)
+                    };
+                    auto placedD = layout(dense65, cfg65, tiles65);
+                    juce::String detailD;
+                    const int overlapsD  = worstOverlap(placedD, detailD);
+                    const bool inBoundsD = allInBounds(placedD);
+
+                    verdict("T65 LINKUI-DENSITY: crowded CROSS-COLUMN link labels never overlap (screenshot case 2<->3,2<->5,3<->5,4<->5 over 5 full-height columns) and stay inside the strip; lane rule also holds for a denser 6-link case",
+                            overlaps4 == 0 && inBounds4 && overlapsD == 0 && inBoundsD,
+                            juce::String("4-link: overlappingPairs=") + juce::String(overlaps4) + detail4
+                            + ", inBounds=" + (inBounds4 ? "y" : "N")
+                            + " | 6-link: overlappingPairs=" + juce::String(overlapsD) + detailD
+                            + ", inBounds=" + (inBoundsD ? "y" : "N"));
+                }
+
                 { // T64 (PERMANENT, ASCII/MOJIBAKE 2026-08-26): user-visible strings
                   // must not carry a code-page mojibake. BACKGROUND: the build passes
                   // no /utf-8 to MSVC and the sources have no UTF-8 BOM, so MSVC reads

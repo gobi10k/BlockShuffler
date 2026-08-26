@@ -100,6 +100,16 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
             g.strokePath(arc, juce::PathStrokeType(2.0f,
                               juce::PathStrokeType::curved,
                               juce::PathStrokeType::rounded));
+
+            // The lane pass may slide a label sideways to clear a tile or another
+            // label. When it does, draw the same leader the same-column brackets
+            // use, so the label stays visibly tied to its own arc.
+            const float midX = (p.anchorX1 + p.anchorX2) * 0.5f;
+            if (std::abs(p.labelBox.getCentreX() - midX) > 8.0f) {
+                g.setColour(col.withMultipliedAlpha(0.65f));
+                g.drawLine(midX, p.arcControlY,
+                           p.labelBox.getCentreX(), p.labelBox.getBottom() + 2.0f, 1.0f);
+            }
         }
 
         // Name row — backed so it stays readable over an arc passing behind it.
