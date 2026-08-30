@@ -113,6 +113,39 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-08-30 — Link labels: natural placement restored (Carter), and the label-overlap root cause found (it was not fonts)
+- What I changed (files):
+  - `Source/UI/LinkArcLayout.h` — placement rewritten. Every label starts at its OWN arc's natural position; only a label that would actually overlap another is moved, by the smallest displacement that clears it. Cross-column labels are 86cc4b6's placement verbatim (centred on the arc midpoint, riding an arc band that steps up with link index). Same-column labels now sit BESIDE the bow apex at the apex's height, outside the column, per Carter's sketch — they used to float above the tiles. Arc geometry, side/depth alternation, bounds clamping and the backing plate are untouched.
+  - `Source/UI/BlockLinkOverlay.cpp` — leader lines only for a label a collision actually displaced (was an 8px heuristic); measurement routed through LinkLabelMetrics.
+  - `Source/UI/LinkLabelMetrics.h` (NEW) — the single definition of a link label's width: the fonts, the text, the measurement call and the padding, shared by `paint()` and the tests.
+  - `Source/MainComponent.cpp` — registers `LookAndFeel_BlockShuffler` as the DEFAULT LookAndFeel (and hands it back in the dtor).
+  - `diag/ResolverDiag.cpp` — harness installs the same LookAndFeel; T63/T65 measure text instead of quoting it and now assert no label was DROPPED; **T66 NEW (permanent)**.
+- What I proved (PASS/FAIL):
+  - **The "Windows-only" framing is wrong, and this is the important finding.** Measurement and drawing already agreed: `paint()` passes ONE Font object to both `measureTextWidth()` and `g.setFont()`, and JUCE 8 shapes both through the same ShapedText path. Probed on both platforms — macOS measured 86.15 vs 86.00px of drawn ink, Windows 77.12 vs 77.00. No measure-vs-draw divergence exists. DPI is not implicated either (globalScale = 1 on both).
+  - **But the app has never used its own fonts.** `LookAndFeel_BlockShuffler` loads Inter/JetBrains Mono from BinaryData, and MainComponent installed it with `setLookAndFeel()` — component-local. JUCE routes every Font→Typeface through the DEFAULT LookAndFeel only. Probe: "Inter" resolved to **Arial on Windows** and to the system sans on macOS, and a deliberately bogus family name gave the same face and the same widths on both. `"Block 2 <-> Block 3"` = 86.15px macOS vs 77.12px Windows, ~10% apart — so a layout verified on a Mac was never verified for Windows. FIXED.
+  - **Real root cause of the overlap:** 74a439d's fallback placed a label in the top lane WITHOUT re-checking it was free, and never clamped Y. Below ~208px of strip height there is room for exactly ONE lane, and the strip is a user-dragged pane that goes down to `blocksMinH = 140`. A short/narrow strip ran out of slots and overlapped silently. Windows display scaling shrinks the logical window, which is why Carter hit it and Alec did not — the metrics were a red herring.
+  - Sweeping macOS **and** Windows widths side by side through the pre-fix layout: **76 bad cells for both, zero Windows-only cells.** That is what ruled the font theory out.
+  - T66 (new): 240 cells — every strip height `blocksMinH`..`blocksDefaultH`, 6 widths, 4–8 links — at the widths the running platform really measures. Asserts no overlap, no dropped label, none out of bounds.
+  - NEGATIVE CONTROL, Part A: disabling the separation guarantee → T65 reports 3 and 5 overlapping pairs, T46's four pills collapse to one.
+  - NEGATIVE CONTROL, Part B: pre-fix `LinkArcLayout.h` against the post-fix tests → T66 FAILS, badCells=58, overlappingPairs=190, first bad cell 140x420 with 5 links (branch `scratch/win-negctl-prefix-labels`, CI job inverts its own pass condition).
+  - **WINDOWS CI, negative control — run 33308569379:** `T66 ... FAIL cells=240, badCells=58, overlappingPairs=190, firstBad=140x420/5links`, `STEP6 RESULT: 1 FAILED`. Byte-identical to the macOS numbers, which is the point: the overlap is NOT a platform-metrics effect.
+  - **WINDOWS CI, fixed tree — run 33308817729 (HEAD 6c294ce): `STEP6 RESULT: ALL PASS`**, T66 `cells=240, badCells=0, overlappingPairs=0, droppedLabels=0, outOfBounds=0`.
+  - **Font probe — run 33307710048** (branch `scratch/win-fontprobe-labels`): the raw Windows evidence quoted above (Inter→Arial, 77.12 vs 86.15px, measured≈drawn on both).
+  - macOS: full suite ALL PASS. Release standalone builds clean (`build-release`, `BlockShuffler_Standalone`).
+  - `git diff --stat 74a439d..HEAD` = `Source/MainComponent.cpp`, `Source/UI/BlockLinkOverlay.cpp`, `Source/UI/LinkArcLayout.h`, `Source/UI/LinkLabelMetrics.h`, `diag/ResolverDiag.cpp` — UI + harness only. No resolver, audio, model or serialization change.
+- What regressed or surprised me:
+  - T63/T65 had `labelW=96`/`pillW=34` typed in — the **macOS** numbers, frozen. They could only ever prove self-consistency for one platform's metrics, and each fixed ONE strip size, which is why they stayed green while Carter watched labels overlap. Both now measure, and T66 covers the envelope instead of a point.
+  - My first rewrite also enforced "clear of the tiles" as an absolute first pass. With single-block columns (tiles fill the strip height) the only tile-free ground is past the last column, so every label emigrated there on a 200px leader — technically clear, useless to read, and it threw away the natural placement this round exists to restore. Caught by **rendering the overlay to a PNG and looking at it**, which I should have done before calling Part A finished. Clearing a tile is now priced at 70px of displacement rather than being unbounded.
+  - My first rewrite pushed labels UP only. On a 140px strip every natural position clamps to the top margin, so the space *below* went unused and 176 labels were dropped across the envelope. Downward displacement added (priced at 1.25x upward); drops went to 0.
+  - Carter's sketch was described in the task text but **no image was attached** — the same-column rule was implemented from the written description ("beside the bow apex, at the apex's height, outside the stack column"). Worth a look before sign-off.
+- NEXT SESSION should:
+  1. HOLD is open: Alec eyeballs on Mac, Carter confirms on Windows.
+  2. Delete the scratch branches once confirmed: `scratch/win-fontprobe-labels`, `scratch/win-negctl-prefix-labels` (both carry CI-trigger edits and are not for merge).
+  3. Now that the embedded fonts actually render, **all** text in the app changed metrics slightly — worth one pass over the inspector/strip for clipped labels.
+
+---
+
+
 ### 2026-08-26 — Link labels: span-ordered LANES (crowded cross-column strips no longer overlap)
 - Carter screenshot on 86cc4b6: 5 blocks, links 2<->3, 2<->5, 3<->5, 4<->5 — labels and their "50%" pills overlapping. Rendering only; no link semantics, no resolver.
 - **STEP 1 — failure on record FIRST (T61 precedent).** T65 reproduces the exact scenario headlessly (5 single-block columns, those four links, 900x360 strip) and FAILED on the pre-fix tree: `4-link: overlappingPairs=2 (1,2)=41x27 (2,3)=41x27` and `6-link: overlappingPairs=5`. T63 had passed throughout because its scenario (2 same-column + 1 cross-column) is too sparse.
