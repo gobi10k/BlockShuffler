@@ -307,15 +307,13 @@ static int generateManualRound(const juce::File& dir) {
 int main(int argc, char* argv[]) {
     juce::ScopedJuceInitialiser_GUI init;
 
-    // The harness must resolve fonts exactly the way the app does, or every
-    // text-measurement assertion below is measuring a face the app never draws
-    // with. MainComponent registers this same LookAndFeel as the default; JUCE
-    // routes Font -> Typeface through the DEFAULT LookAndFeel only, so without
-    // this line "Inter" falls back to a platform face and the widths the tests
-    // check are not the widths the user sees.
-    BlockShuffler::LookAndFeel_BlockShuffler diagLookAndFeel;
-    juce::LookAndFeel::setDefaultLookAndFeel(&diagLookAndFeel);
-    struct LnfReset { ~LnfReset() { juce::LookAndFeel::setDefaultLookAndFeel(nullptr); } } lnfReset;
+    // NOTE: this harness deliberately does NOT register LookAndFeel_BlockShuffler
+    // as the default. Neither does the app on this branch, so both resolve "Inter"
+    // the same way the platform does -- to the system fallback face. The label
+    // tests below therefore measure exactly the metrics the user gets. Registering
+    // the LookAndFeel (so the embedded Inter is really used) is a separate change
+    // on branch font/inter-default: it moves EVERY string in the app, so it needs
+    // its own full-UI pass on both platforms before it ships.
 
     if (argc >= 3 && juce::String(argv[1]) == "--gen-manual")
         return generateManualRound(juce::File(juce::String(argv[2])));
