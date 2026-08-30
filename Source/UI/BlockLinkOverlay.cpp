@@ -89,10 +89,13 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
             g.strokePath(arc, juce::PathStrokeType(2.0f,
                               juce::PathStrokeType::curved,
                               juce::PathStrokeType::rounded));
-            // Leader from the bow apex up to the label it belongs to.
-            g.setColour(col.withMultipliedAlpha(0.65f));
-            g.drawLine(p.apexX, p.apexY,
-                       p.labelBox.getCentreX(), p.labelBox.getBottom() + 2.0f, 1.0f);
+            // The label normally sits right beside the apex, so it needs no
+            // leader. One is drawn only when a collision moved it off that spot.
+            if (p.labelVisible && p.displaced) {
+                const juce::Point<float> apex(p.apexX, p.apexY);
+                g.setColour(col.withMultipliedAlpha(0.65f));
+                g.drawLine({ apex, p.labelBox.getConstrainedPoint(apex) }, 1.0f);
+            }
         } else {
             arc.startNewSubPath(p.anchorX1, p.anchorY1);
             arc.cubicTo(p.anchorX1, p.arcControlY, p.anchorX2, p.arcControlY,
@@ -101,16 +104,18 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
                               juce::PathStrokeType::curved,
                               juce::PathStrokeType::rounded));
 
-            // The lane pass may slide a label sideways to clear a tile or another
-            // label. When it does, draw the same leader the same-column brackets
-            // use, so the label stays visibly tied to its own arc.
-            const float midX = (p.anchorX1 + p.anchorX2) * 0.5f;
-            if (std::abs(p.labelBox.getCentreX() - midX) > 8.0f) {
+            // A label sits on its own arc by default. Only one that a collision
+            // actually displaced gets a leader tying it back to its arc.
+            if (p.labelVisible && p.displaced) {
+                const juce::Point<float> mid((p.anchorX1 + p.anchorX2) * 0.5f, p.arcControlY);
                 g.setColour(col.withMultipliedAlpha(0.65f));
-                g.drawLine(midX, p.arcControlY,
-                           p.labelBox.getCentreX(), p.labelBox.getBottom() + 2.0f, 1.0f);
+                g.drawLine({ mid, p.labelBox.getConstrainedPoint(mid) }, 1.0f);
             }
         }
+
+        // The label is skipped only when the strip had no room for it anywhere
+        // without covering another label; the arc above is still drawn.
+        if (!p.labelVisible) { ++linkIndex; continue; }
 
         // Name row — backed so it stays readable over an arc passing behind it.
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgDark).withAlpha(0.82f));

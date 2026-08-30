@@ -2,52 +2,63 @@
 // ── LinkArcLayout (2026-08-22, Carter link-mode render round) ────────────────
 // PURE geometry for BlockLinkOverlay: where each link's arc is anchored and
 // where its two label rows sit. No Graphics, no Component, no model — so the
-// placement rules are testable headlessly (diag T63).
+// placement rules are testable headlessly (diag T63/T65/T66).
 //
-// GEOMETRY RULE
+// GEOMETRY RULE (unchanged since round 3)
 //   CROSS-COLUMN link (the two blocks sit in different slots, x1 != x2):
-//     unchanged from the original overlay — the arc is a cubic between the two
-//     tile centres at the strip's mid-height, rising to meet its label.
+//     the arc is a cubic between the two tile centres at the strip's mid-height,
+//     rising to meet its label.
 //
 //   SAME-COLUMN link (both endpoints are members of one stack, so their centre
-//   X values coincide): the old code drew cubicTo(x1,..,x2,..) with x1 == x2,
-//   which degenerates into a straight vertical line THROUGH the stacked tiles.
-//   Instead the arc is anchored on one SIDE of the column — at x ± colHalfW,
-//   at each endpoint's own centre Y — and bows further out to an apex at
-//   x ± (colHalfW + bowBase + k*bowStep). k is the index of the link among the
-//   same-column links of that column, and the side alternates with k, so two
-//   links in one stack never trace the same bracket. A leader line joins the
-//   apex to the label.
+//   X values coincide): a straight cubic would degenerate into a vertical line
+//   THROUGH the stacked tiles. Instead the arc is anchored on one SIDE of the
+//   column — at x ± colHalfW, at each endpoint's own centre Y — and bows further
+//   out to an apex at x ± (colHalfW + bowBase + k*bowStep). k is the index of the
+//   link among the same-column links of that column, and the side alternates with
+//   k, so two links in one stack never trace the same bracket.
 //
-//   LABELS — SPAN-ORDERED LANES (rewritten 2026-08-26 after the crowded-strip
-//   defect: 5 columns with links 2<->3, 2<->5, 3<->5, 4<->5 overlapped).
-//   The previous pass pushed each label up until it cleared BOTH the other
-//   labels AND the reserved rects, using one predicate for both. With
-//   single-block columns each tile fills the whole strip height, so the
-//   reserved constraint is UNSATISFIABLE EVERYWHERE: every candidate failed,
-//   every fallback lane was exhausted, and the last failed trial was kept —
-//   which threw away the label-vs-label separation along with it.
+// LABEL RULE (rewritten 2026-08-30 — Carter rejected the lane layout of 74a439d)
 //
-//   So the two constraints are now ranked, not merged:
-//     * label-vs-label separation is a HARD guarantee, delivered by lanes;
-//     * avoiding the reserved rects is a PREFERENCE, honoured when some lane
-//       allows it and dropped when none does.
+//   THE RULE, in one line: every label starts at its OWN arc's natural position,
+//   and only a label that would actually overlap another label is moved, by the
+//   smallest displacement that clears it.
 //
-//   Lanes are horizontal bands one label-group tall, stacked upward from just
-//   above the arc band. Links are placed in order of ARC SPAN, narrowest
-//   first, each taking the LOWEST lane with a free horizontal slot. Widest
-//   arcs therefore end up highest and their labels nest exactly the way the
-//   arcs already nest. A lane is reused whenever the x-intervals do not
-//   overlap, so lane count grows with crowding, not with link count.
+//   Natural position:
+//     * CROSS-COLUMN — centred on the arc's midpoint X, riding just above the
+//       arc band at cy - (arcHBase + i*arcHStep) - H - 4, i.e. each link's arc
+//       and its label rise together. This is exactly the 86cc4b6 placement.
+//     * SAME-COLUMN — BESIDE the bow apex and OUTSIDE the stack column, on the
+//       side the bow points, vertically CENTRED on the apex (Carter's sketch,
+//       2026-08-30). It no longer floats above the tiles as it did at 86cc4b6.
 //
-//   DEGRADATION (predictable, never silent overlap): if every lane is blocked
-//   at the preferred x, the label is placed in the TOP lane and slid sideways
-//   to the nearest free slot, right first then left. Only if the strip has no
-//   free slot at all in that lane is the label clamped and `degraded` set, so
-//   a caller can see capacity was exceeded. The bounds clamp is applied last
-//   and always wins — a label outside the component is invisible.
+//   Displacement, only for labels that collide, nearest-first: candidates are
+//   ranked by how far they move the label (vertical push weighted 1.0,
+//   horizontal slide 0.5, so a label prefers to rise over its own arc before it
+//   slides off it) and the CHEAPEST candidate that is free wins. Lanes are what
+//   this degenerates into when a strip is crowded — a consequence, not the layout.
+//
+//   TWO CONSTRAINTS, RANKED (the ranking is what 74a439d got right and is kept):
+//     * label-vs-label separation is a HARD guarantee;
+//     * clearing the block tiles is a PREFERENCE.
+//   So the candidate list is walked twice: once demanding the tiles be clear,
+//   then, only if that found nothing, once ignoring them. With single-block
+//   columns each tile fills the whole strip height and the tile constraint is
+//   unsatisfiable everywhere — that must never be allowed to destroy separation.
+//
+//   NO FAILED TRIAL IS EVER KEPT. This is the -104 bug of 86cc4b6: `box = trial`
+//   sat at the bottom of the search loop, so when every candidate failed the LAST
+//   REJECTED one was written out, shifting every label by the same amount and
+//   stacking them on top of each other. Here a box is only ever assigned from a
+//   candidate that PASSED. If no candidate passes in either walk, the label is
+//   not drawn at all (labelVisible = false, degraded = true) — the arc still is.
+//   An undrawn label is a visible loss of information; two labels drawn on top of
+//   each other are a visible loss of information AND a lie about which is which.
+//
+//   The bounds clamp is applied to every candidate BEFORE it is tested, so a
+//   label that passes is both inside the strip and clear of its neighbours.
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <algorithm>
 #include <vector>
 #include <cmath>
 
@@ -77,22 +88,23 @@ struct Config {
     float pillH    = 15.0f;
     float rowGap   =  2.0f;
 
-    float arcHBase = 36.0f;
-    float arcHStep = 22.0f;   // retained for callers; lanes no longer stagger by index
-
-    float laneGap  =  4.0f;   // vertical gap between lanes
-    float slotGap  =  6.0f;   // horizontal gap between labels sharing a lane
+    float arcHBase = 36.0f;  ///< height of the first cross-column arc above cy
+    float arcHStep = 22.0f;  ///< extra height per subsequent link, so arcs nest
 
     float bowBase  = 20.0f;  ///< how far past the tile edge the first bracket bows
     float bowStep  = 16.0f;  ///< extra bow per additional link in the same column
+    float labelGap =  6.0f;  ///< gap between a same-column bow apex and its label
 
+    float slotGap  =  6.0f;  ///< clear space required between two label groups
     float margin   =  2.0f;
-    float pushStep = 18.0f;
-    int   maxPush  = 24;
+
+    float pushStep = 18.0f;  ///< one vertical displacement step
+    int   maxPush  = 24;     ///< most steps a label may be pushed up
+    float slideStep=  8.0f;  ///< one horizontal displacement step
 };
 
 struct Placed {
-    bool  visible    = false;
+    bool  visible    = false;   ///< both endpoints on screen: draw the ARC
     bool  sameColumn = false;
 
     float anchorX1 = 0.0f, anchorY1 = 0.0f;   ///< where the arc meets the first tile
@@ -105,8 +117,9 @@ struct Placed {
     juce::Rectangle<float> nameRect;
     juce::Rectangle<float> pillRect;
 
-    int  lane     = 0;        ///< 0 = lowest (narrowest arc); higher = wider arc
-    bool degraded = false;    ///< true only if the strip ran out of lane capacity
+    bool labelVisible = false;  ///< false only when no free position existed at all
+    bool displaced    = false;  ///< true when a collision moved it off its natural spot
+    bool degraded     = false;  ///< true only if the strip ran out of room entirely
 };
 
 inline float totalLabelH(const Config& c) { return c.nameRowH + c.rowGap + c.pillH; }
@@ -118,8 +131,9 @@ inline bool isSameColumn(float x1, float x2) { return std::abs(x2 - x1) < 4.0f; 
 /**
  *  @param links     one entry per project link, in project order.
  *  @param cfg       strip geometry.
- *  @param reserved  rectangles labels must avoid — the block tiles, so a label
- *                   can never land on a block's name.
+ *  @param reserved  rectangles labels should avoid — the block tiles, so a label
+ *                   does not land on a block's name. A PREFERENCE, not a
+ *                   guarantee: see the ranking note at the top of this file.
  *  @return          one Placed per input, index-aligned; `visible` is false for
  *                   links whose endpoints are not both on screen.
  */
@@ -129,6 +143,11 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
 {
     const float H = totalLabelH(cfg);
     std::vector<Placed> out(links.size());
+
+    // Committed label boxes. A box only ever lands here after it has been proven
+    // free of every box already in it, which is what makes separation a guarantee
+    // rather than an outcome.
+    std::vector<juce::Rectangle<float>> committed;
 
     // Per-column counter, so several links inside one stack bow to different
     // depths and alternating sides instead of tracing the same bracket.
@@ -140,12 +159,25 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         return 0;
     };
 
-    // ── 1. Arc geometry + each label's PREFERRED centre X ────────────────────
-    // Unchanged from the previous revision: cross-column arcs anchor at the two
-    // tile centres at mid-height, same-column arcs bracket out to the side of
-    // the column. Only where the LABEL ends up is decided differently below.
-    struct Item { size_t idx; float span, anchorX, boxW; };
-    std::vector<Item> items;
+    auto clampBox = [&](juce::Rectangle<float> r) {
+        if (r.getRight()  > cfg.width  - cfg.margin) r.setX(cfg.width  - cfg.margin - r.getWidth());
+        if (r.getX()      < cfg.margin)              r.setX(cfg.margin);
+        if (r.getBottom() > cfg.height - cfg.margin) r.setY(cfg.height - cfg.margin - r.getHeight());
+        if (r.getY()      < cfg.margin)              r.setY(cfg.margin);
+        return r;
+    };
+    auto freeOfLabels = [&](const juce::Rectangle<float>& r) {
+        for (auto& c : committed)
+            if (r.getRight()  + cfg.slotGap > c.getX()
+             && c.getRight()  + cfg.slotGap > r.getX()
+             && r.getBottom() > c.getY()
+             && c.getBottom() > r.getY()) return false;
+        return true;
+    };
+    auto clearOfTiles = [&](const juce::Rectangle<float>& r) {
+        for (auto& t : reserved) if (r.intersects(t)) return false;
+        return true;
+    };
 
     for (size_t i = 0; i < links.size(); ++i) {
         const auto& in = links[i];
@@ -153,17 +185,20 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         if (!in.a.valid || !in.b.valid) continue;
         p.visible = true;
 
-        const float boxW = juce::jmax(in.labelW, in.pillW)
-                         + 4.0f;   // the drawn name plate is nameRect.expanded(2,1),
-                                   // so the collision unit must cover that overhang
+        // The drawn name plate is nameRect.expanded(2,1), so the collision unit
+        // must cover that overhang or two labels can touch plate-to-plate.
+        const float boxW = juce::jmax(in.labelW, in.pillW) + 4.0f;
         p.sameColumn = isSameColumn(in.a.x, in.b.x);
 
-        float labelAnchorX;
+        // ── Arc geometry + this label's NATURAL position ─────────────────────
+        float naturalX, naturalTop;
         if (p.sameColumn) {
             const float colX = (in.a.x + in.b.x) * 0.5f;
             const int   k    = nextColumnIndex(colX);
             const float bow  = cfg.colHalfW + cfg.bowBase + (float)k * cfg.bowStep;
 
+            // Side/depth choice is round-3 arc geometry and is left exactly as it
+            // was: the label clamp, not the bow, absorbs a tight edge.
             float side = ((k % 2) == 0) ? 1.0f : -1.0f;
             if (colX + bow + boxW * 0.5f > cfg.width  - cfg.margin) side = -1.0f;
             if (colX - bow - boxW * 0.5f < cfg.margin)              side =  1.0f;
@@ -172,110 +207,90 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
             p.anchorX2 = colX + side * cfg.colHalfW;  p.anchorY2 = in.b.y;
             p.apexX    = colX + side * bow;
             p.apexY    = (in.a.y + in.b.y) * 0.5f;
-            labelAnchorX = p.apexX;
+
+            // Carter's sketch: BESIDE the apex, at the apex's height, outside the
+            // column — not stacked above the tiles.
+            naturalX   = p.apexX + side * (cfg.labelGap + boxW * 0.5f) - boxW * 0.5f;
+            naturalTop = p.apexY - H * 0.5f;
         } else {
             p.anchorX1 = in.a.x; p.anchorY1 = cfg.cy;
             p.anchorX2 = in.b.x; p.anchorY2 = cfg.cy;
-            labelAnchorX = (in.a.x + in.b.x) * 0.5f;
+
+            // 86cc4b6's placement, restored verbatim: centred on the arc midpoint,
+            // riding just above an arc band that steps up with the link index.
+            naturalX   = (in.a.x + in.b.x) * 0.5f - boxW * 0.5f;
+            naturalTop = cfg.cy - (cfg.arcHBase + (float)i * cfg.arcHStep) - H - 4.0f;
         }
 
-        // A same-column bracket spans no horizontal distance, so it sorts as the
-        // narrowest and settles in the lowest lane — right beside its own column.
-        const float span = p.sameColumn ? 0.0f : std::abs(in.b.x - in.a.x);
-        items.push_back({ i, span, labelAnchorX, boxW });
-    }
+        const auto naturalBox = clampBox({ naturalX, naturalTop, boxW, H });
 
-    // ── 2. Lane assignment, narrowest arc first ──────────────────────────────
-    // Ordering is total and deterministic (span, then anchor, then index) so the
-    // same project always lays out identically.
-    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
-        if (a.span != b.span)       return a.span < b.span;
-        if (a.anchorX != b.anchorX) return a.anchorX < b.anchorX;
-        return a.idx < b.idx;
-    });
+        // The arc is drawn to its OWN natural height whatever happens to the
+        // label, so a displaced label drags a leader line rather than the arc.
+        p.arcControlY = naturalBox.getBottom() + 4.0f;
 
-    const float lanePitch  = H + cfg.laneGap;
-    const float bandBottom = cfg.cy - cfg.arcHBase;
-    auto laneTop = [&](int k) { return bandBottom - H - (float)k * lanePitch; };
-    int maxLane = 0;
-    while (laneTop(maxLane + 1) >= cfg.margin) ++maxLane;
-
-    std::vector<std::vector<juce::Rectangle<float>>> laneBoxes((size_t)maxLane + 1);
-
-    auto clampX = [&](float x, float w) {
-        return juce::jlimit(cfg.margin, juce::jmax(cfg.margin, cfg.width - cfg.margin - w), x);
-    };
-    auto freeInLane = [&](int k, const juce::Rectangle<float>& r) {
-        for (auto& placed : laneBoxes[(size_t)k])
-            if (r.getRight() + cfg.slotGap > placed.getX()
-             && placed.getRight() + cfg.slotGap > r.getX()) return false;
-        return true;
-    };
-    auto hitsReserved = [&](const juce::Rectangle<float>& r) {
-        for (auto& res : reserved) if (r.intersects(res)) return true;
-        return false;
-    };
-
-    // Search order, most desirable first. Keeping a label centred on its own arc
-    // matters more than clearing a tile (a leader line and a backing plate keep it
-    // readable over one), and clearing a tile matters more than nothing at all.
-    //   A: some lane, centred on the arc, clear of the tiles
-    //   B: some lane, slid sideways,     clear of the tiles
-    //   C: some lane, centred on the arc, tiles ignored
-    //   D: some lane, slid sideways,     tiles ignored
-    // Within each pass the LOWEST lane wins, so narrow arcs stay low and wide ones
-    // rise — the nesting the arcs already have.
-    for (const auto& it : items) {
-        auto& p = out[it.idx];
-        const float x0 = clampX(it.anchorX - it.boxW * 0.5f, it.boxW);
-
-        auto tryAt = [&](int k, float x, bool needClearOfTiles,
-                         juce::Rectangle<float>& hit) {
-            juce::Rectangle<float> r(clampX(x, it.boxW), laneTop(k), it.boxW, H);
-            if (!freeInLane(k, r)) return false;
-            if (needClearOfTiles && hitsReserved(r)) return false;
-            hit = r;
-            return true;
-        };
+        // ── Displacement search, nearest first ───────────────────────────────
+        // Candidates are ranked by distance from natural. Vertical is cheaper than
+        // horizontal so a crowded label rises over its own arc before it slides
+        // away from it — which is how the lanes people liked emerge naturally.
+        struct Cand { float cost; float dy, dx; };
+        std::vector<Cand> cands;
+        const int slideMax = (int)std::ceil(cfg.width  / juce::jmax(1.0f, cfg.slideStep));
+        const int pushMax  = (int)std::ceil(cfg.height / juce::jmax(1.0f, cfg.pushStep));
+        const int upMax    = juce::jmax(cfg.maxPush, pushMax);
+        for (int sy = -upMax; sy <= pushMax; ++sy) {
+            const float dy = (float)sy * cfg.pushStep;
+            // Up is cheaper than down: a label rises over its own arc the way the
+            // arcs already nest, and only drops below it when the strip is so short
+            // that the space above is spent (a 140px strip clamps every natural
+            // position to the top margin, and downward is then the ONLY room left).
+            const float dyCost = std::abs(dy) * (sy <= 0 ? 1.0f : 1.25f);
+            for (int sx = 0; sx <= slideMax; ++sx) {
+                const float dx = (float)sx * cfg.slideStep;
+                const float cost = dyCost + dx * 0.5f;
+                if (sx == 0) { cands.push_back({ cost, dy, 0.0f }); continue; }
+                cands.push_back({ cost, dy,  dx });
+                cands.push_back({ cost, dy, -dx });
+            }
+        }
+        std::stable_sort(cands.begin(), cands.end(),
+                         [](const Cand& l, const Cand& r) { return l.cost < r.cost; });
 
         juce::Rectangle<float> box;
-        int  chosen = -1;
-        bool found  = false;
-
-        for (int pass = 0; pass < 4 && !found; ++pass) {
-            const bool needClear = (pass < 2);
-            const bool slide     = (pass % 2) == 1;
-            for (int k = 0; k <= maxLane && !found; ++k) {
-                if (!slide) {
-                    if (tryAt(k, x0, needClear, box)) { chosen = k; found = true; }
-                } else {
-                    for (float step = it.boxW + cfg.slotGap;
-                         step < cfg.width && !found; step += it.boxW + cfg.slotGap)
-                        for (float dir : { 1.0f, -1.0f })
-                            if (tryAt(k, x0 + dir * step, needClear, box)) {
-                                chosen = k; found = true; break;
-                            }
-                }
+        bool settled = false;
+        // Walk 1 demands the tiles be clear; walk 2 gives that preference up. The
+        // hard test (freeOfLabels) is applied in BOTH, so an unsatisfiable tile
+        // constraint can never cost us separation.
+        for (int walk = 0; walk < 2 && !settled; ++walk) {
+            for (const auto& c : cands) {
+                const auto trial = clampBox({ naturalBox.getX() + c.dx,
+                                              naturalBox.getY() + c.dy, boxW, H });
+                if (!freeOfLabels(trial)) continue;
+                if (walk == 0 && !clearOfTiles(trial)) continue;
+                box = trial;                 // assigned ONLY on success — never a
+                settled = true;              // rejected trial (the -104 bug).
+                break;
             }
         }
 
-        if (!found) {
-            // Capacity exceeded: top lane at the preferred x, clamped. Recorded so a
-            // caller can tell the strip ran out of room rather than silently guessing.
-            chosen = maxLane;
-            box = juce::Rectangle<float>(x0, laneTop(chosen), it.boxW, H);
-            p.degraded = true;
+        if (!settled) {
+            // Nowhere in the strip can this label go without covering another one.
+            // Say so; do not draw it, and do not corrupt anyone else's placement.
+            p.labelVisible = false;
+            p.degraded     = true;
+            p.labelBox     = {};
+            continue;
         }
 
-        laneBoxes[(size_t)chosen].push_back(box);
-        p.lane     = chosen;
-        p.labelBox = box;
-        p.nameRect = juce::Rectangle<float>(box.getCentreX() - links[it.idx].labelW * 0.5f,
-                                            box.getY(), links[it.idx].labelW, cfg.nameRowH);
-        p.pillRect = juce::Rectangle<float>(box.getCentreX() - links[it.idx].pillW * 0.5f,
-                                            box.getY() + cfg.nameRowH + cfg.rowGap,
-                                            links[it.idx].pillW, cfg.pillH);
-        p.arcControlY = box.getBottom() + 4.0f;
+        committed.push_back(box);
+        p.labelVisible = true;
+        p.displaced    = std::abs(box.getX() - naturalBox.getX()) > 0.5f
+                      || std::abs(box.getY() - naturalBox.getY()) > 0.5f;
+        p.labelBox     = box;
+        p.nameRect     = juce::Rectangle<float>(box.getCentreX() - in.labelW * 0.5f,
+                                                box.getY(), in.labelW, cfg.nameRowH);
+        p.pillRect     = juce::Rectangle<float>(box.getCentreX() - in.pillW * 0.5f,
+                                                box.getY() + cfg.nameRowH + cfg.rowGap,
+                                                in.pillW, cfg.pillH);
     }
 
     return out;
