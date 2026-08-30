@@ -113,6 +113,26 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-08-30 (b) — Link labels: culled with their arcs, so scrolling no longer strands one at the strip edge
+- What I changed (files):
+  - `Source/UI/LinkArcLayout.h` — new `Config::viewport` (empty = "whole strip", so every pre-scroll caller is unaffected). A link whose ARC does not intersect the viewport is culled: `labelVisible = false`, `offViewport = true`, empty box, nothing drawn. Where the arc runs off the viewport the horizontal clamp is SKIPPED and the label's centre is held over the visible stub of its own arc instead. Vertical clamping unchanged.
+  - `Source/UI/BlockLinkOverlay.h/.cpp` — `setViewportRect()`; `paint()` clips arcs and labels to it.
+  - `Source/UI/BlockStrip.cpp` — `updateOverlay()` passes `viewport.getBounds()`.
+  - `diag/ResolverDiag.cpp` — **T67 NEW (permanent)**; T63/T65/T66 now police `degraded` (no room) and ignore `offViewport` (correctly culled); T66's synthetic columns made to fit the strip they are swept in.
+- What I proved (PASS/FAIL):
+  - **CAUSE VERIFIED, and it is the shallow one.** The overlay is NOT rendering in unscrolled coordinates: `BlockStrip::updateOverlay` already converts tiles to strip-local coords with `viewport.getViewPositionX()` subtracted, and `viewport.onScrollChanged` re-pushes them on every scroll. A scrolled-off block correctly gets a NEGATIVE centre and its arc correctly leaves the screen. The bug was entirely `clampBox`, applied last and given priority.
+  - **FAILURE ON RECORD FIRST (T61/T65 precedent).** T67 against the pre-fix tree: `(a) offscreenLabelDrawn=Y(BUG) box=2.0` — the label pinned at the strip's left margin, which is the screenshot; `(b) centreX=52.1 want=8.0` — a half-visible label shoved inward instead of tracking its arc. After the fix: `(a) offscreenLabelDrawn=n | (b) centreX=8.0 want=8.0 | (c) centreX=550.0 want=550.0 | drawnDisjoint=y`.
+  - **GUARD — how culling keeps the non-overlap guarantee.** A culled label returns *before* `committed.push_back(box)`, so it never occupies a slot; every drawn label is still proven free against every drawn label already committed, and `committed` holds exactly the drawn ones. Culling only ever REMOVES an occupant — it can move a later label, never collide one. T67(d) asserts the drawn labels stay disjoint under scroll; T66 still sweeps 240 cells for zero overlaps.
+  - T63/T65/T66/T46 all still PASS. Full suite 69 PASS, ALL PASS on macOS.
+  - Renders checked by eye at 15 blocks: unscrolled, "Block 1 <-> Block 7" centred on its arc; scrolled to Blocks 8-15 it is **gone entirely**, the half-visible "Block 7 <-> Block 10" sits on the visible stub of its arc at the left edge, and "Block 9 <-> Block 12" is unchanged.
+  - `git diff --stat` = `Source/UI/BlockLinkOverlay.{h,cpp}`, `Source/UI/BlockStrip.cpp`, `Source/UI/LinkArcLayout.h`, `diag/ResolverDiag.cpp` — UI + harness only. Rendering only: no semantics, no arc geometry change.
+- What regressed or surprised me:
+  - First attempt clamped into the viewport and *then* applied the arc constraint, which still shoved the label inward (T67 (b) gave 60.0 against a wanted 8.0). The horizontal clamp has to be skipped outright when the arc runs off, not merely bounded afterwards.
+  - Culling made T66 report 8 out-of-bounds cells: its synthetic sweep places columns past the strip edge at the narrow widths, so labels legitimately began tracking clipped arcs. Split the two concerns — `offViewport` vs `degraded`, and T66's columns now fit the strip it sweeps. Crowding is T66's job; scrolling is T67's.
+- NEXT SESSION should:
+  1. HOLD is open: Alec eyeballs the scroll behaviour on Mac.
+  2. `font/inter-default` still waiting and unmerged (see previous entry).
+
 ### 2026-08-30 — Link labels: natural placement restored (Carter) + overlap root cause fixed (it was not fonts; that finding is parked on `font/inter-default`)
 - What I changed (files):
   - `Source/UI/LinkArcLayout.h` — placement rewritten. Every label starts at its OWN arc's natural position; only a label that would actually overlap another is moved, by the smallest displacement that clears it. Cross-column labels are 86cc4b6's placement verbatim (centred on the arc midpoint, riding an arc band that steps up with link index). Same-column labels now sit BESIDE the bow apex at the apex's height, outside the column, per Carter's sketch — they used to float above the tiles. Arc geometry, side/depth alternation, bounds clamping and the backing plate are untouched.
