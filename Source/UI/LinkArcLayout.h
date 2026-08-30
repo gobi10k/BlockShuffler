@@ -101,6 +101,12 @@ struct Config {
     float pushStep = 18.0f;  ///< one vertical displacement step
     int   maxPush  = 24;     ///< most steps a label may be pushed up
     float slideStep=  8.0f;  ///< one horizontal displacement step
+
+    /** What clearing a block tile is WORTH, in pixels of displacement. A label
+     *  will move up to this far to get off a tile and no further: past that the
+     *  backing plate is the better answer, because a label dragged across the
+     *  strip is harder to read than one sitting on a tile it is plated over. */
+    float tilePenalty = 70.0f;
 };
 
 struct Placed {
@@ -255,21 +261,32 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         std::stable_sort(cands.begin(), cands.end(),
                          [](const Cand& l, const Cand& r) { return l.cost < r.cost; });
 
+        // The two constraints stay RANKED, but the preference is now PRICED rather
+        // than absolute. An earlier revision walked all candidates demanding clear
+        // tiles first, which with single-block columns (tiles fill the whole strip
+        // height) dragged every label past the last column on a 200px leader --
+        // technically clear of the tiles, useless to read. Landing on a tile now
+        // costs cfg.tilePenalty pixels of displacement, so a label will step aside
+        // for a tile but will not emigrate for one.
+        //
+        // Separation stays a HARD guarantee: a candidate that is not free of the
+        // labels already committed is never costed and never chosen. Candidates are
+        // pre-sorted by displacement cost, and the tile penalty is non-negative, so
+        // once the best total found is <= the next candidate's base cost no later
+        // candidate can beat it -- that is the early exit.
         juce::Rectangle<float> box;
-        bool settled = false;
-        // Walk 1 demands the tiles be clear; walk 2 gives that preference up. The
-        // hard test (freeOfLabels) is applied in BOTH, so an unsatisfiable tile
-        // constraint can never cost us separation.
-        for (int walk = 0; walk < 2 && !settled; ++walk) {
-            for (const auto& c : cands) {
-                const auto trial = clampBox({ naturalBox.getX() + c.dx,
-                                              naturalBox.getY() + c.dy, boxW, H });
-                if (!freeOfLabels(trial)) continue;
-                if (walk == 0 && !clearOfTiles(trial)) continue;
-                box = trial;                 // assigned ONLY on success — never a
-                settled = true;              // rejected trial (the -104 bug).
-                break;
-            }
+        bool  settled  = false;
+        float bestCost = 0.0f;
+        for (const auto& c : cands) {
+            if (settled && c.cost >= bestCost) break;
+            const auto trial = clampBox({ naturalBox.getX() + c.dx,
+                                          naturalBox.getY() + c.dy, boxW, H });
+            if (!freeOfLabels(trial)) continue;
+            const float total = c.cost + (clearOfTiles(trial) ? 0.0f : cfg.tilePenalty);
+            if (settled && total >= bestCost) continue;
+            box      = trial;        // assigned ONLY from a candidate that PASSED the
+            bestCost = total;        // hard test -- never a rejected trial (-104 bug).
+            settled  = true;
         }
 
         if (!settled) {
