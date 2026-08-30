@@ -152,6 +152,20 @@ struct TempoStretcher
                 if (windowAcc[(size_t)i] > 1.0e-6f) wr[i] /= windowAcc[(size_t)i];
         }
 
+        // The Hann window is exactly zero at k=0, so output sample 0 (covered
+        // only by frame 0) accumulates 0/0 and the guard above leaves it
+        // SILENT. Frame 0 always reads from srcStart, and callers anchor
+        // srcStart at a join boundary (tail start; lead-in end via reversal),
+        // so that zero lands exactly on the join — an audible click on every
+        // cross-tempo transition (XTDIAG maxDelta 2x natural @join-1). The
+        // first output sample IS the source sample at the anchor; write it.
+        if (windowAcc[0] <= 1.0e-6f)
+        {
+            const int anchor = juce::jlimit(0, srcLen - 1, srcStart);
+            for (int ch = 0; ch < numCh; ++ch)
+                out.setSample(ch, 0, src.getSample(ch, anchor));
+        }
+
         return out;
     }
 

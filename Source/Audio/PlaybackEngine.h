@@ -11,7 +11,10 @@ namespace BlockShuffler {
  * Thread safety:
  *   play() / stop() / rewind() are called on the UI thread.
  *   getNextAudioBlock() is called on the audio thread.
- *   Uses atomic pointer swap for the arrangement to avoid locks on audio thread.
+ *   Uses CriticalSection with tryEnter on the audio thread — on lock contention
+ *   the audio block is silenced rather than blocking the audio callback.
+ *   Arrangement swaps are infrequent relative to the audio callback rate, so
+ *   contention is rare in practice.
  */
 class PlaybackEngine {
 public:
@@ -44,13 +47,7 @@ private:
 
     double outputSampleRate = 48000.0;
 
-    void mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
-                            int numSamples,
-                            const ResolvedEntry& entry,
-                            int64_t currentHead,
-                            double pToH,
-                            double hToP,
-                            int entryIndex = -1) const;
+    // Removed the old mixEntryIntoBuffer declaration - we now use the global function
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlaybackEngine)
 };

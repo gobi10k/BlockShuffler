@@ -4,6 +4,7 @@
 namespace BlockShuffler {
 
 BlockStrip::~BlockStrip() {
+    cancelPendingUpdate();  // drop any queued deferred rebuild before teardown
     if (project) project->removeChangeListener(this);
 }
 
@@ -11,10 +12,11 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
     project = &proj;
     overlay = ov;
     project->addChangeListener(this);
+    setOpaque(true);
     setWantsKeyboardFocus(true);
 
     viewport.setViewedComponent(&contentArea, false);
-    viewport.setScrollBarsShown(false, true);
+    viewport.setScrollBarsShown(true, true);
     viewport.setScrollBarThickness(8);
     viewport.onScrollChanged = [this] { updateOverlay(); };
     addAndMakeVisible(viewport);
@@ -23,82 +25,117 @@ void BlockStrip::init(Project& proj, BlockLinkOverlay* ov) {
         if (!project) return;
         cancelPendingMode();
         auto* newBlock = project->addBlock();
+        // Rebuild synchronously so the new block has a component with valid bounds
+        // before selectBlock() runs and before the user can start dragging.
+        rebuildBlocks();
+        resized();
         selectBlock(newBlock);
     };
-    addButton.setTooltip("Add a new block  [Cmd+click to name it]");
+    addButton.setTooltip("Add a new block");
     addAndMakeVisible(addButton);
 
-    // Mode label is added last so it renders on top of the viewport/blocks
+    // Clicking empty space (the strip's padding, or blank content next to the
+    // tiles) leaves link/stack mode. Blocks are children of contentArea, and with
+    // wantsEventsForAllNestedChildComponents = false their own clicks are NOT
+    // forwarded here — so this only ever fires on genuinely empty space.
+    contentArea.addMouseListener(this, false);
+
+    // Mode label renders on top of the viewport
     modeLabel.setJustificationType(juce::Justification::centred);
-    modeLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Italic")));
+    modeLabel.setFont(LookAndFeel_BlockShuffler::uiFont(12.0f));
     modeLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::accentCol));
     modeLabel.setColour(juce::Label::backgroundColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::bgDark).withAlpha(0.85f));
     modeLabel.setInterceptsMouseClicks(false, false);
-    modeLabel.setVisible(false);
-    addAndMakeVisible(modeLabel);
+    addChildComponent(&modeLabel);
 
     rebuildBlocks();
 }
 
+// ── Painting ──────────────────────────────────────────────────────────────────
+
 void BlockStrip::paint(juce::Graphics& g) {
     g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
 
-    // Linking/stacking mode tint — the text is drawn by modeLabel (a child component
-    // added after the viewport, so it renders on top of block tiles).
+    // Linking/stacking pending-mode tint
     if (pendingMode != PendingMode::None) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.15f));
         g.fillRect(getLocalBounds());
     }
+}
 
-    // Drag visual feedback: insertion indicators
-    if (dragSourceIndex >= 0 && dragDropSlot >= 0 && project) {
-        int contentX = dragDropSlot * (blockW + blockGap) + blockW / 2;
-        int screenX = viewport.getX() + contentX - viewport.getViewPositionX() + padding;
+void BlockStrip::paintOverChildren(juce::Graphics& g) {
+    // Helpers: convert contentArea-local coords to BlockStrip-local coords.
+    auto contentToStripX = [this](int cx) {
+        return cx + viewport.getX() - viewport.getViewPositionX();
+    };
+    auto contentToStripY = [this](int cy) {
+        return cy + viewport.getY();
+    };
 
-        if (dragIsUnstacking) {
-            if (dragOverIndex >= 0) {
-                // UNSTACK AND STACK WITH TARGET: show stacking indicator
-                g.setColour(juce::Colour(0xFF5599FF).withAlpha(0.85f));
-                g.drawLine(float(screenX), float(viewport.getY() + 4),
-                           float(screenX), float(viewport.getBottom() - 4), 2.5f);
-                g.setColour(juce::Colour(0xFF5599FF).withAlpha(0.9f));
-                g.fillRect(screenX - 6, viewport.getY() + 2, 12, 6);
-                g.fillRect(screenX - 6, viewport.getBottom() - 8, 12, 6);
-                g.setColour(juce::Colours::white);
-                g.setFont(9.0f);
-                g.drawText("STACK", screenX - 20, viewport.getY() + 8, 40, 12,
-                           juce::Justification::centred);
-            } else {
-                // UNSTACK TO EMPTY SLOT: show horizontal insertion line with "unstacking" indicator
-                g.setColour(juce::Colour(0xFFFF6644).withAlpha(0.85f));
-                g.drawLine(float(screenX), float(viewport.getY() + 4),
-                           float(screenX), float(viewport.getBottom() - 4), 2.5f);
-                g.setColour(juce::Colour(0xFFFF6644).withAlpha(0.9f));
-                g.fillRect(screenX - 6, viewport.getY() + 2, 12, 6);
-                g.fillRect(screenX - 6, viewport.getBottom() - 8, 12, 6);
-                g.setColour(juce::Colours::white);
-                g.setFont(9.0f);
-                g.drawText("UNSTACK", screenX - 24, viewport.getY() + 8, 48, 12,
-                           juce::Justification::centred);
-            }
-        } else if (dragSourceSlot >= 0 && dragDropSlot == dragSourceSlot && dragOverIndex >= 0) {
-            // REORDER WITHIN STACK: show vertical swap indicator
-            g.setColour(juce::Colour(0xFF44CCCC).withAlpha(0.7f));
-            g.setFont(9.0f);
-            g.drawText("REORDER", viewport.getX() + 2, viewport.getBottom() - 14, 48, 12,
-                       juce::Justification::centred);
+    if (currentDropAction == DropAction::Stack
+        && dropTargetComp != nullptr
+        && dropTargetIndex >= 0
+        && dropTargetIndex < originalBounds.size()) {
+        // Teal highlight: "drop here to stack with a different block"
+        auto cb = originalBounds[dropTargetIndex];
+        auto r  = juce::Rectangle<int>(contentToStripX(cb.getX()), contentToStripY(cb.getY()),
+                                       cb.getWidth(), cb.getHeight());
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentTeal).withAlpha(0.85f));
+        g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 7.0f, 2.5f);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
+        g.drawText("STACK", r.withTrimmedTop(r.getHeight() / 2), juce::Justification::centred);
+
+    } else if (currentDropAction == DropAction::RearrangeInStack
+               && dropTargetComp != nullptr
+               && dropTargetIndex >= 0
+               && dropTargetIndex < originalBounds.size()) {
+        // Green highlight: "drop here to swap positions within this stack"
+        auto cb = originalBounds[dropTargetIndex];
+        auto r  = juce::Rectangle<int>(contentToStripX(cb.getX()), contentToStripY(cb.getY()),
+                                       cb.getWidth(), cb.getHeight());
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol).withAlpha(0.3f));
+        g.fillRoundedRectangle(r.toFloat().reduced(2.0f), 7.0f);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::startMarkerCol).withAlpha(0.9f));
+        g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 7.0f, 2.5f);
+        g.setColour(juce::Colours::white);
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
+        g.drawText("SWAP", r.withTrimmedTop(r.getHeight() / 2), juce::Justification::centred);
+
+    } else if (currentDropAction == DropAction::Reorder && !originalBounds.isEmpty()) {
+        // Vertical insertion line: teal for single-block reorder, amber+thicker for stack move.
+        int insertBefore = dropTargetIndex;
+        int lineContentX;
+        if (insertBefore <= 0) {
+            lineContentX = originalBounds[0].getX() - blockGap / 2;
+        } else if (insertBefore >= originalBounds.size()) {
+            lineContentX = originalBounds.getLast().getRight() + blockGap / 2;
+        } else {
+            auto prev = originalBounds[insertBefore - 1];
+            auto next = originalBounds[insertBefore];
+            lineContentX = (prev.getRight() + next.getX()) / 2;
         }
+        int lineX = contentToStripX(lineContentX);
+        auto lineColour = isStackMove
+            ? juce::Colour(LookAndFeel_BlockShuffler::accentAmber).withAlpha(0.9f)
+            : juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.9f);
+        float lineW = isStackMove ? 4.0f : 2.5f;
+        g.setColour(lineColour);
+        g.drawLine(float(lineX), float(viewport.getY() + 4),
+                   float(lineX), float(viewport.getBottom() - 4), lineW);
+        g.fillEllipse(float(lineX - 4), float(viewport.getY() + 2),       8.0f, 8.0f);
+        g.fillEllipse(float(lineX - 4), float(viewport.getBottom() - 10), 8.0f, 8.0f);
     }
 }
+
+// ── Layout ────────────────────────────────────────────────────────────────────
 
 void BlockStrip::resized() {
     if (!project) return;
 
     // blockComponents must mirror project->blocks before we index into it.
-    // The async changeListenerCallback rebuilds lazily, but resized() can be
-    // called synchronously (e.g. on first window layout) before that fires.
     if (blockComponents.size() != project->blocks.size())
         rebuildBlocks();
 
@@ -115,10 +152,9 @@ void BlockStrip::resized() {
     const int areaH = area.getHeight();
 
     // Build slot groups: blocks with the same stackGroup share a horizontal slot.
-    // Each slot entry holds the block indices (into project->blocks) that occupy it.
     struct Slot { juce::Array<int> indices; };
     juce::Array<Slot> slots;
-    juce::HashMap<int, int> stackGroupToSlot;  // stackGroup → slot index
+    juce::HashMap<int, int> stackGroupToSlot;
 
     for (int i = 0; i < project->blocks.size(); ++i) {
         int sg = project->blocks[i]->stackGroup;
@@ -135,28 +171,46 @@ void BlockStrip::resized() {
     }
 
     int numSlots = slots.size();
-    int totalW   = juce::jmax(numSlots * (blockW + blockGap), area.getWidth());
-    contentArea.setBounds(0, 0, totalW, areaH);
 
-    // Resize cache
+    // First pass: find the tallest stack to size contentArea height correctly.
+    // Tiles are at least 16px tall; stacks too tall to fit get a vertical scrollbar.
+    int maxContentH = areaH;
+    for (auto& slot : slots) {
+        int n         = slot.indices.size();
+        int totalGaps = (n - 1) * 4;
+        int perH      = juce::jmax(16, (areaH - totalGaps) / n);
+        int neededH   = perH * n + totalGaps;
+        maxContentH   = juce::jmax(maxContentH, neededH);
+    }
+
+    int totalW = juce::jmax(numSlots * (blockW + blockGap), area.getWidth());
+    contentArea.setBounds(0, 0, totalW, maxContentH);
+
     blockCentreXCache.resize(project->blocks.size());
+    originalBounds.resize(project->blocks.size());
 
     int x = 0;
     for (auto& slot : slots) {
-        int n   = slot.indices.size();
-        // Each block in the stack gets an equal share of the height,
-        // with a 2-px gap between stacked tiles.
-        int totalGaps = (n - 1) * 2;
-        int perH      = (areaH - totalGaps) / n;
-        int startY    = (areaH - (perH * n + totalGaps)) / 2;
+        int n         = slot.indices.size();
+        // Each block in the stack gets an equal share of the slot height,
+        // with a 4-px gap between stacked tiles so they're visually distinct.
+        // Never shrink tiles below 16px; stacks that don't fit scroll vertically.
+        int totalGaps = (n - 1) * 4;
+        int perH      = juce::jmax(16, (areaH - totalGaps) / n);
+        int neededH   = perH * n + totalGaps;
+        // Centre stacks that fit; top-align ones that need vertical scrolling.
+        int startY    = (neededH <= areaH) ? (areaH - neededH) / 2 : 0;
 
         for (int j = 0; j < n; ++j) {
-            int bi  = slot.indices[j];
-            int y   = startY + j * (perH + 2);
+            int bi = slot.indices[j];
+            int y  = startY + j * (perH + 4);
+            auto bounds = juce::Rectangle<int>(x, y, blockW, perH);
             if (bi >= 0 && bi < blockComponents.size())
-                blockComponents[bi]->setBounds(x, y, blockW, perH);
+                blockComponents[bi]->setBounds(bounds);
             if (bi >= 0 && bi < blockCentreXCache.size())
                 blockCentreXCache.set(bi, x + blockW / 2);
+            if (bi >= 0 && bi < originalBounds.size())
+                originalBounds.set(bi, bounds);
         }
         x += blockW + blockGap;
     }
@@ -164,15 +218,68 @@ void BlockStrip::resized() {
     updateOverlay();
 }
 
+// ── Change listener ───────────────────────────────────────────────────────────
+
 void BlockStrip::changeListenerCallback(juce::ChangeBroadcaster*) {
     juce::MessageManager::callAsync([safe = juce::Component::SafePointer<BlockStrip>(this)] {
-        if (safe) { safe->rebuildBlocks(); safe->resized(); safe->repaint(); }
+        if (!safe) return;
+        // If a block drag is active, the dragged BlockComponent lives inside
+        // blockComponents. Rebuilding now would free it while its event handler
+        // is still running → crash. Defer until the drag completes.
+        if (safe->activeDragComp != nullptr) {
+            safe->needsRebuildAfterDrag = true;
+            return;
+        }
+        // Preserve the horizontal scroll position across rebuilds so that
+        // dropping a clip onto a far-right block doesn't snap the view back to x=0.
+        int savedScrollX = safe->viewport.getViewPositionX();
+        safe->needsRebuildAfterDrag = false;
+        safe->rebuildBlocks();
+        safe->resized();
+        safe->repaint();
+        if (savedScrollX > 0)
+            safe->viewport.setViewPosition(savedScrollX, 0);
     });
 }
 
+void BlockStrip::handleAsyncUpdate() {
+    // DROP-PATH-ONLY deferred rebuild: triggered exclusively by blockDropped(),
+    // where the rebuild must not run while the dragged component's mouseUp is on
+    // the call stack (the 12.1 use-after-free). Undo/redo and all other model
+    // changes refresh via changeListenerCallback above — per change, uncoalesced,
+    // byte-identical to the pre-UAF-fix wiring (coalescing them through this
+    // AsyncUpdater regressed rapid undo: triggerAsyncUpdate() is a no-op while an
+    // update is pending, so N rapid undos collapsed into one rebuild, leaving
+    // blockComponents dangling on Blocks freed by each undo's resetAndLoad).
+    if (!project) return;
+    if (activeDragComp != nullptr) {      // safety: never rebuild mid-drag
+        needsRebuildAfterDrag = true;
+        return;
+    }
+    // Same scroll preservation as the per-change path (2.9).
+    int savedScrollX = viewport.getViewPositionX();
+    needsRebuildAfterDrag = false;
+    rebuildBlocks();
+    resized();
+    repaint();
+    if (savedScrollX > 0)
+        viewport.setViewPosition(savedScrollX, 0);
+}
+
+// ── Block component management ────────────────────────────────────────────────
+
 void BlockStrip::rebuildBlocks() {
     if (!project) return;
-    dragOverIndex = -1;  // stale pointer after rebuild
+    // Re-entrancy guard: rebuildBlocks() frees every BlockComponent. It must NEVER
+    // run while a drop handler is on the stack (that freed the dragged component
+    // mid-mouseUp — the 12.1 UAF). Rebuilds from a drop go through the AsyncUpdater.
+    jassert(!isInDropHandler);
+    // Reset drag state — any component pointers are about to be freed.
+    activeDragComp  = nullptr;
+    dropTargetComp  = nullptr;
+    currentDropAction = DropAction::None;
+    dropTargetIndex   = -1;
+
     contentArea.removeAllChildren();
     blockComponents.clear();
 
@@ -191,7 +298,7 @@ void BlockStrip::rebuildBlocks() {
             [this](const juce::String& id) { enterLinkMode(id); },
             [this](const juce::String& id) { enterStackMode(id); }
         ));
-        // Wire undo callbacks so context-menu changes are undoable
+
         bc->onCaptureSnapshot  = [this] { return project ? project->toJSON() : juce::var{}; };
         bc->onUndoableMutation = [this](const juce::var& pre) {
             if (project) project->applyExternalMutation(pre);
@@ -202,11 +309,31 @@ void BlockStrip::rebuildBlocks() {
         bc->onPlayFromHereRequested = [this](const juce::String& id) {
             if (onPlayFromHereRequested) onPlayFromHereRequested(id);
         };
+        bc->onPlayBlockRequested = [this](const juce::String& id) {
+            if (onPlayBlockRequested) onPlayBlockRequested(id);
+        };
+        bc->onClipDropped = [this](const juce::String& clipId, const juce::String& targetBlockId) {
+            if (onClipDropped) onClipDropped(clipId, targetBlockId);
+        };
+
+        // ── ComponentDragger callbacks ────────────────────────────────────────
+        bc->onDragMoved = [this](BlockComponent* comp, juce::Point<int> centre, bool shiftDrag) {
+            updateDragFeedback(comp, centre, shiftDrag);
+        };
+        bc->onDragEnded = [this](BlockComponent* comp, juce::Point<int> centre, bool shiftDrag) {
+            blockDropped(comp, centre, shiftDrag);
+        };
+        bc->onBeginStackDrag = [this](int sg) {
+            beginStackDrag(sg);
+        };
+        bc->onMoveStackComponents = [this](int sg, BlockComponent* dragged, juce::Point<int> delta) {
+            moveStackComponents(sg, dragged, delta);
+        };
+
         bc->setSelected(block->id == selectedBlockId);
         bc->setPlaying(block->id == playingBlockId);
-        // Highlight potential targets when in link/stack mode
         bool inPendingMode = (pendingMode != PendingMode::None);
-        bool isSource = (block->id == pendingBlockId);
+        bool isSource      = (block->id == pendingBlockId);
         bc->setHighlighted(inPendingMode && !isSource);
         contentArea.addAndMakeVisible(bc);
     }
@@ -219,7 +346,7 @@ void BlockStrip::selectBlock(Block* block) {
         bc->setSelected(bPtr && bPtr->id == selectedBlockId);
     }
 
-    // Scroll the viewport so the selected block is visible
+    // Scroll so the selected block is visible
     if (block) {
         int idx = 0;
         for (auto* b : project->blocks) { if (b->id == block->id) break; ++idx; }
@@ -247,6 +374,14 @@ void BlockStrip::deleteBlock(const juce::String& blockId) {
     project->removeBlock(blockId);
 }
 
+void BlockStrip::mouseDown(const juce::MouseEvent&) {
+    // Empty-space click: the third way out of link/stack mode, alongside Esc and
+    // completing the link. cancelPendingMode() hides modeLabel, drops the source
+    // line and repaints, so the banner region always clears.
+    if (pendingMode != PendingMode::None)
+        cancelPendingMode();
+}
+
 bool BlockStrip::keyPressed(const juce::KeyPress& key) {
     if (key == juce::KeyPress(juce::KeyPress::escapeKey) &&
         pendingMode != PendingMode::None) {
@@ -256,10 +391,11 @@ bool BlockStrip::keyPressed(const juce::KeyPress& key) {
     return false;
 }
 
+// ── Link / stack pending modes ────────────────────────────────────────────────
+
 void BlockStrip::enterLinkMode(const juce::String& fromBlockId) {
     pendingMode    = PendingMode::Link;
     pendingBlockId = fromBlockId;
-    // Highlight all other blocks as potential targets
     for (auto* bc : blockComponents) {
         auto* bPtr = bc->getBlock();
         bc->setHighlighted(bPtr && bPtr->id != fromBlockId);
@@ -272,13 +408,17 @@ void BlockStrip::enterLinkMode(const juce::String& fromBlockId) {
     modeLabel.setText("Click a block to link to it  (Esc to cancel)",
                       juce::dontSendNotification);
     modeLabel.setVisible(true);
-    grabKeyboardFocus();  // ensure ESC key reaches this component
+    grabKeyboardFocus();
     repaint();
 }
 
 void BlockStrip::enterStackMode(const juce::String& fromBlockId) {
     pendingMode    = PendingMode::Stack;
     pendingBlockId = fromBlockId;
+    // Switching straight from link mode to stack mode (right-click a second block
+    // without pressing Esc first) used to leave the link source's vertical line
+    // painted under the stack banner. Stack mode has no source line of its own.
+    if (overlay) overlay->setLinkingSourceX(-1);
     for (auto* bc : blockComponents) {
         auto* bPtr = bc->getBlock();
         bc->setHighlighted(bPtr && bPtr->id != fromBlockId);
@@ -286,7 +426,7 @@ void BlockStrip::enterStackMode(const juce::String& fromBlockId) {
     modeLabel.setText("Click a block to stack with it  (Esc to cancel)",
                       juce::dontSendNotification);
     modeLabel.setVisible(true);
-    grabKeyboardFocus();  // ensure ESC key reaches this component
+    grabKeyboardFocus();
     repaint();
 }
 
@@ -302,28 +442,43 @@ void BlockStrip::cancelPendingMode() {
 
 void BlockStrip::completePendingMode(const juce::String& targetBlockId) {
     if (targetBlockId == pendingBlockId) { cancelPendingMode(); return; }
-
     if (pendingMode == PendingMode::Link) {
         project->addLink(pendingBlockId, targetBlockId, 0.5f);
     } else if (pendingMode == PendingMode::Stack) {
-        project->stackBlocks(pendingBlockId, targetBlockId);
+        // Same routing as drag-onto-block drops: the right-clicked block
+        // (pendingBlockId) is the mover, the clicked block is the anchor target,
+        // so the merged stack sits at the CLICKED block's slot (1c ruling) instead
+        // of at whichever of the two has the lower blocks[] index.
+        project->restackBlockOnto(pendingBlockId, targetBlockId);
     }
     cancelPendingMode();
-    // Project fires changeMessage → rebuild
 }
+
+// ── Overlay / utilities ───────────────────────────────────────────────────────
 
 void BlockStrip::updateOverlay() {
     if (!overlay || !project) return;
-    juce::HashMap<juce::String, int> positions;
+    // Full tile rects, converted from contentArea coordinates to strip-local ones
+    // (the overlay is given exactly the strip's bounds by MainComponent::resized,
+    // so strip-local and overlay-local are the same space). The centre X matches
+    // what the old centre-only path produced; the rect additionally carries each
+    // tile's Y, which same-column link arcs need.
+    juce::HashMap<juce::String, juce::Rectangle<int>> bounds;
     for (int i = 0; i < project->blocks.size(); ++i) {
-        if (i >= blockCentreXCache.size()) break;
-        // Convert contentArea X to overlay-local coords
-        int cx = viewport.getX() + blockCentreXCache[i]
-                 - viewport.getViewPositionX() + padding;
-        positions.set(project->blocks[i]->id, cx);
+        if (i >= originalBounds.size()) break;
+        auto b = originalBounds[i];
+        bounds.set(project->blocks[i]->id,
+                   juce::Rectangle<int>(viewport.getX() + b.getX()
+                                            - viewport.getViewPositionX() + padding,
+                                        viewport.getY() + b.getY(),
+                                        b.getWidth(), b.getHeight()));
     }
     overlay->setProject(project);
-    overlay->setBlockPositions(positions);
+    // What the user can actually see. The overlay spans the whole strip (the "+"
+    // button gutter included) while the tiles scroll under it, so without this the
+    // label pass cannot tell a link that has scrolled away from one near the edge.
+    overlay->setViewportRect(viewport.getBounds());
+    overlay->setBlockAnchors(bounds);
 }
 
 void BlockStrip::setPlayingBlock(const juce::String& blockId) {
@@ -337,11 +492,9 @@ void BlockStrip::setPlayingBlock(const juce::String& blockId) {
 
 Block* BlockStrip::getBlockAtLocalPoint(juce::Point<int> localPt) const {
     if (!project) return nullptr;
-    // Convert to content-area coordinates (undo viewport scroll and padding offset)
-    int contentX = localPt.x - viewport.getX() + viewport.getViewPositionX() - padding;
+    auto contentPos = toContentPos(localPt);
     for (int i = 0; i < blockComponents.size(); ++i) {
-        auto bounds = blockComponents[i]->getBounds(); // relative to contentArea
-        if (contentX >= bounds.getX() && contentX < bounds.getRight())
+        if (blockComponents[i]->getBounds().contains(contentPos))
             return (i < project->blocks.size()) ? project->blocks[i] : nullptr;
     }
     return nullptr;
@@ -353,310 +506,259 @@ int BlockStrip::blockCentreX(int blockIndex) const {
            - viewport.getViewPositionX() + padding;
 }
 
-bool BlockStrip::isInterestedInDragSource(const SourceDetails& details) {
-    return details.description.toString().startsWith("block:");
-}
-
-// ── Drag-over helpers ─────────────────────────────────────────────────────────
-
 juce::Point<int> BlockStrip::toContentPos(juce::Point<int> stripLocal) const {
-    return { stripLocal.x - viewport.getX() + viewport.getViewPositionX() - padding,
+    return { stripLocal.x - viewport.getX() + viewport.getViewPositionX(),
              stripLocal.y - viewport.getY() };
 }
 
-int BlockStrip::blockIndexAtContentPos(juce::Point<int> contentPos) const {
-    for (int i = 0; i < blockComponents.size(); ++i) {
-        const auto bounds = blockComponents[i]->getBounds();
-        if (bounds.contains(contentPos))
-            return i;
-    }
-    return -1;
-}
+// ── Block drag handling ───────────────────────────────────────────────────────
 
-void BlockStrip::setDragOver(int newIndex, bool isReorder) {
-    if (newIndex == dragOverIndex) {
-        if (newIndex >= 0 && newIndex < blockComponents.size())
-            blockComponents[newIndex]->setDragTargetMode(isReorder);
+void BlockStrip::updateDragFeedback(BlockComponent* draggedComp, juce::Point<int> centre, bool shiftDrag) {
+    if (!project) return;
+
+    activeDragComp    = draggedComp;
+    currentDropAction = DropAction::None;
+    dropTargetIndex   = -1;
+    dropTargetComp    = nullptr;
+    isStackMove       = false;
+
+    auto* draggedBlock = draggedComp->getBlock();
+    if (draggedBlock == nullptr) { repaint(); return; }
+
+    // Shift+drag on a stacked block: show a stack-move insertion line, skipping same-stack slots.
+    if (shiftDrag && draggedBlock->stackGroup >= 0) {
+        currentDropAction = DropAction::Reorder;
+        isStackMove       = true;
+        dropTargetIndex   = blockComponents.size();  // default: append
+        for (int i = 0; i < blockComponents.size(); ++i) {
+            if (i >= originalBounds.size()) continue;
+            auto* b = blockComponents[i]->getBlock();
+            if (b == nullptr || b->stackGroup == draggedBlock->stackGroup) continue;
+            if (originalBounds[i].getCentreX() > centre.x) {
+                dropTargetIndex = i;
+                break;
+            }
+        }
+        repaint();
         return;
     }
-    // Clear old highlight
-    if (dragOverIndex >= 0 && dragOverIndex < blockComponents.size())
-        blockComponents[dragOverIndex]->setDragTarget(false);
-    dragOverIndex = newIndex;
-    if (dragOverIndex >= 0 && dragOverIndex < blockComponents.size()) {
-        blockComponents[dragOverIndex]->setDragTarget(true);
-        blockComponents[dragOverIndex]->setDragTargetMode(isReorder);
-    }
-}
 
-void BlockStrip::itemDragEnter(const SourceDetails& details) {
-    if (!project) return;
-    auto descStr = details.description.toString();
-    if (!descStr.startsWith("block:")) return;
-    auto blockId   = descStr.substring(6);
-    if (blockId.isEmpty()) return;
-    auto contentPos = toContentPos(details.localPosition);
+    // Check every other block's ORIGINAL (pre-drag) bounds for a hit.
+    for (int i = 0; i < blockComponents.size(); ++i) {
+        auto* comp = blockComponents[i];
+        if (comp == draggedComp) continue;                         // skip self
+        if (i >= originalBounds.size()) continue;
 
-    dragSourceIndex = -1;
-    for (int i = 0; i < project->blocks.size(); ++i) {
-        if (project->blocks[i]->id == blockId) { dragSourceIndex = i; break; }
-    }
-    if (dragSourceIndex < 0) return;
+        if (originalBounds[i].contains(centre)) {
+            auto* targetBlock = comp->getBlock();
+            if (targetBlock == nullptr) continue;
 
-    struct SlotInfo { juce::Array<int> indices; };
-    juce::Array<SlotInfo> slots;
-    juce::HashMap<int, int> sgToSlot;
-    for (int i = 0; i < project->blocks.size(); ++i) {
-        int sg = project->blocks[i]->stackGroup;
-        if (sg < 0) {
-            SlotInfo s; s.indices.add(i); slots.add(std::move(s));
-        } else {
-            if (sgToSlot.contains(sg)) {
-                slots.getReference(sgToSlot[sg]).indices.add(i);
-            } else {
-                sgToSlot.set(sg, slots.size());
-                SlotInfo s; s.indices.add(i); slots.add(std::move(s));
-            }
+            bool sameStack = (draggedBlock->stackGroup >= 0
+                           && draggedBlock->stackGroup == targetBlock->stackGroup);
+
+            currentDropAction = sameStack ? DropAction::RearrangeInStack : DropAction::Stack;
+            dropTargetIndex   = i;
+            dropTargetComp    = comp;
+            repaint();
+            return;
         }
     }
 
-    dragSourceSlot = -1;
-    for (int s = 0; s < slots.size(); ++s) {
-        if (slots[s].indices.contains(dragSourceIndex)) { dragSourceSlot = s; break; }
+    // No block hit — find insertion point for reorder.
+    // dropTargetIndex = "insert before this block index" (== blockComponents.size() → append).
+    currentDropAction = DropAction::Reorder;
+    dropTargetIndex   = blockComponents.size();  // default: append
+    for (int i = 0; i < originalBounds.size(); ++i) {
+        if (blockComponents[i] == draggedComp) continue;
+        if (originalBounds[i].getCentreX() > centre.x) {
+            dropTargetIndex = i;
+            break;
+        }
     }
-
-    dragIsUnstacking = false;
-
-    int  over = blockIndexAtContentPos(contentPos);
-    if (over >= 0 && over < (int)project->blocks.size() &&
-        project->blocks[over]->id != blockId)
-        setDragOver(over, false);
-    else
-        setDragOver(-1);
-
     repaint();
 }
 
-void BlockStrip::itemDragMove(const SourceDetails& details) {
-    if (!project) return;
-    auto descStr = details.description.toString();
-    if (!descStr.startsWith("block:")) return;
-    auto blockId   = descStr.substring(6);
-    if (blockId.isEmpty()) return;
-    auto contentPos = toContentPos(details.localPosition);
+void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> centre, bool shiftDrag) {
+    // Re-entrancy guard (see rebuildBlocks()): flags that a drop handler is on the
+    // stack for the whole body, including early returns. rebuildBlocks() must not
+    // run synchronously while this is set — the rebuild is deferred via AsyncUpdater.
+    struct DropGuard {
+        bool& f;
+        DropGuard(bool& flag) : f(flag) { f = true; }
+        ~DropGuard() { f = false; }
+    } dropGuard(isInDropHandler);
 
-    struct SlotInfo { juce::Array<int> indices; };
-    juce::Array<SlotInfo> slots;
-    juce::HashMap<int, int> sgToSlot;
-    for (int i = 0; i < project->blocks.size(); ++i) {
-        int sg = project->blocks[i]->stackGroup;
-        if (sg < 0) {
-            SlotInfo s; s.indices.add(i); slots.add(std::move(s));
+    if (!project) { clearDragFeedback(); return; }
+
+    // Recalculate at the exact release position (mouseDrag isn't called for the final pixel).
+    updateDragFeedback(draggedComp, centre, shiftDrag);
+
+    auto* draggedBlock = draggedComp->getBlock();
+    if (draggedBlock == nullptr || currentDropAction == DropAction::None) {
+        clearDragFeedback();
+        return;
+    }
+
+    if (currentDropAction == DropAction::Stack) {
+        // Stack with a different block / stack group. restackBlockOnto handles
+        // BOTH dragged states: an already-stacked block is detached first (or the
+        // target gets absorbed into the old stack — third-block absorption), a
+        // standalone one detach-no-ops; either way the dragged block is reinserted
+        // after the target group's last member so the merged stack anchors at the
+        // DROP TARGET's slot (1c ruling). Routing standalone drops to the
+        // anchor-free stackBlocks primitive left rightward drops at the dragged
+        // block's old slot (resized() anchors a stack at its first member in
+        // blocks[] order = min index).
+        project->restackBlockOnto(draggedBlock->id, dropTargetComp->getBlock()->id);
+
+    } else if (currentDropAction == DropAction::RearrangeInStack) {
+        // Swap the two blocks' positions in project->blocks to change vertical order.
+        auto* targetBlock = dropTargetComp->getBlock();
+        int draggedIdx = project->blocks.indexOf(draggedBlock);
+        int targetIdx  = project->blocks.indexOf(targetBlock);
+        if (draggedIdx >= 0 && targetIdx >= 0 && draggedIdx != targetIdx) {
+            auto pre = project->toJSON();
+            project->blocks.swap(draggedIdx, targetIdx);
+            project->applyExternalMutation(pre);
+        }
+
+    } else if (currentDropAction == DropAction::Reorder) {
+        int fromIndex = project->blocks.indexOf(draggedBlock);
+        if (fromIndex < 0) { clearDragFeedback(); return; }
+
+        if (shiftDrag && draggedBlock->stackGroup >= 0) {
+            // Shift+drag: move the entire stack as a unit to the new position.
+            auto pre = project->toJSON();
+            int stackGroup = draggedBlock->stackGroup;
+
+            juce::Array<int> stackIndices;
+            for (int i = 0; i < project->blocks.size(); ++i)
+                if (project->blocks[i]->stackGroup == stackGroup)
+                    stackIndices.add(i);
+
+            // Extract (remove high→low to keep lower indices stable).
+            juce::OwnedArray<Block> extracted;
+            for (int i = stackIndices.size() - 1; i >= 0; --i)
+                extracted.insert(0, project->blocks.removeAndReturn(stackIndices[i]));
+
+            // Adjust insertion point for each removed index below it.
+            int insertPos = dropTargetIndex;
+            for (int idx : stackIndices)
+                if (idx < insertPos) --insertPos;
+            insertPos = juce::jlimit(0, project->blocks.size(), insertPos);
+
+            // Re-insert in original order. Capture count before mutating extracted.
+            int count = extracted.size();
+            for (int i = 0; i < count; ++i)
+                project->blocks.insert(insertPos + i, extracted.removeAndReturn(0));
+
+            for (int i = 0; i < project->blocks.size(); ++i)
+                project->blocks[i]->position = i;
+
+            project->applyExternalMutation(pre);
+
+        } else if (draggedBlock->stackGroup >= 0) {
+            // No Shift: unstack this block and move it to the new position.
+            // detachBlockFromStack is the single factored detach (also used by
+            // restackBlockOnto); it fires no change/undo — this branch's
+            // applyExternalMutation below does that once for the whole drop.
+            auto pre = project->toJSON();
+            project->detachBlockFromStack(*draggedBlock);
+
+            // Move to drop position.
+            int insertBefore = juce::jlimit(0, project->blocks.size(), dropTargetIndex);
+            int dest;
+            if (insertBefore >= project->blocks.size())
+                dest = project->blocks.size() - 1;
+            else if (fromIndex < insertBefore)
+                dest = insertBefore - 1;
+            else
+                dest = insertBefore;
+            dest = juce::jlimit(0, project->blocks.size() - 1, dest);
+
+            if (fromIndex != dest)
+                project->blocks.move(fromIndex, dest);
+
+            for (int i = 0; i < project->blocks.size(); ++i)
+                project->blocks[i]->position = i;
+
+            project->applyExternalMutation(pre);
+
         } else {
-            if (sgToSlot.contains(sg)) {
-                slots.getReference(sgToSlot[sg]).indices.add(i);
+            // Plain reorder (non-stacked block).
+            int insertBefore = juce::jlimit(0, project->blocks.size(), dropTargetIndex);
+            int dest;
+            if (insertBefore >= project->blocks.size()) {
+                dest = project->blocks.size() - 1;
+            } else if (fromIndex < insertBefore) {
+                dest = insertBefore - 1;
             } else {
-                sgToSlot.set(sg, slots.size());
-                SlotInfo s; s.indices.add(i); slots.add(std::move(s));
+                dest = insertBefore;
             }
+            dest = juce::jlimit(0, project->blocks.size() - 1, dest);
+
+            if (fromIndex != dest)
+                project->moveBlock(fromIndex, dest);
         }
     }
 
-    int dropSlot = juce::jlimit(0, slots.size() - 1,
-                                contentPos.x / (blockW + blockGap));
-
-    dragDropSlot = dropSlot;
-
-    // Determine if we are still inside the source column using actual pixel bounds
-    bool sameColumn = false;
-    if (dragSourceSlot >= 0) {
-        int sourceSlotLeft  = dragSourceSlot * (blockW + blockGap);
-        int sourceSlotRight = sourceSlotLeft + blockW;
-        sameColumn = (contentPos.x >= sourceSlotLeft && contentPos.x < sourceSlotRight);
+    // Snap sibling stack tiles back to their original positions before the
+    // component array is freed by rebuildBlocks().
+    {
+        juce::HashMap<BlockComponent*, juce::Point<int>>::Iterator it(stackDragStartPositions);
+        while (it.next())
+            it.getKey()->setTopLeftPosition(it.getValue());
     }
-    dragIsUnstacking = (dragSourceSlot >= 0 && !sameColumn);
+    stackDragStartPositions.clear();
 
-    int  over = blockIndexAtContentPos(contentPos);
-    bool isReorder = !dragIsUnstacking;
-    if (over >= 0 && over < (int)project->blocks.size() &&
-        project->blocks[over]->id != blockId)
-        setDragOver(over, isReorder);
-    else
-        setDragOver(-1);
+    // Clear drag state, then request a DEFERRED rebuild. The rebuild must NOT run
+    // synchronously here: it frees the dragged BlockComponent, whose mouseUp() is
+    // still on the call stack (12.1 use-after-free). triggerAsyncUpdate() coalesces
+    // and runs rebuildBlocks()+resized()+repaint() on the message loop, after this
+    // mouse event has fully unwound. activeDragComp is cleared first so
+    // handleAsyncUpdate() (which also honours needsRebuildAfterDrag) will proceed.
+    activeDragComp        = nullptr;
+    needsRebuildAfterDrag = false;
+    currentDropAction     = DropAction::None;
+    dropTargetIndex       = -1;
+    dropTargetComp        = nullptr;
+    isStackMove           = false;
 
+    triggerAsyncUpdate();
+}
+
+void BlockStrip::clearDragFeedback() {
+    activeDragComp    = nullptr;
+    currentDropAction = DropAction::None;
+    dropTargetIndex   = -1;
+    dropTargetComp    = nullptr;
+    isStackMove       = false;
+    stackDragStartPositions.clear();
     repaint();
 }
 
-void BlockStrip::itemDragExit(const SourceDetails&) {
-    setDragOver(-1);
-    dragSourceIndex = -1;
-    dragSourceSlot  = -1;
-    dragIsUnstacking = false;
-    dragDropSlot = -1;
-    repaint();
+void BlockStrip::beginStackDrag(int stackGroup) {
+    stackDragStartPositions.clear();
+    for (auto* comp : blockComponents) {
+        auto* b = comp->getBlock();
+        if (b && b->stackGroup == stackGroup)
+            stackDragStartPositions.set(comp, comp->getPosition());
+    }
+    // Bring all stack tiles to front so they render above non-stack tiles.
+    // The dragged tile will call toFront(true) immediately after, putting it on top.
+    for (auto* comp : blockComponents) {
+        auto* b = comp->getBlock();
+        if (b && b->stackGroup == stackGroup)
+            comp->toFront(false);
+    }
 }
 
-void BlockStrip::itemDropped(const SourceDetails& details) {
-    setDragOver(-1);
-    dragSourceIndex = -1;
-    dragSourceSlot  = -1;
-    dragIsUnstacking = false;
-    repaint();
-    if (!project) return;
-
-    auto descStr = details.description.toString();
-    if (!descStr.startsWith("block:")) return;
-    auto blockId = descStr.substring(6);
-    if (blockId.isEmpty()) return;
-    int fromIndex = -1;
-    for (int i = 0; i < project->blocks.size(); ++i)
-        if (project->blocks[i]->id == blockId) { fromIndex = i; break; }
-    if (fromIndex < 0) return;
-
-    auto contentPos = toContentPos(details.localPosition);
-    int  overIndex  = blockIndexAtContentPos(contentPos);
-
-    struct SlotInfo { juce::Array<int> indices; };
-    juce::Array<SlotInfo> slots;
-    juce::HashMap<int, int> sgToSlot;
-    for (int i = 0; i < project->blocks.size(); ++i) {
-        int sg = project->blocks[i]->stackGroup;
-        if (sg < 0) {
-            SlotInfo s; s.indices.add(i); slots.add(std::move(s));
-        } else {
-            if (sgToSlot.contains(sg)) {
-                slots.getReference(sgToSlot[sg]).indices.add(i);
-            } else {
-                sgToSlot.set(sg, slots.size());
-                SlotInfo s; s.indices.add(i); slots.add(std::move(s));
-            }
-        }
-    }
-
-    int fromSlot = -1;
-    for (int s = 0; s < slots.size(); ++s)
-        if (slots[s].indices.contains(fromIndex)) { fromSlot = s; break; }
-
-    int dropSlot = juce::jlimit(0, juce::jmax(0, slots.size() - 1),
-                                contentPos.x / (blockW + blockGap));
-
-    auto* draggedBlock      = project->blocks[fromIndex];
-    bool draggedIsStacked   = (draggedBlock->stackGroup >= 0);
-    bool droppedOnDiffBlock = (overIndex >= 0 && overIndex != fromIndex);
-
-    // CASE 3: Stacked block dragged out of its stack column → unstack
-    if (draggedIsStacked && dragIsUnstacking) {
-        // CASE 3: stacked block dragged to a different horizontal slot → unstack
-        auto pre = project->toJSON();
-
-        int oldGroup = draggedBlock->stackGroup;
-        draggedBlock->stackGroup = -1;
-
-        int remaining = 0;
-        for (auto* b : project->blocks)
-            if (b->stackGroup == oldGroup) ++remaining;
-        if (remaining <= 1)
-            for (auto* b : project->blocks)
-                if (b->stackGroup == oldGroup) b->stackGroup = -1;
-
-        if (droppedOnDiffBlock) {
-            auto* targetBlock = project->blocks[overIndex];
-            if (targetBlock->stackGroup >= 0) {
-                draggedBlock->stackGroup = targetBlock->stackGroup;
-            } else {
-                int maxGroup = -1;
-                for (auto* b : project->blocks)
-                    maxGroup = juce::jmax(maxGroup, b->stackGroup);
-                draggedBlock->stackGroup = maxGroup + 1;
-                targetBlock->stackGroup  = maxGroup + 1;
-            }
-            project->propagateStackSettings(draggedBlock->stackGroup);
-        } else {
-            // Rebuild slots after unstacking (slot count may have changed)
-            struct SlotInfo { juce::Array<int> indices; };
-            juce::Array<SlotInfo> newSlots;
-            juce::HashMap<int, int> sgToSlot2;
-            for (int i = 0; i < project->blocks.size(); ++i) {
-                int sg = project->blocks[i]->stackGroup;
-                if (sg < 0) {
-                    SlotInfo s; s.indices.add(i); newSlots.add(std::move(s));
-                } else {
-                    if (sgToSlot2.contains(sg)) {
-                        newSlots.getReference(sgToSlot2[sg]).indices.add(i);
-                    } else {
-                        sgToSlot2.set(sg, newSlots.size());
-                        SlotInfo s; s.indices.add(i); newSlots.add(std::move(s));
-                    }
-                }
-            }
-
-            // Recalculate dropSlot with new slot count
-            int newDropSlot = juce::jlimit(0, juce::jmax(0, newSlots.size() - 1),
-                                           contentPos.x / (blockW + blockGap));
-
-            int toIndex = newSlots[newDropSlot].indices[0];
-            if (fromIndex != toIndex) {
-                project->blocks.move(fromIndex, toIndex);
-                for (int i = 0; i < project->blocks.size(); ++i)
-                    project->blocks[i]->position = i;
-            }
-            // Propagate settings to remaining blocks in old stack (if any)
-            project->propagateStackSettings(oldGroup);
-        }
-
-        project->applyExternalMutation(pre);
-
-    } else if (!draggedIsStacked && droppedOnDiffBlock) {
-        // CASE 1: non-stacked block dropped onto another block → stack
-        project->stackBlocks(blockId, project->blocks[overIndex]->id);
-
-    } else if (draggedIsStacked && fromSlot >= 0) {
-        // CASE 2: stacked block dragged within its stack column (swap or reorder)
-        auto pre = project->toJSON();
-
-        // Get all blocks in this stack
-        juce::Array<int> slotIndices = slots[fromSlot].indices;
-        int fromPos = slotIndices.indexOf(fromIndex);
-        int toPos = (overIndex >= 0) ? slotIndices.indexOf(overIndex) : -1;
-
-        if (toPos >= 0 && toPos != fromPos) {
-            // Dropped directly on another block → swap positions
-            int blockA = slotIndices[fromPos];
-            int blockB = slotIndices[toPos];
-            project->blocks.swap(blockA, blockB);
-        } else if (toPos == -1 && overIndex == -1) {
-            // Dropped in a gap → insert at nearest position based on Y
-            auto contentPos = toContentPos(details.localPosition);
-            int yInStack = contentPos.y;
-            int targetPos = slotIndices.size();
-            for (int i = 0; i < slotIndices.size(); ++i) {
-                auto bounds = blockComponents[slotIndices[i]]->getBounds();
-                if (yInStack < bounds.getCentreY()) { targetPos = i; break; }
-            }
-            if (targetPos != fromPos) {
-                auto* draggedBlockPtr = project->blocks[fromIndex];
-                project->blocks.remove(fromIndex);
-                int newTarget = (targetPos > fromPos) ? targetPos - 1 : targetPos;
-                project->blocks.insert(newTarget, draggedBlockPtr);
-            }
-        }
-
-        // Update position members
-        for (int p = 0; p < slotIndices.size(); ++p) {
-            int bi = slotIndices[p];
-            if (bi >= 0 && bi < project->blocks.size())
-                project->blocks[bi]->position = p;
-        }
-
-        project->applyExternalMutation(pre);
-
-    } else {
-        // Plain horizontal reorder (non-stacked block to new position, or no-op)
-        if (dropSlot >= 0 && dropSlot < slots.size() && !slots[dropSlot].indices.isEmpty()) {
-            int toIndex = slots[dropSlot].indices[0];
-            if (fromIndex != toIndex)
-                project->moveBlock(fromIndex, toIndex);
-        }
+void BlockStrip::moveStackComponents(int stackGroup, BlockComponent* draggedComp, juce::Point<int> delta) {
+    for (auto* comp : blockComponents) {
+        if (comp == draggedComp) continue;
+        auto* b = comp->getBlock();
+        if (b && b->stackGroup == stackGroup && stackDragStartPositions.contains(comp))
+            comp->setTopLeftPosition(stackDragStartPositions[comp] + delta);
     }
 }
 

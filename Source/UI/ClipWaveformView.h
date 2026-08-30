@@ -9,7 +9,8 @@ namespace BlockShuffler {
 /**
  * A single clip row: colored header with editable name + waveform with markers.
  */
-class ClipRowComponent : public juce::Component {
+class ClipRowComponent : public juce::Component,
+                         public juce::SettableTooltipClient {
 public:
     ClipRowComponent(Clip& clip,
                      double projectSampleRate,
@@ -45,6 +46,9 @@ public:
     std::function<juce::var()>            onCaptureSnapshot;
     std::function<void(const juce::var&)> onUndoableMutation;
 
+    /// Called when "Play Clip" is chosen from the context menu.
+    std::function<void(const juce::String&)> onPlayClipRequested;
+
     // Used to compute effective (normalized) probability across all sibling clips
     Block* ownerBlock = nullptr;
 
@@ -53,8 +57,10 @@ private:
     juce::var   nameLabelEditPre;   // snapshot captured when name editor opens
     juce::var   markerDragPre;      // snapshot captured when a marker drag begins
 
-    enum class DragTarget { None, StartMarker, EndMarker };
+    enum class DragTarget { None, StartMarker, EndMarker, Clip };
     DragTarget activeDrag = DragTarget::None;
+    int clipDragStartX = 0;
+    int clipDragStartY = 0;
 
     int     sampleToX(int64_t sample) const;
     int64_t xToSample(int x) const;
@@ -67,11 +73,18 @@ private:
 /** Viewport subclass that routes Cmd+scroll to a zoom callback instead of scrolling. */
 class ZoomableViewport : public juce::Viewport {
 public:
-    std::function<void(float deltaY)> onZoomScroll;
+    // deltaY + the mouse x in VIEWPORT-LOCAL (visible) coordinates. JUCE
+    // bubbles child wheel events via getEventRelativeTo(parent), so e here is
+    // already viewport-local: x==0 is the visible left edge.
+    std::function<void(float deltaY, int mouseXinViewport)> onZoomScroll;
+
+    void paint(juce::Graphics& g) override {
+        g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
+    }
 
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override {
         if (e.mods.isCommandDown() && onZoomScroll) {
-            onZoomScroll(w.deltaY);
+            onZoomScroll(w.deltaY, e.getPosition().x);
         } else {
             juce::Viewport::mouseWheelMove(e, w);
         }
@@ -94,7 +107,8 @@ public:
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override;
 
     void setBlock(Block* block, double sampleRate, juce::AudioFormatManager* fmtMgr = nullptr);
-    Clip* getSelectedClip() const { return selectedClip; }
+    Clip*  getSelectedClip()  const { return selectedClip; }
+    Block* getCurrentBlock()  const { return currentBlock; }
 
     /** Set the currently playing clip and its position.
         @param clipId The ID of the clip being played (empty = stop playback)
@@ -102,7 +116,12 @@ public:
         @param sampleRate The sample rate for samplePos calculation */
     void setPlayingClip(const juce::String& clipId, int64_t samplePos, double sampleRate);
 
+    double defaultTempo = 120.0;  ///< Applied to new clips when loaded; sync'd from Project::defaultClipTempo
+
     std::function<void(Clip*)> onClipSelected;
+
+    /// Called when "Play Clip" is chosen from a clip's context menu.
+    std::function<void(const juce::String&)> onPlayClipRequested;
 
     // Wired by MainComponent so clip mutations are undoable
     std::function<juce::var()>            onCaptureSnapshot;
@@ -119,9 +138,20 @@ private:
     double projectSampleRate = 48000.0;
 
     ZoomableViewport viewport;
-    juce::Component contentArea;
+    struct ContentArea : public juce::Component {
+        ContentArea() { setOpaque(true); }
+        void paint(juce::Graphics& g) override {
+            g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
+        }
+    };
+    ContentArea contentArea;
     juce::OwnedArray<ClipRowComponent> clipRows;
-    juce::TextButton addClipBtn { "+ Add Clip" };
+    juce::TextButton addClipBtn  { "+ Add Clip" };
+    juce::TextButton zoomInBtn   { "+" };
+    juce::TextButton zoomOutBtn  { "-" };
+    juce::TextButton zoomFitBtn  { "Fit" };
+
+    static constexpr int zoomBarH = 24;
 
     juce::String playingClipId;
     int64_t      playingSamplePos = 0;
@@ -136,6 +166,15 @@ private:
     void selectClip(Clip* clip);
     void removeClip(Clip* clip);
     void browseForClip();
+    float computeMaxZoom() const;
+    /** Change zoom keeping the time under `anchorXinVisible` fixed on screen
+     *  (13.4 UX: without anchoring, the kept pixel-x drifts the view to the
+     *  clip start on every zoom step). anchorXinVisible is in the viewport's
+     *  VISIBLE coordinate: 0 = left edge on screen, visW = right edge. Wheel
+     *  paths pass the cursor x; buttons pass visW/2 (centre). Captures the
+     *  anchor time-fraction BEFORE the zoom changes, restores it after the
+     *  deferred re-layout, clamped to [0, contentW - visW]. */
+    void setZoomAnchored(float newFactor, double anchorXinVisible);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipWaveformView)
 };

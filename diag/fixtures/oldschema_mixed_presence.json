@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "name": "oldschema mixed presence (mode on M1, count on M2, neither on M3)",
+  "sampleRate": 48000.0,
+  "defaultClipTempo": 120.0,
+  "blocks": [
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+      "name": "M1_mode_bearer",
+      "color": "ffe05252",
+      "position": 0,
+      "stackGroup": 0,
+      "stackPlayMode": "simultaneous",
+      "probability": 1.0,
+      "playChance": 1.0,
+      "tempo": 120.0,
+      "clips": [
+        {
+          "id": "cccccccccccccccccccccccccccccca1",
+          "name": "cA",
+          "probability": 1.0,
+          "tempo": 120.0,
+          "retainLeadInTempo": false,
+          "retainTailTempo": false,
+          "isSongEnder": false,
+          "startMark": "0",
+          "endMark": "1000"
+        }
+      ]
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2",
+      "name": "M2_count_bearer",
+      "color": "ffe08840",
+      "position": 1,
+      "stackGroup": 0,
+      "probability": 1.0,
+      "playChance": 1.0,
+      "tempo": 120.0,
+      "clips": [
+        {
+          "id": "cccccccccccccccccccccccccccccca2",
+          "name": "cB",
+          "probability": 1.0,
+          "tempo": 120.0,
+          "retainLeadInTempo": false,
+          "retainTailTempo": false,
+          "isSongEnder": false,
+          "startMark": "0",
+          "endMark": "1000"
+        }
+      ],
+      "stackPlayCount": {
+        "values": [
+          3
+        ],
+        "weights": [
+          1.0
+        ]
+      }
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3",
+      "name": "M3_bare",
+      "color": "ffccaa44",
+      "position": 2,
+      "stackGroup": 0,
+      "probability": 1.0,
+      "playChance": 1.0,
+      "tempo": 120.0,
+      "clips": [
+        {
+          "id": "cccccccccccccccccccccccccccccca3",
+          "name": "cC",
+          "probability": 1.0,
+          "tempo": 120.0,
+          "retainLeadInTempo": false,
+          "retainTailTempo": false,
+          "isSongEnder": false,
+          "startMark": "0",
+          "endMark": "1000"
+        }
+      ]
+    }
+  ],
+  "links": []
+}

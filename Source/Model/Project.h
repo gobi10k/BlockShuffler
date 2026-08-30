@@ -14,7 +14,21 @@ public:
 
     // Metadata
     juce::String name;
-    double sampleRate = 48000.0;
+    double sampleRate        = 48000.0;
+    double defaultClipTempo  = 120.0;
+
+    /** RAWGAIN: raw-summing mode. When true the mixer applies NO crossfade
+     *  ramps, no complementary join law and no per-entry stack attenuation —
+     *  every entry sums at unity gain, lead-ins and tails included. Entry
+     *  timing, lengths and timelinePos are unaffected either way.
+     *  Default TRUE (Carter 2026-08-22, retracting the 2026-08-21 request):
+     *  a fresh project / fresh install starts with raw summing ON. The single
+     *  source of truth for the default — the loader falls back to this same
+     *  constant for a .bsp with the key ABSENT, so legacy files follow the new
+     *  default while an EXPLICITLY stored choice is never silently overridden.
+     *  The inspector toggle stays user-switchable in both directions. */
+    static constexpr bool kDefaultUnityGainMode = true;
+    bool unityGainMode = kDefaultUnityGainMode;
 
     // Content
     juce::OwnedArray<Block>     blocks;
@@ -29,7 +43,31 @@ public:
     void   removeBlock(const juce::String& blockId);
     void   moveBlock(int fromIndex, int toIndex);
     void   stackBlocks(const juce::String& blockIdA, const juce::String& blockIdB);
+
+    /** Drop of an already-stacked block onto another block: detaches it from its
+     *  current stack first (so the target is never absorbed into the old stack),
+     *  then stacks it with the target — joining the target's stack if it has one,
+     *  else forming a fresh two-block stack. The resulting stack is anchored at
+     *  the DROP TARGET's slot: the dragged block is reinserted after the target
+     *  group's last member, never left at its old index.
+     *  One undo entry, one change message. */
+    void   restackBlockOnto(const juce::String& draggedBlockId, const juce::String& targetBlockId);
+
+    /** Removes the block from its stack group; if exactly one member remains in
+     *  the old group it auto-unstacks with its stack settings reset (H6/H7).
+     *  Does NOT send a change message or record undo — callers wrap it. */
+    void   detachBlockFromStack(Block& block);
+
     Block* getBlockById(const juce::String& blockId);
+
+    // Tempo inherit/override write-paths. Tempos stay MATERIALIZED: these
+    // setters propagate downward at write time; read paths (resolver, grid,
+    // nudge, inspector reads) are untouched. Each call = ONE undo entry.
+    void setClipTempo(Clip& clip, double t);            // marks the clip overridden
+    void setBlockTempo(Block& block, double t);         // marks the block overridden; skips overridden clips
+    void setDefaultTempo(double t);                     // skips overridden blocks (and their clips entirely)
+    void resetClipTempoToInherited(Clip& clip, Block& block);
+    void resetBlockTempoToInherited(Block& block);
 
     /** Copies stackPlayCount and stackPlayMode from sourceBlock to all other blocks in the group.
      *  If sourceBlock is null or not in the group, uses the first block as source.

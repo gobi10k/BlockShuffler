@@ -18,6 +18,7 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     blockStrip.onBlockSelected = [this](Block* block) {
         applyBlockSelection(block);
     };
+    waveformView.defaultTempo = project->defaultClipTempo;
 
     waveformView.onClipSelected = [this](Clip* clip) {
         inspectorPanel.setClip(clip, selectedBlock);
@@ -32,21 +33,86 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     transportBar.onStop   = [this] { onStopPressed();   };
     transportBar.onRewind = [this] { onRewindPressed(); };
     transportBar.onExport = [this] { exportProject(); };
-    transportBar.onSave   = [this] { saveProject(); };
-    transportBar.onOpen   = [this] { openProject(); };
+    transportBar.onSave   = [this] { saveProject();   };
+    transportBar.onSaveAs = [this] { saveProjectAs(); };
+    transportBar.onOpen   = [this] { openProject();   };
 
-    blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
-        currentArrangement = resolver.resolve(*project, rng);
-        // Find the body start of the target block in the resolved arrangement
-        int64_t seekPos = 0;
-        for (const auto& entry : currentArrangement.entries) {
-            if (entry.blockId == blockId) {
-                seekPos = entry.timelinePos + entry.startMark;
+    blockStrip.onClipDropped = [this](const juce::String& clipId, const juce::String& targetBlockId) {
+        if (!project) return;
+        // Find the clip and its source block
+        Block* sourceBlock = nullptr;
+        Clip*  movedClip   = nullptr;
+        for (auto* b : project->blocks) {
+            for (auto* c : b->clips) {
+                if (c->id == clipId) { sourceBlock = b; movedClip = c; break; }
+            }
+            if (movedClip) break;
+        }
+        auto* targetBlock = project->getBlockById(targetBlockId);
+        if (!movedClip || !sourceBlock || !targetBlock || sourceBlock == targetBlock) return;
+
+        auto pre = project->toJSON();
+        // Transfer ownership: take clip out of source, add to target.
+        // Also update the clip's tempo to match the target block so it plays on the
+        // correct grid, then fire change messages on both blocks so their waveform
+        // views rebuild immediately (the clip disappears from the source row and
+        // appears in the target row without waiting for a project-level rebuild).
+        bool moved = false;
+        for (int i = 0; i < sourceBlock->clips.size(); ++i) {
+            if (sourceBlock->clips[i] == movedClip) {
+                Clip* rawClip = sourceBlock->clips.removeAndReturn(i);
+                // Overridden clips KEEP their tempo across the move; inheriting
+                // clips retarget to the destination block's grid.
+                if (!rawClip->tempoOverridden)
+                    rawClip->tempo = targetBlock->tempo > 0.0 ? targetBlock->tempo : rawClip->tempo;
+                targetBlock->clips.add(rawClip);
+                moved = true;
                 break;
             }
         }
+        if (moved) {
+            sourceBlock->sendChangeMessage();  // source waveform view drops the clip row
+            targetBlock->sendChangeMessage();  // target waveform view gains the clip row
+        }
+        project->applyExternalMutation(pre);
+    };
+
+    blockStrip.onPlayBlockRequested = [this](const juce::String& blockId) {
+        playBlock(blockId);
+    };
+
+    waveformView.onPlayClipRequested = [this](const juce::String& clipId) {
+        playClip(clipId);
+    };
+
+    blockStrip.onPlayFromHereRequested = [this](const juce::String& blockId) {
+        // PIN (2026-08-22): resolve() is a fresh random draw, so the clicked block
+        // is not otherwise guaranteed to be in it — pass it as forceInclude and the
+        // resolver pins it (playChance bypassed, pre-picked into its stack, earlier
+        // song enders suppressed). See ArrangementResolver::resolve.
+        auto* target = project->getBlockById(blockId);
+        if (target == nullptr) return;
+        currentArrangement = resolver.resolve(*project, rng, target);
+        if (currentArrangement.entries.isEmpty()) return;  // FIX H5: nothing to play
+
+        // Find the body start of the target block in the resolved arrangement.
+        // NOT-FOUND IS NOT ZERO: the old code seeded seekPos with 0 and let the
+        // initialiser double as the not-found value, so a miss silently played the
+        // whole song from the top. With the pin a miss should now be unreachable
+        // (and the menu item is disabled for blocks that can never produce an
+        // entry), but if it ever happens we play nothing rather than the wrong thing.
+        const ResolvedEntry* hit = nullptr;
+        for (const auto& entry : currentArrangement.entries) {
+            if (entry.blockId == blockId) { hit = &entry; break; }
+        }
+        if (hit == nullptr) {
+            DBG("Play from Here: block " + blockId + " absent from the resolved "
+                "arrangement even though it was pinned - not playing.");
+            return;
+        }
+
         engine.play(currentArrangement);
-        engine.seekTo(seekPos);
+        engine.seekTo(hit->timelinePos);  // timelinePos = body start (lead-in deferred)
         transportBar.setIsPlaying(true);
     };
 
@@ -55,8 +121,13 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     addAndMakeVisible(linkOverlay);
     addAndMakeVisible(transportBar);
 
+    // SPLITTER: restore the per-user divider (sanitised here, clamped in resized())
+    // and show the bar. The bar sets its own UpDownResizeCursor in its constructor.
+    loadSplitterPosition();
+    addAndMakeVisible(splitterBar);
+
     inspectorViewport.setViewedComponent(&inspectorPanel);
-    inspectorViewport.setScrollBarsShown(true, true, false, false);
+    inspectorViewport.setScrollBarsShown(true, false, false, false);
     inspectorViewport.setColour(juce::ScrollBar::backgroundColourId,
                                juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
     inspectorViewport.setColour(juce::ScrollBar::thumbColourId,
@@ -71,6 +142,8 @@ MainComponent::MainComponent(PlaybackEngine& eng)
     // first user action should undo that action, not remove the startup block.
     project->undoManager.clearUndoHistory();
     blockStrip.selectBlock(defaultBlock);  // fires onBlockSelected → applyBlockSelection
+
+    // Transport display refresh is driven by the MainWindow timer at 30fps.
 }
 
 MainComponent::~MainComponent() {
@@ -102,15 +175,85 @@ void MainComponent::resized() {
     transportBar  .setBounds(area.removeFromBottom(transportHeight));
     inspectorViewport.setBounds(area.removeFromRight(inspectorWidth));
 
-    // Set inspector panel size to accommodate all content (including stack settings)
-    // Width matches viewport, height is enough for full content with some margin
-    int panelHeight = juce::jmax(getHeight() - transportHeight + 200, 800);
-    inspectorPanel.setBounds(0, 0, inspectorWidth, panelHeight);
+    // Inspector height: window-derived floor, but never below what the content
+    // needs — big stacks/link lists grow the panel and the viewport scrolls (5.12).
+    int panelFloor = juce::jmax(getHeight() - transportHeight + 200, 800);
+    inspectorPanel.setMinHeight(panelFloor);
+    inspectorPanel.setBounds(0, 0, inspectorWidth,
+                             juce::jmax(panelFloor, inspectorPanel.preferredHeight()));
 
-    auto blockArea = area.removeFromBottom(blockStripHeight);
+    // ── SPLITTER: waveform (top) / resizer bar / block strip (bottom) ─────────
+    // `area` is everything left after the transport bar and the inspector viewport
+    // were removed, so the inspector's width and scrolling are decided ABOVE this
+    // point and are untouched by the divider (T49 is unaffected).
+    // Always re-derive the applied height from the user's INTENT, so a window that
+    // shrank (forcing a clamp) and grew again returns to the split they chose.
+    splitAreaHeight  = area.getHeight();
+    blocksPaneHeight = SplitLayout::clampBlocksHeight(desiredBlocksHeight, splitAreaHeight);
+
+    // Re-seed the drag transport from the clamped geometry, so a drag starts from
+    // what is actually on screen and the manager's own minimums match ours.
+    splitLayout.setItemLayout(0, SplitLayout::waveMinH,   SplitLayout::blocksSanityMaxH,
+                              (double)SplitLayout::waveHeightFor(blocksPaneHeight, splitAreaHeight));
+    splitLayout.setItemLayout(1, SplitLayout::barH,       SplitLayout::barH,
+                              (double)SplitLayout::barH);
+    splitLayout.setItemLayout(2, SplitLayout::blocksMinH, SplitLayout::blocksSanityMaxH,
+                              (double)blocksPaneHeight);
+    // Prime the manager's internal sizes/positions (getItemCurrent*() are only
+    // meaningful once it has laid out). setTotalSize() is private in JUCE 8, so we
+    // go through layOutComponents with a NULL component array — it null-checks each
+    // entry, so this updates state without touching any bounds. The real bounds are
+    // applied below from our own clamped numbers.
+    juce::Component* splitComps[3] = { nullptr, nullptr, nullptr };
+    splitLayout.layOutComponents(splitComps, 3,
+                                 area.getX(), area.getY(), area.getWidth(), splitAreaHeight,
+                                 true, false);
+
+    // Lay out from OUR clamped numbers, never from the manager: removeFromTop of a
+    // clamped waveform height leaves exactly barH + blocksPaneHeight behind, so the
+    // strip is guaranteed a non-zero on-screen rectangle at every window size.
+    waveformView.setBounds(area.removeFromTop(
+                               SplitLayout::waveHeightFor(blocksPaneHeight, splitAreaHeight)));
+    splitterBar .setBounds(area.removeFromTop(SplitLayout::barH));
+    auto blockArea = area;
     blockStrip .setBounds(blockArea);
     linkOverlay.setBounds(blockArea);
-    waveformView.setBounds(area);
+}
+
+void MainComponent::splitterMoved() {
+    // The bar has already pushed a position into splitLayout (which honours the two
+    // minimums itself); take the strip size back out, run it through the same clamp
+    // resized() uses, and relay out.
+    desiredBlocksHeight = SplitLayout::clampBlocksHeight(
+                              splitLayout.getItemCurrentAbsoluteSize(2), splitAreaHeight);
+    resized();
+}
+
+void MainComponent::loadSplitterPosition() {
+    // Per-user app properties — deliberately NOT the .bsp. The project format is
+    // byte-for-byte unchanged by this feature.
+    juce::PropertiesFile::Options opts;
+    opts.applicationName     = "BlockShuffler";
+    opts.filenameSuffix      = "settings";
+    opts.folderName          = "BlockShuffler";
+    opts.osxLibrarySubFolder = "Application Support";
+    appProps.setStorageParameters(opts);
+
+    // 0 => key absent (fresh install) => sanitize returns the default split.
+    // Only the window-INDEPENDENT half of the restore runs here: the real content
+    // height is not known until the first resized(), which applies the clamp.
+    const int stored = appProps.getUserSettings()->getIntValue("splitterBlocksHeight", 0);
+    desiredBlocksHeight = SplitLayout::sanitizeStoredBlocksHeight(stored);
+    blocksPaneHeight    = desiredBlocksHeight;   // resized() clamps it to the window
+}
+
+void MainComponent::saveSplitterPosition() {
+    if (auto* s = appProps.getUserSettings()) {
+        // Persist the INTENT, not the window-clamped value, so a session spent at a
+        // small window size cannot quietly shrink the saved preference.
+        s->setValue("splitterBlocksHeight", desiredBlocksHeight);
+        s->saveIfNeeded();
+    }
 }
 
 bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files) {
@@ -134,6 +277,7 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
         if (project->blocks.isEmpty()) project->addBlock("Block 1");
         blockStrip.selectBlock(project->blocks.getFirst());  // fires onBlockSelected → applyBlockSelection
     }
+    if (selectedBlock == nullptr) return;  // FIX C2: guard against null after fallback
     auto pre = project->toJSON();
     bool anyAdded = false;
     for (auto& filePath : files) {
@@ -143,6 +287,10 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
             ext == ".flac" || ext == ".ogg"  || ext == ".mp3") {
             auto clip = std::make_unique<Clip>();
             if (clip->loadFromFile(file, project->formatManager, project->sampleRate)) {
+                // Block tempo takes priority; fall back to project default.
+                clip->tempo = (selectedBlock->tempo > 0.0)
+                              ? selectedBlock->tempo
+                              : (project->defaultClipTempo > 0.0 ? project->defaultClipTempo : 120.0);
                 selectedBlock->addClip(std::move(clip));
                 anyAdded = true;
             }
@@ -153,10 +301,24 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y) {
 }
 
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* /*source*/) {
+    // Keep waveformView in sync with project default tempo (may have changed via undo/redo)
+    waveformView.defaultTempo = project->defaultClipTempo;
+
     // Re-validate the selected block pointer — undo/redo may have deleted/recreated it.
     auto* found = project->getBlockById(selectedBlockId);
-    if (found != selectedBlock) {
-        // Block changed (deleted, recreated, or new project) — full refresh
+    // FIX C1: if the id is gone (deleted by undo), fall back to the first block
+    if (found == nullptr && !project->blocks.isEmpty()) {
+        found = project->blocks.getFirst();
+        selectedBlockId = found->id;
+    }
+    // Use waveformView.getCurrentBlock() in the staleness check as well as the pointer
+    // comparison: after undo/redo the model frees old blocks and allocates new ones,
+    // and the allocator may reuse the same address.  In that case found == selectedBlock
+    // would be true but the waveform's WeakReference (which null-clears on block
+    // destruction) would differ from 'found', revealing the stale state.
+    const bool waveformStale = (waveformView.getCurrentBlock() != found);
+    if (found != selectedBlock || waveformStale) {
+        // Block changed (deleted, recreated, undo/redo, or new project) — full refresh
         selectedBlock = found;
         waveformView.setBlock(found, project->sampleRate, found ? &project->formatManager : nullptr);
         inspectorPanel.setBlock(selectedBlock);
@@ -173,8 +335,37 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
         return waveformView.keyPressed(key);
     }
 
+    // Delete / Backspace:
+    //   • If a clip is selected in the waveform, delete the clip (existing behaviour).
+    //   • If no clip is selected but a block is selected, delete the block.
+    if (key.getKeyCode() == juce::KeyPress::deleteKey ||
+        key.getKeyCode() == juce::KeyPress::backspaceKey) {
+        if (waveformView.keyPressed(key)) return true;  // clip removed — done
+        if (selectedBlock && project) {
+            // Mirror the logic in BlockStrip::deleteBlock: clear selection before
+            // removing so changeListenerCallback doesn't try to reselect the deleted block.
+            juce::String idToDelete = selectedBlockId;
+            selectedBlock   = nullptr;
+            selectedBlockId = {};
+            waveformView.setBlock(nullptr, project->sampleRate);
+            inspectorPanel.setClip(nullptr, nullptr);
+            inspectorPanel.setBlock(nullptr);
+            project->removeBlock(idToDelete);   // fires sendChangeMessage + recordMutation
+            return true;
+        }
+        return false;
+    }
+
+    if (key == juce::KeyPress(juce::KeyPress::spaceKey, juce::ModifierKeys::shiftModifier, 0)) {
+        if (selectedBlock) playBlock(selectedBlock->id);
+        return true;
+    }
     if (key == juce::KeyPress(juce::KeyPress::spaceKey)) {
         onPlayPressed();
+        return true;
+    }
+    if (key.isKeyCode('S') && key.getModifiers().isCommandDown() && key.getModifiers().isShiftDown()) {
+        saveProjectAs();
         return true;
     }
     if (key.isKeyCode('S') && key.getModifiers().isCommandDown()) {
@@ -240,6 +431,82 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     return false;
 }
 
+void MainComponent::playBlock(const juce::String& blockId) {
+    if (!project) return;
+    auto* block = project->getBlockById(blockId);
+    if (!block || block->clips.isEmpty()) return;
+
+    // Always stop before starting — prevents the engine ignoring a new play()
+    // call while the audio thread still thinks it is playing.
+    engine.stop();
+
+    // Pick a clip by weighted selection directly. Using the full probabilistic
+    // resolver here caused ~50% silent failures: the resolver might not include
+    // this block (e.g. a link swap placed a different block in its slot, or
+    // playChance < 1 skipped it), so single.isEmpty() triggered an early return.
+    auto* clip = ArrangementResolver::pickClip(*block, rng);
+    if (!clip || !clip->audioBuffer || clip->audioBuffer->getNumSamples() == 0)
+        return;
+
+    // Mirror the resolver's convention: timelinePos = body start = startMark, so
+    // the lead-in plays at [0, startMark) and the body at [startMark, endMark).
+    // totalDurationSamples = endMark so the engine stops after the body ends.
+    ResolvedEntry entry;
+    entry.audioBuffer        = clip->audioBuffer;
+    entry.startMark          = clip->startMark;
+    entry.endMark            = clip->endMark;
+    entry.originalStartMark  = clip->startMark;
+    entry.clipId             = clip->id;
+    entry.clipName           = clip->name;
+    entry.blockId            = blockId;
+    entry.timelinePos        = clip->startMark;  // body starts after lead-in
+    entry.gain               = 1.0f;
+    entry.unityGainMode      = project->unityGainMode;  // RAWGAIN: preview honours it too
+
+    ResolvedArrangement single;
+    single.sampleRate           = project->sampleRate;
+    single.totalDurationSamples = clip->endMark;  // includes lead-in + body
+    single.entries.add(entry);
+
+    currentArrangement = std::move(single);
+    engine.play(currentArrangement);
+    transportBar.setIsPlaying(true);
+}
+
+void MainComponent::playClip(const juce::String& clipId) {
+    if (!project) return;
+    Clip* found = nullptr;
+    juce::String foundBlockId;
+    for (auto* b : project->blocks) {
+        for (auto* c : b->clips) {
+            if (c->id == clipId) { found = c; foundBlockId = b->id; break; }
+        }
+        if (found) break;
+    }
+    if (!found || !found->audioBuffer) return;
+
+    ResolvedEntry entry;
+    entry.audioBuffer        = found->audioBuffer;
+    entry.startMark          = found->startMark;
+    entry.endMark            = found->endMark;
+    entry.originalStartMark  = found->startMark;
+    entry.clipId             = found->id;
+    entry.clipName           = found->name;
+    entry.blockId            = foundBlockId;
+    entry.timelinePos        = found->startMark;  // body starts after lead-in
+    entry.gain               = 1.0f;
+    entry.unityGainMode      = project->unityGainMode;  // RAWGAIN: preview honours it too
+
+    ResolvedArrangement single;
+    single.sampleRate           = project->sampleRate;
+    single.totalDurationSamples = found->endMark;  // includes lead-in + body
+    single.entries.add(entry);
+
+    currentArrangement = std::move(single);
+    engine.play(currentArrangement);
+    transportBar.setIsPlaying(true);
+}
+
 void MainComponent::onPlayPressed() {
     if (engine.isPlaying()) {
         engine.stop();
@@ -260,6 +527,12 @@ void MainComponent::onStopPressed() {
     transportBar.setTimeDisplay(0.0, engine.getTotalSeconds());
     blockStrip.setPlayingBlock({});
     waveformView.setPlayingClip({}, 0, 0.0);
+    if (lastPlayingBlock != nullptr) {
+        lastPlayingBlock = nullptr;
+        waveformView.setBlock(selectedBlock, project->sampleRate,
+                              selectedBlock ? &project->formatManager : nullptr);
+        inspectorPanel.setBlock(selectedBlock);
+    }
 }
 
 void MainComponent::onRewindPressed() {
@@ -289,8 +562,10 @@ void MainComponent::saveProjectAs() {
             auto result = fc.getResult();
             if (result != juce::File{}) {
                 auto f = result.withFileExtension(".bsp");
-                if (project->saveToFile(f))
+                if (project->saveToFile(f)) {
                     currentProjectFile = f;
+                    updateWindowTitle(f.getFileNameWithoutExtension());
+                }
             }
         });
 }
@@ -316,15 +591,13 @@ void MainComponent::loadProject(const juce::File& file) {
     auto newProject = std::make_unique<Project>();
     if (!newProject->loadFromFile(file)) return;
 
-    // Warn about missing audio files before swapping the project in
-    if (!newProject->missingFilesOnLoad.isEmpty()) {
-        juce::String msg = "The following audio files could not be found and will be silent:\n\n"
-                         + newProject->missingFilesOnLoad.joinIntoString("\n");
-        juce::NativeMessageBox::showMessageBoxAsync(
-            juce::MessageBoxIconType::WarningIcon,
-            "Missing Audio Files",
-            msg);
-    }
+    // Clear UI references to the old project BEFORE destroying it so no component
+    // holds a dangling pointer during teardown.
+    selectedBlock   = nullptr;
+    selectedBlockId = {};
+    waveformView.setBlock(nullptr, project->sampleRate);
+    inspectorPanel.setClip(nullptr, nullptr);
+    inspectorPanel.setBlock(nullptr);
 
     project->removeChangeListener(this);
     project = std::move(newProject);
@@ -333,15 +606,27 @@ void MainComponent::loadProject(const juce::File& file) {
     currentProjectFile = file;
     inspectorPanel.setProject(project.get());
 
-    selectedBlock   = nullptr;
-    selectedBlockId = {};
     blockStrip.init(*project, &linkOverlay);
-    waveformView.setBlock(nullptr, project->sampleRate);
-    inspectorPanel.setClip(nullptr, nullptr);
+    blockStrip.resized();  // synchronous layout — blocks are visible immediately after load
 
-    if (!project->blocks.isEmpty()) {
+    if (!project->blocks.isEmpty())
         blockStrip.selectBlock(project->blocks.getFirst());  // fires onBlockSelected → applyBlockSelection
+
+    waveformView.defaultTempo = project->defaultClipTempo;
+    updateWindowTitle(file.getFileNameWithoutExtension());
+
+    if (!project->missingFilesOnLoad.isEmpty()) {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon,
+            "Missing Audio Files",
+            "The following audio files could not be found and will be silent:\n\n"
+            + project->missingFilesOnLoad.joinIntoString("\n"));
     }
+}
+
+void MainComponent::updateWindowTitle(const juce::String& projectName) {
+    if (auto* dw = dynamic_cast<juce::DocumentWindow*>(getTopLevelComponent()))
+        dw->setName("BlockShuffler - " + projectName);  // ASCII separator: raw UTF-8 em-dash in a char* literal mojibakes in the title bar (acceptance 11.1)
 }
 
 void MainComponent::updateTimeDisplay() {
@@ -349,67 +634,63 @@ void MainComponent::updateTimeDisplay() {
     double total   = engine.getTotalSeconds();
     transportBar.setTimeDisplay(current, total);
 
-    const bool playing = engine.isPlaying();
-    if (!playing) {
+    if (!engine.isPlaying()) {
         transportBar.setIsPlaying(false);
         blockStrip.setPlayingBlock({});
         waveformView.setPlayingClip({}, 0, 0.0);
-    } else {
-        // Find which entry is at the current playhead position.
-        // With the current timeline model: timelinePos = lead-in start,
-        // body occupies [timelinePos + startMark, timelinePos + endMark).
-        int64_t headSamples = (int64_t)(current * currentArrangement.sampleRate);
-        juce::String nowPlayingBlockId;
-        juce::String nowPlayingClipId;
-        int64_t clipSamplePos = 0;
-
-        // Always show the first entry at start
-        if (!currentArrangement.entries.isEmpty()) {
-            const auto& firstEntry = currentArrangement.entries.getReference(0);
-            nowPlayingBlockId = firstEntry.blockId;
-            nowPlayingClipId = firstEntry.clipId;
-
-            // After trimming: startMark=0, so bodyStart = timelinePos, bodyEnd = timelinePos + endMark
-            int64_t bodyStart = firstEntry.timelinePos;
-            int64_t bodyEnd   = firstEntry.timelinePos + firstEntry.endMark;
-
-            if (headSamples >= bodyStart && headSamples < bodyEnd) {
-                // Currently within clip body - map to original clip position
-                int64_t posInTrimmed = headSamples - bodyStart;
-                clipSamplePos = firstEntry.originalStartMark + posInTrimmed;
-            } else if (headSamples < bodyStart) {
-                // Before clip starts - show at original start marker
-                clipSamplePos = firstEntry.originalStartMark;
-            } else {
-                // After first clip - use normal tracking
-                for (const auto& entry : currentArrangement.entries) {
-                    int64_t eb = entry.timelinePos;  // startMark is 0 after trimming
-                    int64_t ee = entry.timelinePos + entry.endMark;
-                    if (headSamples >= eb && headSamples < ee) {
-                        nowPlayingBlockId = entry.blockId;
-                        nowPlayingClipId = entry.clipId;
-                        int64_t posInTrimmed = headSamples - eb;
-                        clipSamplePos = entry.originalStartMark + posInTrimmed;
-                        break;
-                    }
-                }
-            }
+        if (lastPlayingBlock != nullptr) {
+            lastPlayingBlock = nullptr;
+            waveformView.setBlock(selectedBlock, project->sampleRate,
+                                  selectedBlock ? &project->formatManager : nullptr);
+            inspectorPanel.setBlock(selectedBlock);
         }
-
-        blockStrip.setPlayingBlock(nowPlayingBlockId);
-
-        // Always switch waveform to show the playing block's clips
-        if (!nowPlayingBlockId.isEmpty()) {
-            selectedBlockId = nowPlayingBlockId;
-            selectedBlock = project->getBlockById(nowPlayingBlockId);
-            if (selectedBlock) {
-                waveformView.setBlock(selectedBlock, project->sampleRate, &project->formatManager);
-                inspectorPanel.setBlock(selectedBlock);
-            }
-        }
-
-        waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, currentArrangement.sampleRate);
+        return;
     }
+
+    const double sr = currentArrangement.sampleRate;
+    int64_t headSamples = (sr > 0.0) ? (int64_t)(current * sr) : 0;
+
+    juce::String nowPlayingBlockId;
+    juce::String nowPlayingClipId;
+    int64_t clipSamplePos = 0;
+
+    // Forward scan through entries — pick the first entry whose body has not yet ended.
+    // This naturally handles:
+    //   • lead-in (headSamples < timelinePos): clamp clipSamplePos to startMark
+    //   • body (headSamples in [timelinePos, bodyEnd)): compute exact position
+    //   • tail / gap (headSamples >= bodyEnd): move on to next entry
+    for (const auto& entry : currentArrangement.entries) {
+        int64_t bodyEnd = entry.timelinePos + (entry.endMark - entry.startMark);
+        if (headSamples < bodyEnd) {
+            nowPlayingBlockId = entry.blockId;
+            nowPlayingClipId  = entry.clipId;
+            int64_t offsetIntoBody = headSamples - entry.timelinePos;
+            clipSamplePos = entry.startMark + juce::jmax((int64_t)0, offsetIntoBody);
+            break;
+        }
+    }
+
+    // Fallback: playhead is past all entries (playing through the tail of the last block).
+    if (nowPlayingBlockId.isEmpty() && !currentArrangement.entries.isEmpty()) {
+        const auto& e = currentArrangement.entries.getReference(
+            currentArrangement.entries.size() - 1);
+        nowPlayingBlockId = e.blockId;
+        nowPlayingClipId  = e.clipId;
+        clipSamplePos     = e.endMark;
+    }
+
+    // Follow the playing block: switch waveform + inspector when block changes
+    if (nowPlayingBlockId.isNotEmpty()) {
+        auto* playingBlock = project->getBlockById(nowPlayingBlockId);
+        if (playingBlock != nullptr && playingBlock != lastPlayingBlock) {
+            lastPlayingBlock = playingBlock;
+            waveformView.setBlock(playingBlock, project->sampleRate, &project->formatManager);
+            inspectorPanel.setBlock(playingBlock);
+        }
+    }
+
+    blockStrip.setPlayingBlock(nowPlayingBlockId);
+    waveformView.setPlayingClip(nowPlayingClipId, clipSamplePos, sr);
 }
 
 namespace {
@@ -435,7 +716,12 @@ public:
             juce::AudioFormat* fmt = (ext == ".flac")
                                    ? (juce::AudioFormat*)&flacFmt
                                    : (juce::AudioFormat*)&wavFmt;
-            ok = renderer.renderToFile(arrangement, file, *fmt, 24, progressFn);
+            // WAV exports at 32-bit IEEE float (JUCE writes bitDepth 32 as float):
+            // the file holds the exact float mix, so crossfade peaks >1.0 that
+            // playback passes are preserved instead of clamped by a fixed-point
+            // writer. FLAC is integer-only and stays at 24-bit.
+            const int depth = (ext == ".flac") ? 24 : 32;
+            ok = renderer.renderToFile(arrangement, file, *fmt, depth, progressFn);
         }
     }
 
@@ -507,7 +793,7 @@ void MainComponent::exportProject() {
                         juce::NativeMessageBox::showMessageBoxAsync(
                             juce::MessageBoxIconType::WarningIcon,
                             "Nothing to Export",
-                            "All blocks are marked as Done. Unmark at least one block to export.");
+                            "The arrangement is empty. Add blocks with clips to export.");
                         return;
                     }
 

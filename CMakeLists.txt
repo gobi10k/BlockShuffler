@@ -13,6 +13,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+juce_add_binary_data(BlockShufflerResources
+    SOURCES
+        Resources/icon.svg
+        Resources/icon.png
+        Resources/fonts/Inter-Regular.ttf
+        Resources/fonts/Inter-Bold.ttf
+        Resources/fonts/JetBrainsMono-Regular.ttf
+)
+
 juce_add_plugin(BlockShuffler
     COMPANY_NAME "gobi10k"
     IS_SYNTH FALSE
@@ -22,6 +31,12 @@ juce_add_plugin(BlockShuffler
     PLUGIN_CODE BkSh
     FORMATS Standalone VST3
     PRODUCT_NAME "BlockShuffler"
+    DOCUMENT_EXTENSIONS bsp
+    # Square RiverMix app icon (matches Resources/app.icns / the in-app wordmark).
+    # JUCE rasterises this PNG into the macOS .icns and the Windows .ico for us, so
+    # a single square source drives the icon on BOTH platforms.
+    ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/appicon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/appicon.png"
 )
 
 target_sources(BlockShuffler PRIVATE
@@ -47,6 +62,7 @@ target_sources(BlockShuffler PRIVATE
     # Audio
     Source/Audio/ArrangementResolver.h
     Source/Audio/ArrangementResolver.cpp
+    Source/Audio/EntryMixer.h
     Source/Audio/PlaybackEngine.h
     Source/Audio/PlaybackEngine.cpp
     Source/Audio/TempoStretcher.h
@@ -73,12 +89,17 @@ target_sources(BlockShuffler PRIVATE
     Source/UI/BlockLinkOverlay.cpp
     Source/UI/LookAndFeel_BlockShuffler.h
     Source/UI/LookAndFeel_BlockShuffler.cpp
+    Source/UI/SplitLayout.h
 
     # Utils
     Source/Utils/WeightedRandom.h
     Source/Utils/GridSnap.h
     Source/Utils/UuidGenerator.h
 )
+
+# Windows .exe icon: JUCE auto-generates an icon resource from ICON_BIG/ICON_SMALL
+# above (Resources/appicon.png) and embeds it, so no hand-written .rc is needed.
+# (Resources/BlockShuffler.rc + app.ico are retained in-repo only for reference.)
 
 target_compile_definitions(BlockShuffler PUBLIC
     JUCE_WEB_BROWSER=0
@@ -87,6 +108,10 @@ target_compile_definitions(BlockShuffler PUBLIC
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
 )
+
+# macOS .app icon: JUCE generates Icon.icns from ICON_BIG/ICON_SMALL (appicon.png)
+# and sets CFBundleIconFile in the bundle's Info.plist automatically — the previous
+# hand-rolled app.icns copy + patch_icon.sh are no longer needed.
 
 # Re-sign the Standalone app with ad-hoc signature after build (macOS only)
 if(APPLE)
@@ -97,8 +122,13 @@ if(APPLE)
     )
 endif()
 
+if(UNIX AND NOT APPLE)
+    find_package(ALSA REQUIRED)
+endif()
+
 target_link_libraries(BlockShuffler
     PRIVATE
+        BlockShufflerResources
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats
@@ -114,4 +144,48 @@ target_link_libraries(BlockShuffler
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
+)
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(BlockShuffler PRIVATE ALSA::ALSA)
+endif()
+
+# ── ResolverDiag: PERMANENT regression harness (Step 7B deviation: kept).
+# Excluded from default builds — build explicitly with:
+#   cmake --build build-diag --target ResolverDiag
+# Run the FULL harness before ANY change to resolver, stack, or link code. ──
+juce_add_console_app(ResolverDiag PRODUCT_NAME "ResolverDiag")
+set_target_properties(ResolverDiag PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_sources(ResolverDiag PRIVATE
+    diag/ResolverDiag.cpp
+    Source/Model/Project.cpp
+    Source/Model/Block.cpp
+    Source/Model/Clip.cpp
+    Source/Model/BlockLink.cpp
+    Source/Model/Serialization.cpp
+    Source/Audio/ArrangementResolver.cpp
+    Source/Audio/TempoStretcher.cpp
+    Source/Audio/ExportRenderer.cpp
+    Source/Audio/PlaybackEngine.cpp
+    Source/UI/LookAndFeel_BlockShuffler.cpp
+    Source/UI/BlockLinkOverlay.cpp
+    Source/UI/InspectorPanel.cpp
+)
+target_include_directories(ResolverDiag PRIVATE Source)
+target_compile_definitions(ResolverDiag PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+)
+target_link_libraries(ResolverDiag
+    PRIVATE
+        BlockShufflerResources
+        juce::juce_core
+        juce::juce_events
+        juce::juce_data_structures
+        juce::juce_audio_basics
+        juce::juce_audio_formats
+        juce::juce_graphics
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
 )

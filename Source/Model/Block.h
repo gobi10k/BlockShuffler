@@ -18,10 +18,9 @@ public:
           position(0),
           stackGroup(-1),
           stackPlayMode(StackPlayMode::Sequential),
-          isOverlapping(false),
-          overlapProbability(0.5f),
           probability(1.0f),
           isDone(false),
+          playChance(1.0f),
           tempo(120.0) {
         stackPlayCount.values.add(1);
         stackPlayCount.weights.add(1.0f);
@@ -37,23 +36,22 @@ public:
     int stackGroup;         // -1 = not stacked; same value = same stack
     WeightedValue<int> stackPlayCount;
     StackPlayMode stackPlayMode;
+    bool alwaysPlayBase = false;  // stack-level (shared via propagateStackSettings); simultaneous mode only:
+                                  // the stack's base block (first in project order) always plays
 
-    // Overlap
-    bool isOverlapping;
-    float overlapProbability;
     float probability;     // weight for random selection when in a stack
-    // If non-empty, this overlapping block only plays when the selected parent clip
-    // is in this list. Empty = play over any parent clip (default / backward-compatible).
-    juce::StringArray allowedParentClipIds;
 
     // Clips
     juce::OwnedArray<Clip> clips;
 
     // Flags
     bool isDone;
+    float playChance;  // 0.0–1.0, probability that this block is included in the arrangement
 
     // Tempo
     double tempo;
+    bool tempoOverridden = false;  // false = inherits the project default tempo
+                                   // (Project::setDefaultTempo re-materializes it)
 
     // Helpers
     void addClip(std::unique_ptr<Clip> clip) {

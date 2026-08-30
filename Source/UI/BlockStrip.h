@@ -3,16 +3,23 @@
 #include "../Model/Project.h"
 #include "BlockComponent.h"
 #include "BlockLinkOverlay.h"
+#include "LookAndFeel_BlockShuffler.h"
 
 namespace BlockShuffler {
 
 /**
  * Horizontally scrollable strip of block tiles.
- * Manages selection, link/stack "pending" mode, and drag-to-reorder.
+ * Manages selection, link/stack "pending" mode, and drag-to-reorder/stack.
+ *
+ * Block dragging uses ComponentDragger (not DragAndDropContainer).
+ * BlockComponent physically follows the mouse and calls onDragMoved / onDragEnded.
+ * BlockStrip is the sole handler for block drop logic.
+ *
+ * Clip dragging still uses DragAndDropContainer; BlockComponent handles those drops.
  */
 class BlockStrip : public juce::Component,
                    public juce::ChangeListener,
-                   public juce::DragAndDropTarget {
+                   public juce::AsyncUpdater {
 public:
     BlockStrip() = default;
     ~BlockStrip() override;
@@ -21,12 +28,17 @@ public:
     void init(Project& project, BlockLinkOverlay* overlay = nullptr);
 
     void paint(juce::Graphics& g) override;
+    void paintOverChildren(juce::Graphics& g) override;
     void resized() override;
     bool keyPressed(const juce::KeyPress& key) override;
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
     std::function<void(Block*)>              onBlockSelected;
     std::function<void(const juce::String&)> onPlayFromHereRequested;
+    /// Called when "Play Block" is chosen — plays only that block in isolation.
+    std::function<void(const juce::String&)> onPlayBlockRequested;
+    /// Called when a clip is dragged and dropped onto a block: (clipId, targetBlockId)
+    std::function<void(const juce::String&, const juce::String&)> onClipDropped;
 
     /** Programmatic selection (e.g. on startup or project load). */
     void selectBlock(Block* block);
@@ -41,12 +53,21 @@ public:
     /** Cancels any pending link/stack mode (e.g. when Esc is pressed). */
     void cancelPendingMode();
 
-    // DragAndDropTarget
-    bool isInterestedInDragSource(const SourceDetails& details) override;
-    void itemDropped(const SourceDetails& details) override;
-    void itemDragEnter(const SourceDetails& details) override;
-    void itemDragExit(const SourceDetails& details) override;
-    void itemDragMove(const SourceDetails& details) override;
+    /** Empty-space click leaves link/stack mode (see the ctor's addMouseListener). */
+    void mouseDown(const juce::MouseEvent&) override;
+
+    // ── Block drag callbacks — called by BlockComponent ──────────────────────────
+    /** Called every frame during a block drag with the dragged component and its
+     *  current centre in contentArea-local coordinates. Updates drop feedback.
+     *  @param isShiftDrag  True when Shift was held at drag start (stack-move mode). */
+    void updateDragFeedback(BlockComponent* draggedComp, juce::Point<int> centre, bool isShiftDrag = false);
+
+    /** Called when a block drag ends. Processes the drop and rebuilds layout.
+     *  @param isShiftDrag  True when Shift was held at drag start (stack-move mode). */
+    void blockDropped(BlockComponent* draggedComp, juce::Point<int> centre, bool isShiftDrag = false);
+
+    /** Clears all drop-feedback state and repaints. */
+    void clearDragFeedback();
 
 private:
     Project*          project  = nullptr;
@@ -58,9 +79,19 @@ private:
         void visibleAreaChanged(const juce::Rectangle<int>&) override {
             if (onScrollChanged) onScrollChanged();
         }
+        void paint(juce::Graphics& g) override {
+            g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
+        }
     };
     ScrollNotifyViewport viewport;
-    juce::Component  contentArea;
+
+    struct ContentArea : public juce::Component {
+        ContentArea() { setOpaque(true); }
+        void paint(juce::Graphics& g) override {
+            g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
+        }
+    };
+    ContentArea      contentArea;
     juce::TextButton addButton { "+" };
     juce::Label      modeLabel;   ///< overlay shown during link/stack pending mode
 
@@ -68,28 +99,62 @@ private:
     juce::String selectedBlockId;
     juce::String playingBlockId;
 
-    // Pending interaction modes
+    // Pending interaction modes (link / stack via context menu)
     enum class PendingMode { None, Link, Stack };
     PendingMode    pendingMode     = PendingMode::None;
-    juce::String   pendingBlockId;  ///< Source block for the pending link/stack
+    juce::String   pendingBlockId;
 
     static constexpr int blockW   = 100;
     static constexpr int blockH   = 120;
-    static constexpr int blockGap =   6;
+    static constexpr int blockGap =  10;  // wide enough for reliable gap-drop targeting
     static constexpr int padding  =   8;
     static constexpr int addBtnW  =  36;
 
-    // Cache of contentArea-relative centre-X for each block (indexed parallel to project->blocks)
+    // Cache of contentArea-relative centre-X for each block (indexed parallel to project->blocks).
+    // Used for scroll-into-view calculations.
     juce::Array<int> blockCentreXCache;
 
-    // Index (into blockComponents) of the block currently under a drag-to-stack hover; -1 = none
-    int dragOverIndex = -1;
+    // Static bounds of each block component as laid out by resized().
+    // These don't change while a drag is in progress, so hit-testing against them
+    // is consistent regardless of where the dragged tile has moved.
+    juce::Array<juce::Rectangle<int>> originalBounds;
 
-    // Drag state tracking for visual feedback
-    int  dragSourceIndex = -1;
-    int  dragSourceSlot  = -1;
-    bool dragIsUnstacking = false;  // true = moving to different slot (will unstack)
-    int  dragDropSlot = -1;         // horizontal slot where drop will occur
+    // ── Drag-drop feedback state ──────────────────────────────────────────────────
+    enum class DropAction { None, Reorder, Stack, RearrangeInStack };
+
+    DropAction       currentDropAction = DropAction::None;
+    int              dropTargetIndex   = -1;      ///< block index for Stack/Rearrange; insert-before for Reorder
+    BlockComponent*  dropTargetComp    = nullptr; ///< target component for Stack / RearrangeInStack
+    bool             isStackMove       = false;   ///< true when Shift+drag is moving a whole stack
+
+    // Sibling positions recorded at the start of a Shift+stack drag.
+    // Keys are valid only while no rebuild is in progress.
+    juce::HashMap<BlockComponent*, juce::Point<int>> stackDragStartPositions;
+
+    void beginStackDrag(int stackGroup);
+    void moveStackComponents(int stackGroup, BlockComponent* draggedComp, juce::Point<int> delta);
+
+    /// Non-null while a block is being dragged. Guards against rebuilding the
+    /// component array while the drag event handler is still on the call stack.
+    BlockComponent* activeDragComp = nullptr;
+
+    /// Set by handleAsyncUpdate() if a rebuild fires during an active drag.
+    /// The drop's deferred rebuild request re-runs handleAsyncUpdate() once the
+    /// drag has cleared activeDragComp.
+    bool needsRebuildAfterDrag = false;
+
+    /// True only while blockDropped()'s body runs. rebuildBlocks() asserts this is
+    /// false so a synchronous rebuild can never again be invoked from inside a drop
+    /// handler (that was the 12.1 use-after-free: freeing the dragged component
+    /// while its mouseUp was still on the call stack).
+    bool isInDropHandler = false;
+
+    /// AsyncUpdater: DROP-PATH-ONLY deferred strip rebuild, triggered exclusively
+    /// by blockDropped() so the dragged BlockComponent outlives the mouse event
+    /// that dropped it (12.1 UAF). Model-change refreshes (undo/redo, inspector,
+    /// load) do NOT route through this — changeListenerCallback queues a rebuild
+    /// PER change (coalescing them regressed rapid undo, see .cpp comment).
+    void handleAsyncUpdate() override;
 
     void rebuildBlocks();
     void deleteBlock(const juce::String& blockId);
@@ -99,15 +164,8 @@ private:
     void updateOverlay();
     int  blockCentreX(int blockIndex) const;
 
-    /** Returns the contentArea-relative X and Y for a strip-local drag position. */
+    /** Converts a BlockStrip-local point to contentArea-local coordinates. */
     juce::Point<int> toContentPos(juce::Point<int> stripLocal) const;
-
-    /** Returns the block index (into blockComponents/project->blocks) at a contentArea point,
-     *  or -1 if the point is not inside any block tile. */
-    int blockIndexAtContentPos(juce::Point<int> contentPos) const;
-
-    /** Sets the drag-over highlight on the block at dragOverIndex, clearing the previous one. */
-    void setDragOver(int newIndex, bool isReorder = false);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BlockStrip)
 };

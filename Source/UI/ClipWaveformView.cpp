@@ -20,7 +20,7 @@ ClipRowComponent::ClipRowComponent(Clip& c,
       onRemoveCallback(std::move(onRemove))
 {
     nameLabel.setText(clip ? clip->name : "", juce::dontSendNotification);
-    nameLabel.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
+    nameLabel.setFont(LookAndFeel_BlockShuffler::uiFontBold(12.0f));
     nameLabel.setColour(juce::Label::textColourId,
                         juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
     nameLabel.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
@@ -39,6 +39,7 @@ ClipRowComponent::ClipRowComponent(Clip& c,
     nameLabel.setInterceptsMouseClicks(false, false);
     addAndMakeVisible(nameLabel);
     setInterceptsMouseClicks(true, true);
+    setOpaque(true);  // paint() covers every pixel; skip alpha-compositing path
 }
 
 void ClipRowComponent::setSelected(bool sel) {
@@ -71,7 +72,7 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
 
     if (!clip || !clip->audioBuffer) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
         g.drawText("No audio loaded", area, juce::Justification::centred);
         return;
     }
@@ -81,17 +82,32 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
     const int numChannels = buf.getNumChannels();
     if (numSamples == 0 || numChannels == 0) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(11.0f));
         g.drawText("No audio loaded", area, juce::Justification::centred);
         return;
     }
 
-    const int w  = area.getWidth();
-    const int cy = area.getCentreY();
-    const int halfH = area.getHeight() / 2;
+    const int w      = area.getWidth();
+    const int cy     = area.getCentreY();
+    const int halfH  = area.getHeight() / 2;
+    const auto waveCol = juce::Colour(LookAndFeel_BlockShuffler::waveformFill);
 
-    g.setColour(juce::Colour(LookAndFeel_BlockShuffler::waveformFill));
-    for (int px = 0; px < w; ++px) {
+    // Clip-region-aware paint (13.4 perf): compute/draw ONLY the columns that
+    // intersect the dirty region, so repaint cost is independent of clip
+    // length (rowW reaches millions of px at deep zoom; full-width HeapBlocks
+    // at the 65536 zoom cap would be hundreds of MB per repaint). The
+    // column->sample mapping below is BIT-IDENTICAL to the previous full-width
+    // math: absolute px, scaled off the full `area` width w. One extra column
+    // on each side keeps the fill-path geometry crossing the clip boundary
+    // pixel-identical to a full repaint (T47 backstop guards the mapping).
+    const auto vis = g.getClipBounds().getIntersection(area);
+    if (vis.isEmpty()) return;
+    const int pxFirst = juce::jmax(0,     (vis.getX()     - area.getX()) - 1);
+    const int pxLast  = juce::jmin(w - 1,  vis.getRight() - area.getX());  // inclusive
+    const int nCols   = pxLast - pxFirst + 1;
+
+    juce::HeapBlock<int> peakY(nCols), troughY(nCols);
+    for (int px = pxFirst; px <= pxLast; ++px) {
         int s0 = (int)((int64_t)px * numSamples / w);
         int s1 = juce::jmin((int)((int64_t)(px + 1) * numSamples / w), numSamples - 1);
         if (s1 < s0) s1 = s0;
@@ -107,21 +123,38 @@ void ClipRowComponent::renderWaveform(juce::Graphics& g,
         int y1 = cy - (int)(mn * (float)halfH);
         if (y0 > y1) std::swap(y0, y1);
         if (y0 == y1) ++y1;
-        g.drawLine((float)(area.getX() + px), (float)y0,
-                   (float)(area.getX() + px), (float)y1);
+        peakY[px - pxFirst]   = y0;
+        troughY[px - pxFirst] = y1;
     }
+
+    // Fill pass — outline path traced peak→trough, filled at low alpha.
+    // With pxFirst == 0 (full repaint) this is the exact pre-change path.
+    juce::Path fillPath;
+    fillPath.startNewSubPath((float)(area.getX() + pxFirst), (float)cy);
+    for (int px = pxFirst; px <= pxLast; ++px)
+        fillPath.lineTo((float)(area.getX() + px), (float)peakY[px - pxFirst]);
+    for (int px = pxLast; px >= pxFirst; --px)
+        fillPath.lineTo((float)(area.getX() + px), (float)troughY[px - pxFirst]);
+    fillPath.closeSubPath();
+    g.setColour(waveCol.withAlpha(0.18f));
+    g.fillPath(fillPath);
+
+    // Line pass — 1px peak-to-trough at full opacity
+    g.setColour(waveCol);
+    for (int px = pxFirst; px <= pxLast; ++px)
+        g.drawLine((float)(area.getX() + px), (float)peakY[px - pxFirst],
+                   (float)(area.getX() + px), (float)troughY[px - pxFirst]);
 }
 
 void ClipRowComponent::paint(juce::Graphics& g) {
     if (!clip) return;
-    auto bg = selected
-        ? juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.18f)
-        : juce::Colour(LookAndFeel_BlockShuffler::bgMedium);
-    g.fillAll(bg);
+    // Background is always the neutral panel colour — selection is shown via border only
+    // so the clip's header colour is never tinted by the accent.
+    g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgMedium));
 
-    // Header
+    // Header — clip's own colour, fully opaque
     auto headerRect = getLocalBounds().removeFromTop(headerH);
-    g.setColour(clip->color.withAlpha(0.85f));
+    g.setColour(clip->color);
     g.fillRect(headerRect);
 
     // Pick black or white text depending on header luminance so it's always readable
@@ -131,40 +164,62 @@ void ClipRowComponent::paint(juce::Graphics& g) {
     auto headerTextCol = (lum > 0.55f) ? juce::Colours::black : juce::Colours::white;
     nameLabel.setColour(juce::Label::textColourId, headerTextCol);
 
-    // Effective (normalized) probability on right of header
-    juce::String probText;
-    if (clip->isDone) {
-        probText = "excl.";
-    } else if (ownerBlock) {
-        float totalWeight = 0.0f;
-        for (auto* c : ownerBlock->clips)
-            if (!c->isDone) totalWeight += c->probability;
-        float eff = (totalWeight > 0.0f) ? (clip->probability / totalWeight) * 100.0f : 0.0f;
-        probText = "eff: " + juce::String(eff, 1) + "%";
-    } else {
-        probText = juce::String((int)(clip->probability * 100.0f)) + "%";
+    // Raw probability weight displayed in the header pill.
+    // Effective (normalized) probability is shown in the inspector's label when the clip is selected.
+    juce::String probText = juce::String((int)(clip->probability * 100.0f)) + "%";
+    {
+        auto pillFont  = LookAndFeel_BlockShuffler::monoFont(10.5f);
+        float pillW    = LookAndFeel_BlockShuffler::measureTextWidth(pillFont, probText) + 10.0f;
+        float pillH    = 14.0f;
+        float pillX    = (float)headerRect.getRight() - pillW - 4.0f;
+        float pillY    = (float)headerRect.getCentreY() - pillH * 0.5f;
+        auto  pillRect = juce::Rectangle<float>(pillX, pillY, pillW, pillH);
+        g.setColour(juce::Colours::black.withAlpha(0.28f));
+        g.fillRoundedRectangle(pillRect, 3.5f);
+        g.setFont(pillFont);
+        g.setColour(juce::Colours::white.withAlpha(0.92f));
+        g.drawText(probText, pillRect.toNearestInt(), juce::Justification::centred);
     }
-    g.setFont(juce::Font(juce::FontOptions(11.0f)));
-    g.setColour(headerTextCol);
-    g.drawText(probText, headerRect.withTrimmedRight(4), juce::Justification::centredRight);
 
     // Waveform
     auto wa = waveArea();
     renderWaveform(g, wa);
 
-    // Grid lines — offset by gridOffsetSamples so the nudge is visible
+    // Grid lines — adaptive density: coarsen grid until lines are >= 8px apart
     if (clip->tempo > 0.0 && projectSampleRate > 0.0) {
-        double spb   = (projectSampleRate * 60.0) / clip->tempo;
         int64_t total = (clip->audioBuffer) ? (int64_t)clip->audioBuffer->getNumSamples() : 0;
-        // Wrap the offset into [0, spb) so lines start at the right phase
-        double offset = std::fmod((double)clip->gridOffsetSamples, spb);
-        if (offset < 0.0) offset += spb;
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::gridLineColor));
-        for (double s = offset; s < (double)total; s += spb) {
-            int gx = sampleToX((int64_t)s);
-            if (gx >= wa.getX() && gx < wa.getRight())
-                g.drawLine((float)gx, (float)wa.getY(),
-                           (float)gx, (float)wa.getBottom(), 1.0f);
+        double spb = (projectSampleRate * 60.0) / clip->tempo;
+        if (total > 0 && wa.getWidth() > 0 && spb > 0.0) {
+            double pixelsPerSample = (double)wa.getWidth() / (double)total;
+            double drawSpb = spb;
+            double pixelsPerLine = drawSpb * pixelsPerSample;
+            while (pixelsPerLine < 8.0 && drawSpb < (double)total) {
+                drawSpb *= 2.0;
+                pixelsPerLine *= 2.0;
+            }
+            if (pixelsPerLine >= 8.0) {
+                float alpha = juce::jmap((float)pixelsPerLine, 8.0f, 40.0f, 0.15f, 0.40f);
+                g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderStrong).withAlpha(alpha));
+                double offset = std::fmod((double)clip->gridOffsetSamples, drawSpb);
+                if (offset < 0.0) offset += drawSpb;
+                // Clip-region-aware (13.4 perf): jump analytically to the first
+                // grid line inside the dirty region and stop past its right
+                // edge — no scan across the full width from sample 0.
+                const auto visG = g.getClipBounds().getIntersection(wa);
+                if (!visG.isEmpty()) {
+                    double firstVisSample = (double)(visG.getX() - wa.getX()) / pixelsPerSample;
+                    double lastVisSample  = (double)(visG.getRight() - wa.getX()) / pixelsPerSample;
+                    double k = std::ceil((firstVisSample - offset) / drawSpb) - 1.0;  // -1: cover the boundary line
+                    if (k < 0.0) k = 0.0;
+                    for (double s = offset + k * drawSpb;
+                         s < (double)total && s <= lastVisSample + drawSpb; s += drawSpb) {
+                        int gx = sampleToX((int64_t)s);
+                        if (gx >= wa.getX() && gx < wa.getRight())
+                            g.drawLine((float)gx, (float)wa.getY(),
+                                       (float)gx, (float)wa.getBottom(), 1.5f);
+                    }
+                }
+            }
         }
     }
 
@@ -203,15 +258,33 @@ void ClipRowComponent::paint(juce::Graphics& g) {
         g.fillPath(tri);
     }
 
-    g.setColour(selected ? juce::Colour(LookAndFeel_BlockShuffler::accentCol)
-                         : juce::Colour(LookAndFeel_BlockShuffler::bgLight));
-    g.drawRect(getLocalBounds());
+    // Done overlay — semi-transparent dark + strikethrough + "DONE" label
+    if (clip->isDone) {
+        auto wa2 = waveArea();
+        g.setColour(juce::Colour(0x88000000));
+        g.fillRect(wa2);
+        g.setColour(juce::Colour(0xAAFF4444));
+        g.drawLine((float)wa2.getX(), (float)wa2.getCentreY(),
+                   (float)wa2.getRight(), (float)wa2.getCentreY(), 2.0f);
+        g.setColour(juce::Colour(0xCCFFFFFF));
+        g.setFont(LookAndFeel_BlockShuffler::uiFontBold(13.0f));
+        g.drawText("DONE", wa2, juce::Justification::centred);
+    }
+
+    // Border: 2px accent for selected, 1px borderSubtle separator otherwise
+    if (selected) {
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol));
+        g.drawRect(getLocalBounds(), 2);
+    } else {
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::borderSubtle));
+        g.drawRect(getLocalBounds(), 1);
+    }
 }
 
 void ClipRowComponent::resized() {
     auto hdr = getLocalBounds().removeFromTop(headerH);
     // Leave right 44px for the probability label (drawn in paint)
-    nameLabel.setBounds(hdr.withTrimmedLeft(5).withTrimmedRight(44));
+    nameLabel.setBounds(hdr.withTrimmedLeft(5).withTrimmedRight(72));
 }
 
 void ClipRowComponent::mouseDown(const juce::MouseEvent& e) {
@@ -222,9 +295,18 @@ void ClipRowComponent::mouseDown(const juce::MouseEvent& e) {
     }
     if (onSelectedCallback) onSelectedCallback();
 
-    // Check marker hit in wave area
+    if (!clip) { activeDrag = DragTarget::None; return; }
+
     auto wa = waveArea();
-    if (!wa.contains(e.x, e.y) || !clip) { activeDrag = DragTarget::None; return; }
+    if (!wa.contains(e.x, e.y)) {
+        // Header area: arm for a potential clip drag
+        activeDrag = DragTarget::Clip;
+        clipDragStartX = e.x;
+        clipDragStartY = e.y;
+        return;
+    }
+
+    // Wave area: check for marker hit
     int sx = sampleToX(clip->startMark);
     int ex = sampleToX(clip->endMark);
     if (std::abs(e.x - sx) <= markerHit)      activeDrag = DragTarget::StartMarker;
@@ -245,6 +327,17 @@ void ClipRowComponent::mouseDoubleClick(const juce::MouseEvent& e) {
 }
 
 void ClipRowComponent::mouseDrag(const juce::MouseEvent& e) {
+    if (activeDrag == DragTarget::Clip) {
+        int dx = e.x - clipDragStartX;
+        int dy = e.y - clipDragStartY;
+        if (std::abs(dx) + std::abs(dy) > 5 && clip) {
+            if (auto* dc = juce::DragAndDropContainer::findParentDragContainerFor(this))
+                dc->startDragging("clip:" + clip->id, this);
+            activeDrag = DragTarget::None;
+        }
+        return;
+    }
+
     if (activeDrag == DragTarget::None) return;
 
     // Snap to tempo grid unless Shift is held (Shift = free drag)
@@ -289,6 +382,8 @@ void ClipRowComponent::showContextMenu() {
     menu.addItem(1, "Rename");
     menu.addSubMenu("Set Color", colourMenu);
     menu.addSeparator();
+    menu.addItem(5, "Play Clip");
+    menu.addSeparator();
     menu.addItem(2, "Song Ender",  true, clip && clip->isSongEnder);
     menu.addItem(3, "Mark as Done", true, clip && clip->isDone);
     menu.addSeparator();
@@ -324,6 +419,8 @@ void ClipRowComponent::showContextMenu() {
             if (self->onUndoableMutation && pre.isObject()) self->onUndoableMutation(pre);
         } else if (result == 4) {
             if (self->onRemoveCallback) self->onRemoveCallback();
+        } else if (result == 5 && self->clip) {
+            if (self->onPlayClipRequested) self->onPlayClipRequested(self->clip->id);
         }
     });
 }
@@ -333,6 +430,7 @@ void ClipRowComponent::showContextMenu() {
 //==============================================================================
 
 ClipWaveformView::ClipWaveformView() {
+    setOpaque(true);  // ensures paint() runs first so transparent children show bgDark
     setWantsKeyboardFocus(true);
 
     viewport.setViewedComponent(&contentArea, false);
@@ -343,19 +441,36 @@ ClipWaveformView::ClipWaveformView() {
     // immediately reclaims focus and consumes arrow keys for scrolling instead of nudging.
     viewport.setWantsKeyboardFocus(false);
     // Route Cmd+scroll from the viewport subclass to our zoom logic.
-    viewport.onZoomScroll = [this](float deltaY) {
+    viewport.onZoomScroll = [this](float deltaY, int mouseX) {
+        // mouseX is viewport-local (visible) x — anchor the zoom on the cursor.
         float delta = deltaY > 0 ? 1.25f : 0.8f;
-        zoomFactor  = juce::jlimit(1.0f, 32.0f, zoomFactor * delta);
-        juce::Component::SafePointer<ClipWaveformView> safeThis(this);
-        juce::MessageManager::callAsync(
-            [safeThis] {
-                if (safeThis) safeThis->resized();
-            });
+        setZoomAnchored(zoomFactor * delta, (double)mouseX);
     };
     addAndMakeVisible(viewport);
 
     addClipBtn.onClick = [this] { browseForClip(); };
     addAndMakeVisible(addClipBtn);
+
+    auto applyZoom = [this] {
+        ClipWaveformView* self = this;
+        juce::MessageManager::callAsync(
+            [safe = juce::Component::SafePointer<ClipWaveformView>(self)] {
+                if (safe) safe->resized();
+            });
+    };
+    zoomInBtn .onClick = [this] { setZoomAnchored(zoomFactor * 1.5f, viewport.getMaximumVisibleWidth() * 0.5); };
+    zoomOutBtn.onClick = [this] { setZoomAnchored(zoomFactor / 1.5f, viewport.getMaximumVisibleWidth() * 0.5); };
+    zoomFitBtn.onClick = [this, applyZoom] { zoomFactor = 1.0f; applyZoom(); };  // fit: x clamps to 0 naturally
+    zoomInBtn .setTooltip("Zoom in  [Cmd+scroll]");
+    zoomOutBtn.setTooltip("Zoom out  [Cmd+scroll]");
+    zoomFitBtn.setTooltip("Reset zoom to fit");
+    // Tag buttons so LookAndFeel can draw them as a joined segmented control
+    zoomOutBtn.getProperties().set("segmentPos", "left");
+    zoomFitBtn.getProperties().set("segmentPos", "middle");
+    zoomInBtn .getProperties().set("segmentPos", "right");
+    addAndMakeVisible(zoomInBtn);
+    addAndMakeVisible(zoomOutBtn);
+    addAndMakeVisible(zoomFitBtn);
 }
 
 ClipWaveformView::~ClipWaveformView() {
@@ -375,8 +490,9 @@ void ClipWaveformView::setBlock(Block* block, double sampleRate, juce::AudioForm
 }
 
 void ClipWaveformView::changeListenerCallback(juce::ChangeBroadcaster*) {
+    juce::Component::SafePointer<ClipWaveformView> safe(this);
     juce::MessageManager::callAsync(
-        [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
+        [safe] {
             if (safe) { safe->rebuildRows(); safe->resized(); safe->repaint(); }
         });
 }
@@ -386,6 +502,21 @@ void ClipWaveformView::rebuildRows() {
     clipRows.clear();
     if (!currentBlock) return;
 
+    if (selectedClip != nullptr) {
+        bool stillHere = false;
+        for (auto* c : currentBlock->clips)
+            if (c == selectedClip) { stillHere = true; break; }
+        if (!stillHere) {
+            selectedClip = nullptr;
+            if (onClipSelected) onClipSelected(nullptr);
+        }
+    }
+
+    // Pre-compute total weight for effective-probability tooltip
+    float totalWeight = 0.0f;
+    for (auto* c : currentBlock->clips)
+        totalWeight += c->probability;
+
     for (auto* clipPtr : currentBlock->clips) {
         auto* row = clipRows.add(new ClipRowComponent(
             *clipPtr,
@@ -394,10 +525,20 @@ void ClipWaveformView::rebuildRows() {
             [this]       { repaint(); },
             [this, clipPtr] { removeClip(clipPtr); }
         ));
-        row->onCaptureSnapshot  = onCaptureSnapshot;
-        row->onUndoableMutation = onUndoableMutation;
+        row->onCaptureSnapshot   = onCaptureSnapshot;
+        row->onUndoableMutation  = onUndoableMutation;
+        row->onPlayClipRequested = onPlayClipRequested;
         row->ownerBlock = currentBlock.get();
         row->setSelected(clipPtr == selectedClip);
+
+        float rawPct = clipPtr->probability * 100.0f;
+        float effPct = (totalWeight > 0.0f)
+                     ? (clipPtr->probability / totalWeight) * 100.0f
+                     : 0.0f;  // Carter 2.7: all-0% -> 0% effective (block is skipped)
+        row->setTooltip(clipPtr->name
+            + " | Weight: " + juce::String((int)rawPct) + "%"
+            + " | Effective: " + juce::String(effPct, 1) + "%");
+
         contentArea.addAndMakeVisible(row);
     }
 }
@@ -450,6 +591,9 @@ void ClipWaveformView::browseForClip() {
                 if (f.existsAsFile()) {
                     auto clipPtr = std::make_unique<Clip>();
                     if (clipPtr->loadFromFile(f, *formatManager, projectSampleRate)) {
+                        double blockT = currentBlock ? currentBlock->tempo : 0.0;
+                        clipPtr->tempo = (blockT > 0.0) ? blockT
+                                       : (defaultTempo > 0.0 ? defaultTempo : 120.0);
                         currentBlock->addClip(std::move(clipPtr));
                         anyAdded = true;
                     }
@@ -496,17 +640,15 @@ void ClipWaveformView::setPlayingClip(const juce::String& clipId, int64_t sample
         playingClipId = clipId;
         changed = true;
 
+        // Scroll the playing clip's row into view WITHOUT changing the user's selection.
+        // The playhead (red line in paintOverChildren) is the only visual playing indicator.
+        // Do NOT change selectedClip or any row's selected state here — that would override
+        // the clip the user explicitly clicked, switching the inspector to the playing clip.
         if (!clipId.isEmpty()) {
             for (int i = 0; i < clipRows.size(); ++i) {
                 auto* row = clipRows[i];
                 auto* clip = row->getClip();
                 if (clip != nullptr && !clip->id.isEmpty() && clip->id == clipId) {
-                    selectedClip = clip;
-                    row->setSelected(true);
-                    for (int j = 0; j < clipRows.size(); ++j) {
-                        if (j != i) clipRows[j]->setSelected(false);
-                    }
-
                     juce::MessageManager::callAsync([this, rowIndex = i]() {
                         if (rowIndex >= 0 && rowIndex < clipRows.size()) {
                             auto rowBounds = clipRows[rowIndex]->getBounds();
@@ -541,34 +683,49 @@ void ClipWaveformView::paintOverChildren(juce::Graphics& g) {
         auto* clip = row->getClip();
         if (clip == nullptr || clip->id.isEmpty() || clip->id != playingClipId) continue;
 
-        auto rowBounds = row->getBounds();
-        auto wa = row->waveArea();
-
         if (clip->audioBuffer == nullptr || clip->audioBuffer->getNumSamples() == 0) return;
-
         int64_t totalSamples = clip->audioBuffer->getNumSamples();
         if (totalSamples <= 0) return;
 
         double fraction = (double)playingSamplePos / (double)totalSamples;
-        if (fraction < 0.0) fraction = 0.0;
-        if (fraction > 1.0) fraction = 1.0;
+        fraction = juce::jlimit(0.0, 1.0, fraction);
 
-        int vpTop = viewport.getY();
-        int vpBottom = viewport.getBottom();
-        int vpLeft = viewport.getX();
-        int vpRight = viewport.getRight();
+        // Row bounds are in contentArea-local space; convert to ClipWaveformView space.
+        // Viewport sits at (vpX, vpY) in our space; contentArea is offset by the scroll.
+        const int scrollX = viewport.getViewPositionX();
+        const int scrollY = viewport.getViewPositionY();
+        const int vpX     = viewport.getX();
+        const int vpY     = viewport.getY();
 
-        int waveX = wa.getX() + (int)(fraction * wa.getWidth());
+        auto rowBounds = row->getBounds();   // contentArea coords
+        auto wa        = row->waveArea();    // row-local coords (row.getX()==0 so same as contentArea)
 
-        if (waveX < vpLeft || waveX > vpRight) return;
+        // Playhead X in ClipWaveformView space
+        int waveX = vpX - scrollX + wa.getX() + (int)(fraction * wa.getWidth());
 
-        int drawTop = juce::jmax(vpTop, rowBounds.getY());
-        int drawBottom = juce::jmin(vpBottom, rowBounds.getBottom());
+        // Viewport clip bounds in ClipWaveformView space
+        const int vpLeft   = vpX;
+        const int vpRight  = viewport.getRight();
+        const int vpTop    = vpY;
+        const int vpBottom = viewport.getBottom();
 
-        if (drawBottom <= drawTop) return;
+        if (waveX < vpLeft || waveX > vpRight) break;
 
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::playheadCol).withAlpha(0.85f));
-        g.drawLine((float)waveX, (float)drawTop, (float)waveX, (float)drawBottom, 2.0f);
+        // Row Y range in ClipWaveformView space
+        int rowTop    = vpY - scrollY + rowBounds.getY();
+        int rowBottom = vpY - scrollY + rowBounds.getBottom();
+
+        int drawTop    = juce::jmax(vpTop,    rowTop);
+        int drawBottom = juce::jmin(vpBottom, rowBottom);
+
+        if (drawBottom <= drawTop) break;
+
+        // Glow pass — wide soft halo
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::playheadCol).withAlpha(0.18f));
+        g.drawLine((float)waveX, (float)drawTop, (float)waveX, (float)drawBottom, 5.0f);
+        // Sharp pass — 1px crisp line at full opacity
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::playheadCol));
+        g.drawLine((float)waveX, (float)drawTop, (float)waveX, (float)drawBottom, 1.0f);
 
         juce::Path tri;
         tri.addTriangle((float)waveX - 5, (float)drawTop,
@@ -584,7 +741,7 @@ void ClipWaveformView::paint(juce::Graphics& g) {
     g.fillAll(juce::Colour(LookAndFeel_BlockShuffler::bgDark));
     if (!currentBlock || currentBlock->clips.isEmpty()) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textSecondary));
-        g.setFont(juce::Font(juce::FontOptions(14.0f)));
+        g.setFont(LookAndFeel_BlockShuffler::uiFont(14.0f));
         g.drawText(currentBlock ? "Drop audio files here or click  \"+Add Clip\""
                                 : "Select a block to view clips",
                    getLocalBounds().withTrimmedBottom(btnH + 4),
@@ -595,12 +752,18 @@ void ClipWaveformView::paint(juce::Graphics& g) {
 void ClipWaveformView::resized() {
     auto area = getLocalBounds();
     addClipBtn.setBounds(area.removeFromBottom(btnH).reduced(4, 2));
+
+    auto zoomBar = area.removeFromBottom(zoomBarH).reduced(4, 2);
+    zoomOutBtn.setBounds(zoomBar.removeFromLeft(24));
+    zoomFitBtn.setBounds(zoomBar.removeFromLeft(36));
+    zoomInBtn .setBounds(zoomBar.removeFromLeft(24));
+
     viewport.setBounds(area);
 
     int visW   = juce::jmax(viewport.getMaximumVisibleWidth(), 1);
     int rowW   = (int)(visW * zoomFactor);
     int totalH = juce::jmax((int)clipRows.size() * (rowH + rowGap),
-                            viewport.getMaximumVisibleHeight());
+                            juce::jmax(viewport.getMaximumVisibleHeight(), 1));
     contentArea.setBounds(0, 0, rowW, totalH);
 
     int y = 0;
@@ -615,12 +778,12 @@ void ClipWaveformView::mouseWheelMove(const juce::MouseEvent& e,
     // Events that land directly on ClipWaveformView (outside the viewport area):
     // delegate zoom to shared logic, or scroll the viewport manually.
     if (e.mods.isCommandDown()) {
+        // e is in ClipWaveformView coords (this handler catches events landing
+        // outside the viewport, e.g. the zoom bar) — convert to viewport-local
+        // visible x; setZoomAnchored clamps it into [0, visW].
         float delta = w.deltaY > 0 ? 1.25f : 0.8f;
-        zoomFactor  = juce::jlimit(1.0f, 32.0f, zoomFactor * delta);
-        juce::MessageManager::callAsync(
-            [safe = juce::Component::SafePointer<ClipWaveformView>(this)] {
-                if (safe) safe->resized();
-            });
+        const int mx = viewport.getLocalPoint(this, e.getPosition()).x;
+        setZoomAnchored(zoomFactor * delta, (double)mx);
     } else {
         auto pos = viewport.getViewPosition();
         int newY = juce::jlimit(
@@ -629,6 +792,61 @@ void ClipWaveformView::mouseWheelMove(const juce::MouseEvent& e,
             pos.y - juce::roundToInt(w.deltaY * 100.0f));
         viewport.setViewPosition(pos.x, newY);
     }
+}
+
+float ClipWaveformView::computeMaxZoom() const {
+    // Find the longest clip in the current block.
+    // Max zoom is chosen so the waveform shows ~0.5 seconds at full zoom.
+    double maxDurationSeconds = 0.0;
+    const double sr = projectSampleRate > 0.0 ? projectSampleRate : 48000.0;
+
+    if (currentBlock) {
+        for (auto* clip : currentBlock->clips) {
+            if (clip->audioBuffer) {
+                double dur = (double)clip->audioBuffer->getNumSamples() / sr;
+                if (dur > maxDurationSeconds) maxDurationSeconds = dur;
+            }
+        }
+    }
+
+    if (maxDurationSeconds < 0.001) return 32.0f; // fallback for empty/tiny clips
+
+    // Carter 13.4 (2026-07-15): the deepest zoom window must be ~0.5 s for
+    // ANY clip length — the old 256 cap left clips over 128 s stuck shallower
+    // than the beat (300 s bottomed out at a 1.17 s window). Cap only at 65536
+    // for arithmetic safety (content width = viewW * zoom stays far below
+    // INT_MAX; 65536 preserves the 0.5 s window up to ~9 h of audio).
+    double maxZoom = maxDurationSeconds / 0.5;     // shows ~0.5 s at full zoom
+    maxZoom = juce::jmax(maxZoom, 1.0);
+    maxZoom = juce::jmin(maxZoom, 65536.0);
+    return (float)maxZoom;
+}
+
+void ClipWaveformView::setZoomAnchored(float newFactor, double anchorXinVisible) {
+    // Anchor = the time fraction at anchorXinVisible (viewport visible coord),
+    // captured BEFORE the zoom factor changes (contentArea still has the old
+    // width here). anchorXinVisible = visW/2 gives centre anchoring (buttons);
+    // wheel paths pass the cursor x so the sample under the cursor stays put.
+    const auto pos  = viewport.getViewPosition();
+    const int  visW = juce::jmax(1, viewport.getMaximumVisibleWidth());
+    const double anchorX    = juce::jlimit(0.0, (double)visW, anchorXinVisible);
+    const double anchorFrac = ((double)pos.x + anchorX)
+                            / (double)juce::jmax(1, contentArea.getWidth());
+
+    zoomFactor = juce::jlimit(1.0f, computeMaxZoom(), newFactor);
+
+    // Deferred re-layout kept from the original zoom paths (never resize the
+    // viewport content mid-wheel-event), then restore the anchored point.
+    juce::MessageManager::callAsync(
+        [safe = juce::Component::SafePointer<ClipWaveformView>(this), anchorFrac, anchorX, visW] {
+            if (!safe) return;
+            safe->resized();
+            const int contentW = safe->contentArea.getWidth();
+            const int newX = juce::jlimit(0, juce::jmax(0, contentW - visW),
+                juce::roundToInt(anchorFrac * (double)contentW - anchorX));
+            const auto p = safe->viewport.getViewPosition();
+            safe->viewport.setViewPosition(newX, p.y);
+        });
 }
 
 } // namespace BlockShuffler

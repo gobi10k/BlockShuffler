@@ -1,4 +1,5 @@
 #include "PlaybackEngine.h"
+#include "EntryMixer.h"
 #include "TempoStretcher.h"
 
 namespace BlockShuffler {
@@ -41,8 +42,10 @@ void PlaybackEngine::seekTo(int64_t projectSample) {
         playheadSamples.store(0);
         return;
     }
+    // FIX M3: clamp to valid range before converting to hardware samples
+    projectSample = juce::jlimit((int64_t)0, current->totalDurationSamples, projectSample);
     int64_t hw = (int64_t)((double)projectSample * outputSampleRate / current->sampleRate + 0.5);
-    playheadSamples.store(juce::jmax((int64_t)0, hw));
+    playheadSamples.store(hw);
 }
 
 double PlaybackEngine::getPlayheadSeconds() const {
@@ -84,8 +87,6 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
 
     for (int entryIndex = 0; entryIndex < current->entries.size(); ++entryIndex) {
         const auto& entry = current->entries.getReference(entryIndex);
-        const int64_t bodyLen   = entry.endMark - entry.startMark;
-        const int64_t leadInLen = entry.startMark;
         const int64_t tailLen   = (entry.audioBuffer) ? juce::jmax((int64_t)0,
                                              (int64_t)entry.audioBuffer->getNumSamples()
                                              - entry.endMark) : 0;
@@ -96,13 +97,18 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
                                   ? (int64_t)entry.stretchedTail->getNumSamples()
                                   : (int64_t)(tailLen   * entry.tailStretchRatio   + 0.5f);
 
-        // Convert project-space bounds to hardware-space bounds
-        int64_t fullStartH = (int64_t)((double)entry.timelinePos * hToP + 0.5);
-        int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + entry.endMark + tailTL) * hToP + 0.5);
+        // timelinePos = body start; the lead-in ENDS at the body join and spans
+        // its RENDERED (post-stretch) length — the culling window must match
+        // the mixer's end-anchor or a stretched lead longer than startMark gets
+        // culled at block granularity (part of fix (a), the 2e93c22 pairing).
+        // Convert project-space bounds to hardware-space bounds.
+        int64_t fullStartH = (int64_t)((double)(entry.timelinePos - renderedLeadInLength(entry)) * hToP + 0.5);
+        int64_t fullEndH   = (int64_t)((double)(entry.timelinePos + (entry.endMark - entry.startMark) + tailTL) * hToP + 0.5);
 
         if (fullEndH <= head || fullStartH >= head + (int64_t)numSamples) continue;
 
-        mixEntryIntoBuffer(buffer, numSamples, entry, head, pToH, hToP, entryIndex);
+        // Delegate to shared EntryMixer
+        mixEntryToBuffer(entry, buffer, numSamples, head, pToH, hToP, entryIndex);
     }
 
     head += numSamples;
@@ -113,128 +119,6 @@ void PlaybackEngine::getNextAudioBlock(juce::AudioBuffer<float>& buffer, int num
     if (head >= totalH) {
         playing.store(false);
         playheadSamples.store(totalH);
-    }
-}
-
-void PlaybackEngine::mixEntryIntoBuffer(juce::AudioBuffer<float>& buffer,
-                                         int numSamples,
-                                         const ResolvedEntry& entry,
-                                         int64_t currentHead,
-                                         double pToH,
-                                         double hToP,
-                                         int entryIndex) const
-{
-    if (!entry.audioBuffer) return;
-    const auto& src  = *entry.audioBuffer;
-    const int srcCh  = src.getNumChannels();
-    const int srcLen = src.getNumSamples();
-    const int dstCh  = buffer.getNumChannels();
-    if (srcCh == 0 || srcLen == 0 || dstCh == 0) return;
-
-    const int64_t startMark = entry.startMark;
-    const int64_t endMark   = entry.endMark;
-    const int64_t bodyLen   = endMark - startMark;
-    const int64_t leadInLen = startMark;
-    const int64_t tailLen   = juce::jmax((int64_t)0, (int64_t)srcLen - endMark);
-
-    // New timeline model: timelinePos = lead-in start; body starts at timelinePos + startMark.
-    const int64_t leadInStart = entry.timelinePos;
-    const int64_t bodyStart   = leadInStart + leadInLen;  // = timelinePos + startMark
-    const int64_t bodyEnd     = leadInStart + endMark;    // = timelinePos + endMark
-    const int64_t blockEnd    = currentHead + (int64_t)numSamples;
-
-    // General region mixer with resampling for pitch correction.
-    // regionStart/regionEnd are in project-sample space.
-    auto mixBuf = [&](const juce::AudioBuffer<float>& s,
-                      int64_t regionStart, int64_t regionEnd,
-                      double clipOff,
-                      float gainStart, float gainEnd)
-    {
-        const int sCh  = s.getNumChannels();
-        const int sLen = s.getNumSamples();
-        if (sCh == 0 || sLen == 0) return;
-
-        // Convert project region to hardware-sample region
-        int64_t regionStartH = (int64_t)((double)regionStart * hToP + 0.5);
-        int64_t regionEndH   = (int64_t)((double)regionEnd   * hToP + 0.5);
-
-        int64_t ovStartH = juce::jmax(regionStartH, currentHead);
-        int64_t ovEndH   = juce::jmin(regionEndH,   blockEnd);
-        if (ovStartH >= ovEndH) return;
-
-        int    destOff   = (int)(ovStartH - currentHead);
-        int    destCount = (int)(ovEndH - ovStartH);
-
-        // Find corresponding project-sample range for source reading
-        double pOvStart  = (double)ovStartH * pToH;
-        double srcStart  = clipOff + (pOvStart - (double)regionStart);
-        double srcSamples = (double)destCount * pToH;
-
-        if (srcStart + srcSamples <= 0.0 || srcStart >= (double)sLen) return;
-
-        if (srcStart < 0.0) {
-            double skip = -srcStart;
-            srcStart = 0.0;
-            srcSamples -= skip;
-        }
-
-        const int64_t regLen = regionEnd - regionStart;
-        float gs = gainStart, ge = gainEnd;
-        if (regLen > 1) {
-            float t0 = (float)(pOvStart - (double)regionStart) / (float)regLen;
-            float t1 = (float)((double)pOvStart + srcSamples - (double)regionStart) / (float)regLen;
-            gs = gainStart + t0 * (gainEnd - gainStart);
-            ge = gainStart + t1 * (gainEnd - gainStart);
-        }
-        gs *= entry.gain;
-        ge *= entry.gain;
-
-        TempoStretcher::resampleAdd(s, srcStart, srcSamples, buffer, destOff, destCount, gs, ge);
-    };
-
-    // ── Lead-in ────────────────────────────────────────────────────────────────
-    // Lead-in occupies [leadInStart, bodyStart) in the timeline — fades 0→1.
-    // This region overlaps with the TAIL of the previous entry, enabling crossfade.
-    if (leadInLen > 0)
-    {
-        if (entry.stretchedLeadIn)
-        {
-            // Pre-stretched buffer occupies [leadInStart, leadInStart + sl)
-            int64_t sl = (int64_t)entry.stretchedLeadIn->getNumSamples();
-            mixBuf(*entry.stretchedLeadIn, leadInStart, leadInStart + sl, 0.0, 0.0f, 1.0f);
-        }
-        else if (std::abs(entry.leadInStretchRatio - 1.0f) < 0.0001f)
-        {
-            // No stretching needed
-            mixBuf(src, leadInStart, bodyStart, 0.0, 0.0f, 1.0f);
-        }
-        else
-        {
-            // Fallback linear-interp (WSOLA failed or was bypassed)
-            int64_t leadInTL = (int64_t)(leadInLen * entry.leadInStretchRatio + 0.5f);
-            mixBuf(src, leadInStart, leadInStart + leadInTL, 0.0, 0.0f, 1.0f);
-        }
-    }
-
-    // ── Body ──────────────────────────────────────────────────────────────────
-    if (bodyLen > 0)
-        mixBuf(src, bodyStart, bodyEnd, (double)startMark, 1.0f, 1.0f);
-
-    // ── Tail ──────────────────────────────────────────────────────────────────
-    if (tailLen > 0)
-    {
-        // retainTailTempo=true → always use original clip audio at 1:1, never
-        // use a pre-stretched buffer (even if one happened to exist).
-        if (entry.retainTailTempo || !entry.stretchedTail)
-        {
-            mixBuf(src, bodyEnd, bodyEnd + tailLen, (double)endMark, 1.0f, 0.0f);
-        }
-        else
-        {
-            // Pre-stretched buffer (retainTailTempo=false, tempos differ)
-            int64_t sl = (int64_t)entry.stretchedTail->getNumSamples();
-            mixBuf(*entry.stretchedTail, bodyEnd, bodyEnd + sl, 0.0, 1.0f, 0.0f);
-        }
     }
 }
 

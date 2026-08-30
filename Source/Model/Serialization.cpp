@@ -1,15 +1,18 @@
 #include "Serialization.h"
 #include "Project.h"
 #include "../Utils/UuidGenerator.h"
+#include <map>
 
 namespace BlockShuffler {
 namespace Serialization {
 
-juce::var projectToJSON(const Project& project) {
+juce::var projectToJSON(const Project& project, const juce::File& baseDir) {
     auto* root = new juce::DynamicObject();
     root->setProperty("version", 1);
     root->setProperty("name", project.name);
     root->setProperty("sampleRate", project.sampleRate);
+    root->setProperty("defaultClipTempo", project.defaultClipTempo);
+    root->setProperty("unityGainMode",    project.unityGainMode);
 
     // Blocks
     juce::Array<juce::var> blocksArray;
@@ -22,16 +25,12 @@ juce::var projectToJSON(const Project& project) {
         bObj->setProperty("stackGroup",       block->stackGroup);
         bObj->setProperty("stackPlayMode",    block->stackPlayMode == StackPlayMode::Sequential
                                                   ? "sequential" : "simultaneous");
-        bObj->setProperty("isOverlapping",    block->isOverlapping);
-        bObj->setProperty("overlapProb",      (double)block->overlapProbability);
+        bObj->setProperty("alwaysPlayBase",   block->alwaysPlayBase);
         bObj->setProperty("probability",      (double)block->probability);
-
-        juce::Array<juce::var> apciArr;
-        for (auto& s : block->allowedParentClipIds) apciArr.add(juce::var(s));
-        bObj->setProperty("allowedParentClipIds", juce::var(apciArr));
-
-        bObj->setProperty("isDone",           block->isDone);
+        bObj->setProperty("isDone",            block->isDone);
+        bObj->setProperty("playChance",       (double)block->playChance);
         bObj->setProperty("tempo",            block->tempo);
+        bObj->setProperty("tempoOverridden",  block->tempoOverridden);
 
         // stackPlayCount
         auto* spcObj = new juce::DynamicObject();
@@ -49,13 +48,22 @@ juce::var projectToJSON(const Project& project) {
             cObj->setProperty("id",                 clip->id);
             cObj->setProperty("name",               clip->name);
             cObj->setProperty("color",              clip->color.toString());
-            cObj->setProperty("audioFile",          clip->audioFile.getFullPathName());
-            cObj->setProperty("nativeSampleRate",   clip->nativeSampleRate);
+            // Store relative path (with forward slashes) when saving to disk so projects
+            // are portable across platforms and moveable directories.
+            // Absolute path is used for undo/redo snapshots (baseDir is invalid there).
+            juce::String audioPathStr;
+            if (baseDir.isDirectory() && clip->audioFile != juce::File{})
+                audioPathStr = clip->audioFile.getRelativePathFrom(baseDir).replaceCharacter('\\', '/');
+            else
+                audioPathStr = clip->audioFile.getFullPathName();
+            cObj->setProperty("audioFile", audioPathStr);
+            // nativeSampleRate is not persisted — it is recovered by loadFromFile on project open.
             // Store large int as string to avoid double precision loss
             cObj->setProperty("startMark",          juce::String(clip->startMark));
             cObj->setProperty("endMark",            juce::String(clip->endMark));
             cObj->setProperty("probability",        (double)clip->probability);
             cObj->setProperty("tempo",              clip->tempo);
+            cObj->setProperty("tempoOverridden",    clip->tempoOverridden);
             cObj->setProperty("retainLeadInTempo",  clip->retainLeadInTempo);
             cObj->setProperty("retainTailTempo",    clip->retainTailTempo);
             cObj->setProperty("isSongEnder",        clip->isSongEnder);
@@ -85,39 +93,64 @@ juce::var projectToJSON(const Project& project) {
     return juce::var(root);
 }
 
-bool projectFromJSON(const juce::var& json, Project& project) {
+bool projectFromJSON(const juce::var& json, Project& project, const juce::File& baseDir) {
     if (!json.isObject()) return false;
 
-    project.name       = json.getProperty("name",       "Untitled").toString();
-    project.sampleRate = (double)json.getProperty("sampleRate", 48000.0);
+    project.name             = json.getProperty("name",            "Untitled").toString();
+    project.sampleRate       = (double)json.getProperty("sampleRate",       48000.0);
+    project.defaultClipTempo = (double)json.getProperty("defaultClipTempo", 120.0);
+    // RAWGAIN: absent (every pre-existing .bsp) → the current default, i.e.
+    // raw summing ON since 2026-08-22. An explicitly stored true/false is read
+    // back verbatim and never overridden by the default.
+    project.unityGainMode    = (bool)json.getProperty("unityGainMode",
+                                                      Project::kDefaultUnityGainMode);
+
+    // BACKCOMPAT (2026-08-14): which stack-level fields each block ACTUALLY
+    // carried in the JSON, as opposed to falling back to a constructor default.
+    // Keyed by the loaded Block* (not an index, so pre-existing blocks in the
+    // target Project cannot misalign it). Function-scoped: it is consumed by the
+    // normalisation step below and never outlives this load. No model change, no
+    // new serialised field — presence is inferred from the parsed JSON only.
+    struct StackFieldPresence { bool count = false, mode = false, base = false; };
+    std::map<const Block*, StackFieldPresence> stackPresence;
 
     // Blocks
     if (auto* blocksArr = json.getProperty("blocks", juce::var()).getArray()) {
         for (auto& bVar : *blocksArr) {
             auto block = std::make_unique<Block>();
+            StackFieldPresence presence;
             block->id             = bVar.getProperty("id",   generateUuid()).toString();
             block->name           = bVar.getProperty("name", "Block").toString();
             block->color          = juce::Colour::fromString(
                                         bVar.getProperty("color", "FF5599FF").toString());
             block->position       = (int)   bVar.getProperty("position",    0);
             block->stackGroup     = (int)   bVar.getProperty("stackGroup",  -1);
+            presence.mode         = bVar.hasProperty("stackPlayMode");
             block->stackPlayMode  = bVar.getProperty("stackPlayMode", "sequential")
                                         .toString() == "simultaneous"
                                         ? StackPlayMode::Simultaneous
                                         : StackPlayMode::Sequential;
-            block->isOverlapping  = (bool)  bVar.getProperty("isOverlapping",  false);
-            block->overlapProbability = (float)(double)bVar.getProperty("overlapProb", 0.5);
+            // Missing key (pre-3B project) → false
+            presence.base         = bVar.hasProperty("alwaysPlayBase");
+            block->alwaysPlayBase = (bool)  bVar.getProperty("alwaysPlayBase", false);
             block->probability    = (float)(double)bVar.getProperty("probability", 1.0);
-
-            block->allowedParentClipIds.clear();
-            if (auto* apciArr = bVar.getProperty("allowedParentClipIds", juce::var()).getArray())
-                for (auto& v : *apciArr) block->allowedParentClipIds.add(v.toString());
-
             block->isDone         = (bool)  bVar.getProperty("isDone",         false);
+            // FIX M7: clamp on load so out-of-range saved values don't cause silent skips
+            block->playChance     = juce::jlimit(0.0f, 1.0f,
+                                        (float)(double)bVar.getProperty("playChance", 1.0));
             block->tempo          = (double)bVar.getProperty("tempo",          120.0);
+            // Legacy files (no flag): a block whose tempo diverges from the
+            // project default must be treated as overridden, else the first
+            // setDefaultTempo would flatten it.
+            if (bVar.hasProperty("tempoOverridden"))
+                block->tempoOverridden = (bool)bVar.getProperty("tempoOverridden", false);
+            else
+                block->tempoOverridden =
+                    std::abs(block->tempo - project.defaultClipTempo) > 0.01;
 
             // stackPlayCount
             auto spcVar = bVar.getProperty("stackPlayCount", juce::var());
+            presence.count = spcVar.isObject();   // only an object form is a real value
             if (spcVar.isObject()) {
                 block->stackPlayCount.values.clear();
                 block->stackPlayCount.weights.clear();
@@ -135,9 +168,35 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                     clip->name             = cVar.getProperty("name", "Clip").toString();
                     clip->color            = juce::Colour::fromString(
                                                 cVar.getProperty("color", "FFFFFFFF").toString());
-                    clip->audioFile        = juce::File(cVar.getProperty("audioFile", "").toString());
+                    // Resolve audio path: relative paths are resolved against baseDir (project dir).
+                    // Absolute paths (from undo/redo snapshots or old project files) are used as-is.
+                    {
+                        // Normalise separators to '/' so a .bsp written on Windows
+                        // (backslash paths) resolves on macOS/Linux and vice-versa.
+                        // Symmetric with the save side, which stores forward slashes.
+                        // JUCE's File/getChildFile accept '/' on every platform.
+                        const juce::String pathStr =
+                            cVar.getProperty("audioFile", "").toString().replaceCharacter('\\', '/');
+                        if (pathStr.isEmpty()) {
+                            clip->audioFile = juce::File{};
+                        } else if (pathStr.startsWithChar('/') ||
+                                   (pathStr.length() >= 2 && pathStr[1] == ':')) {
+                            clip->audioFile = juce::File(pathStr);  // already absolute
+                        } else if (baseDir.isDirectory()) {
+                            clip->audioFile = baseDir.getChildFile(pathStr);  // relative → absolute
+                        } else {
+                            clip->audioFile = juce::File(pathStr);  // fallback for in-memory snapshots
+                        }
+                    }
                     clip->probability      = (float)(double)cVar.getProperty("probability",     1.0);
                     clip->tempo            = (double)cVar.getProperty("tempo",            120.0);
+                    // Legacy inference mirrors the block-level rule, against the
+                    // (already loaded) parent block tempo.
+                    if (cVar.hasProperty("tempoOverridden"))
+                        clip->tempoOverridden = (bool)cVar.getProperty("tempoOverridden", false);
+                    else
+                        clip->tempoOverridden =
+                            std::abs(clip->tempo - block->tempo) > 0.01;
                     clip->retainLeadInTempo= (bool)cVar.getProperty("retainLeadInTempo",  false);
                     clip->retainTailTempo  = (bool)cVar.getProperty("retainTailTempo",    false);
                     clip->isSongEnder      = (bool)cVar.getProperty("isSongEnder",        false);
@@ -147,6 +206,9 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                     if (clip->audioFile.existsAsFile()) {
                         clip->loadFromFile(clip->audioFile, project.formatManager,
                                            project.sampleRate);
+                        // FIX M6: warn when a file exists but can't be decoded
+                        if (!clip->audioBuffer)
+                            project.missingFilesOnLoad.add(clip->audioFile.getFullPathName());
                     } else if (clip->audioFile != juce::File{}) {
                         project.missingFilesOnLoad.add(clip->audioFile.getFullPathName());
                     }
@@ -184,7 +246,9 @@ bool projectFromJSON(const juce::var& json, Project& project) {
                 }
             }
 
-            project.blocks.add(block.release());
+            auto* rawBlock = block.release();
+            project.blocks.add(rawBlock);
+            stackPresence[rawBlock] = presence;
         }
     }
 
@@ -199,15 +263,55 @@ bool projectFromJSON(const juce::var& json, Project& project) {
         }
     }
 
-    // Propagate stack settings from first block in each group to all others,
-    // fixing any inconsistency in saved files (e.g. from pre-propagation builds).
+    // Normalise stack settings across each group, fixing inconsistency in saved
+    // files (e.g. from pre-propagation builds).
+    //
+    // BACKCOMPAT (2026-08-14) — PER-FIELD BEARER SELECTION.
+    // This used to call propagateStackSettings(group) with sourceBlock = nullptr,
+    // which takes the FIRST member in blocks order as the source for ALL fields
+    // (Project.cpp:131-134). A pre-propagation save wrote a stack field on only
+    // ONE member of the group, so whenever that member was not the first one, the
+    // first member's CONSTRUCTOR DEFAULT (stackPlayCount {values:[1],weights:[1]},
+    // Block.h:25-26 — an absent key leaves it untouched, see the isObject() guard
+    // above) was propagated over the top of the genuinely saved value, silently
+    // turning the user's "play 3" into "play 1" before the resolver ever ran.
+    // That made the bug ORDER-DEPENDENT, which is why it reproduced on some
+    // presets and not others: fixtures diag/fixtures/oldschema_seq3.json (bearer
+    // first → value survived) vs oldschema_seq3_bearer_last.json (bearer last →
+    // value destroyed). Pinned by T58.
+    //
+    // Fix, confined to the LOAD path: resolve each field INDEPENDENTLY from the
+    // first member whose JSON actually contained it. If no member carried a
+    // field, every member already holds identical constructor defaults, so we
+    // leave them exactly as before. Project::propagateStackSettings itself is
+    // deliberately unchanged — the interactive call sites (InspectorPanel, and
+    // Project's own stack mutators) keep their existing source-block semantics.
     {
         juce::SortedSet<int> seen;
-        for (auto* b : project.blocks)
-            if (b->stackGroup >= 0 && !seen.contains(b->stackGroup)) {
-                seen.add(b->stackGroup);
-                project.propagateStackSettings(b->stackGroup);
+        for (auto* b : project.blocks) {
+            if (b->stackGroup < 0 || seen.contains(b->stackGroup)) continue;
+            seen.add(b->stackGroup);
+            const int group = b->stackGroup;
+
+            const Block* countSrc = nullptr;
+            const Block* modeSrc  = nullptr;
+            const Block* baseSrc  = nullptr;
+            for (auto* m : project.blocks) {
+                if (m->stackGroup != group) continue;
+                auto it = stackPresence.find(m);
+                if (it == stackPresence.end()) continue;   // not from this JSON
+                if (countSrc == nullptr && it->second.count) countSrc = m;
+                if (modeSrc  == nullptr && it->second.mode)  modeSrc  = m;
+                if (baseSrc  == nullptr && it->second.base)  baseSrc  = m;
             }
+
+            for (auto* m : project.blocks) {
+                if (m->stackGroup != group) continue;
+                if (countSrc != nullptr) m->stackPlayCount = countSrc->stackPlayCount;
+                if (modeSrc  != nullptr) m->stackPlayMode  = modeSrc->stackPlayMode;
+                if (baseSrc  != nullptr) m->alwaysPlayBase = baseSrc->alwaysPlayBase;
+            }
+        }
     }
 
     return true;
