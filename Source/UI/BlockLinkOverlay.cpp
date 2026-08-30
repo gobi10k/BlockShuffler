@@ -1,5 +1,6 @@
 #include "BlockLinkOverlay.h"
 #include "LinkArcLayout.h"
+#include "LinkLabelMetrics.h"
 #include "LookAndFeel_BlockShuffler.h"
 
 namespace BlockShuffler {
@@ -20,8 +21,10 @@ void BlockLinkOverlay::setLinkingSourceX(int x) {
 void BlockLinkOverlay::paint(juce::Graphics& g) {
     if (!project) return;
 
-    auto labelFont = LookAndFeel_BlockShuffler::uiFont(10.0f);
-    auto probFont  = LookAndFeel_BlockShuffler::monoFont(10.0f);
+    // These two Font objects are used for BOTH the measurement that sizes the
+    // collision box and the g.setFont that draws the glyphs. Keep it that way.
+    const auto labelFont = LinkLabelMetrics::nameFont();
+    const auto probFont  = LinkLabelMetrics::pillFont();
 
     LinkArcLayout::Config cfg;
     cfg.width  = (float)getWidth();
@@ -58,11 +61,11 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         if (auto* ba = project->getBlockById(link->blockA)) nameA = ba->name;
         if (auto* bb = project->getBlockById(link->blockB)) nameB = bb->name;
 
-        juce::String labelText = nameA + " <-> " + nameB;
-        juce::String probText  = juce::String((int)(link->swapProbability * 100)) + "%";
+        const juce::String labelText = LinkLabelMetrics::nameText(nameA, nameB);
+        const juce::String probText  = LinkLabelMetrics::pillText(link->swapProbability);
 
-        in.labelW = LookAndFeel_BlockShuffler::measureTextWidth(labelFont, labelText) + 10.0f;
-        in.pillW  = LookAndFeel_BlockShuffler::measureTextWidth(probFont,  probText)  + 12.0f;
+        in.labelW = LinkLabelMetrics::nameWidth(labelFont, labelText);
+        in.pillW  = LinkLabelMetrics::pillWidth(probFont,  probText);
 
         ins.push_back(in);
         labelTexts.add(labelText);

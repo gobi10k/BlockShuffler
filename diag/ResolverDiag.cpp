@@ -19,6 +19,7 @@
 #include "Utils/GridSnap.h"
 #include "UI/BlockLinkOverlay.h"
 #include "UI/LinkArcLayout.h"
+#include "UI/LinkLabelMetrics.h"
 #include "UI/LookAndFeel_BlockShuffler.h"
 #include <cmath>
 
@@ -305,6 +306,16 @@ static int generateManualRound(const juce::File& dir) {
 
 int main(int argc, char* argv[]) {
     juce::ScopedJuceInitialiser_GUI init;
+
+    // The harness must resolve fonts exactly the way the app does, or every
+    // text-measurement assertion below is measuring a face the app never draws
+    // with. MainComponent registers this same LookAndFeel as the default; JUCE
+    // routes Font -> Typeface through the DEFAULT LookAndFeel only, so without
+    // this line "Inter" falls back to a platform face and the widths the tests
+    // check are not the widths the user sees.
+    BlockShuffler::LookAndFeel_BlockShuffler diagLookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel(&diagLookAndFeel);
+    struct LnfReset { ~LnfReset() { juce::LookAndFeel::setDefaultLookAndFeel(nullptr); } } lnfReset;
 
     if (argc >= 3 && juce::String(argv[1]) == "--gen-manual")
         return generateManualRound(juce::File(juce::String(argv[2])));
@@ -4422,18 +4433,26 @@ int main(int argc, char* argv[]) {
                         Anchor a; a.x = r.getCentreX(); a.y = r.getCentreY(); a.valid = true;
                         return a;
                     };
-                    auto mkLink = [&](const juce::Rectangle<float>& ra,
-                                      const juce::Rectangle<float>& rb) {
+                    // Widths come from the SAME fonts, text, measurement call and
+                    // padding BlockLinkOverlay::paint uses. They are deliberately
+                    // NOT constants: a hardcoded 96/34 measured on a Mac is what
+                    // let this test stay green on Windows while labels overlapped.
+                    const auto nameFont63 = LinkLabelMetrics::nameFont();
+                    const auto pillFont63 = LinkLabelMetrics::pillFont();
+                    auto mkLink = [&](const juce::Rectangle<float>& ra, const juce::String& na,
+                                      const juce::Rectangle<float>& rb, const juce::String& nb) {
                         LinkIn in;
                         in.a = anchorOf(ra); in.b = anchorOf(rb);
-                        in.labelW = 96.0f;   // ~ "Block 3 <-> Block 4" at 10pt
-                        in.pillW  = 34.0f;   // ~ "50%"
+                        in.labelW = LinkLabelMetrics::nameWidth(nameFont63,
+                                        LinkLabelMetrics::nameText(na, nb));
+                        in.pillW  = LinkLabelMetrics::pillWidth(pillFont63,
+                                        LinkLabelMetrics::pillText(0.5f));
                         return in;
                     };
                     std::vector<LinkIn> links {
-                        mkLink(tS1, tS2),          // same column
-                        mkLink(tS2, tS3),          // same column
-                        mkLink(tS1, tX)            // cross column
+                        mkLink(tS1, "Verse 1",  tS2, "Verse 2"),   // same column
+                        mkLink(tS2, "Verse 2",  tS3, "Solo 5"),    // same column
+                        mkLink(tS1, "Verse 1",  tX,  "Chorus")     // cross column
                     };
 
                     const auto placed = layout(links, cfg, reserved);
@@ -4482,9 +4501,16 @@ int main(int argc, char* argv[]) {
                     for (auto& p : placed)
                         if (p.visible && !stripBounds.contains(p.labelBox)) labelsInBounds = false;
 
+                    // (f) every label was actually PLACED. Without this the layout
+                    //     could satisfy (c)-(e) by dropping labels it could not fit.
+                    bool allLabelsDrawn = true;
+                    for (auto& p : placed)
+                        if (p.visible && (!p.labelVisible || p.degraded)) allLabelsDrawn = false;
+
                     verdict("T63 LINKUI arcs/labels: same-column links bow OUT to the side of the stack (never a vertical line through the tiles), two same-stack brackets differ, no two labels intersect, no label lands on a block tile, all labels clamped inside the strip",
                             allVisible && sameColFlags && bowsOutside && bracketsDiffer
-                            && labelsDisjoint && labelsClearOfTiles && labelsInBounds,
+                            && labelsDisjoint && labelsClearOfTiles && labelsInBounds
+                            && allLabelsDrawn,
                             juce::String("sameColumnFlags=") + (sameColFlags ? "y" : "N")
                             + ", apexX=[" + juce::String(placed[0].apexX, 1) + ","
                             + juce::String(placed[1].apexX, 1) + "] colX="
@@ -4493,7 +4519,10 @@ int main(int argc, char* argv[]) {
                             + ", bracketsDiffer=" + (bracketsDiffer ? "y" : "N")
                             + ", labelsDisjoint=" + (labelsDisjoint ? "y" : "N") + overlapDetail
                             + ", clearOfTiles=" + (labelsClearOfTiles ? "y" : "N")
-                            + ", inBounds=" + (labelsInBounds ? "y" : "N"));
+                            + ", inBounds=" + (labelsInBounds ? "y" : "N")
+                            + ", allLabelsDrawn=" + (allLabelsDrawn ? "y" : "N")
+                            + ", measuredW=" + juce::String(links[0].labelW, 1) + "/"
+                            + juce::String(links[0].pillW, 1));
                 }
 
                 { // T65 (PERMANENT, LINKUI-DENSITY 2026-08-26, Carter screenshot on
@@ -4531,10 +4560,18 @@ int main(int argc, char* argv[]) {
                         a.valid = true;
                         return a;
                     };
-                    // "Block 2 <-> Block 3" at 10pt ~ 96px incl. padding; "50%" ~ 34px.
+                    // Real measurement, same path as paint() -- see T63's note. The
+                    // block names are the defaults a fresh project produces, so the
+                    // widths are the ones a user actually gets.
+                    const auto nameFont65 = LinkLabelMetrics::nameFont();
+                    const auto pillFont65 = LinkLabelMetrics::pillFont();
                     auto mk65 = [&](int a, int b) {
                         LinkIn in; in.a = anchorAt(a); in.b = anchorAt(b);
-                        in.labelW = 96.0f; in.pillW = 34.0f;
+                        in.labelW = LinkLabelMetrics::nameWidth(nameFont65,
+                                        LinkLabelMetrics::nameText("Block " + juce::String(a),
+                                                                   "Block " + juce::String(b)));
+                        in.pillW  = LinkLabelMetrics::pillWidth(pillFont65,
+                                        LinkLabelMetrics::pillText(0.5f));
                         return in;
                     };
 
@@ -4560,6 +4597,12 @@ int main(int argc, char* argv[]) {
                             if (p.visible && !strip65.contains(p.labelBox)) return false;
                         return true;
                     };
+                    // A layout that drops labels could satisfy "no overlap" trivially.
+                    auto allDrawn = [&](const std::vector<Placed>& placed) {
+                        for (auto& p : placed)
+                            if (p.visible && (!p.labelVisible || p.degraded)) return false;
+                        return true;
+                    };
 
                     // ── (a)(b) the screenshot's four links ──────────────────────────
                     std::vector<LinkIn> links65 { mk65(2,3), mk65(2,5), mk65(3,5), mk65(4,5) };
@@ -4567,6 +4610,7 @@ int main(int argc, char* argv[]) {
                     juce::String detail4;
                     const int overlaps4  = worstOverlap(placed65, detail4);
                     const bool inBounds4 = allInBounds(placed65);
+                    const bool drawn4    = allDrawn(placed65);
 
                     // ── (c) denser: 6 links over the same 5 columns ─────────────────
                     std::vector<LinkIn> dense65 {
@@ -4576,13 +4620,126 @@ int main(int argc, char* argv[]) {
                     juce::String detailD;
                     const int overlapsD  = worstOverlap(placedD, detailD);
                     const bool inBoundsD = allInBounds(placedD);
+                    const bool drawnD    = allDrawn(placedD);
 
                     verdict("T65 LINKUI-DENSITY: crowded CROSS-COLUMN link labels never overlap (screenshot case 2<->3,2<->5,3<->5,4<->5 over 5 full-height columns) and stay inside the strip; lane rule also holds for a denser 6-link case",
-                            overlaps4 == 0 && inBounds4 && overlapsD == 0 && inBoundsD,
+                            overlaps4 == 0 && inBounds4 && drawn4
+                            && overlapsD == 0 && inBoundsD && drawnD,
                             juce::String("4-link: overlappingPairs=") + juce::String(overlaps4) + detail4
                             + ", inBounds=" + (inBounds4 ? "y" : "N")
+                            + ", allDrawn=" + (drawn4 ? "y" : "N")
                             + " | 6-link: overlappingPairs=" + juce::String(overlapsD) + detailD
-                            + ", inBounds=" + (inBoundsD ? "y" : "N"));
+                            + ", inBounds=" + (inBoundsD ? "y" : "N")
+                            + ", allDrawn=" + (drawnD ? "y" : "N")
+                            + " | measuredW=" + juce::String(links65[0].labelW, 1) + "/"
+                            + juce::String(links65[0].pillW, 1));
+                }
+
+                { // T66 (PERMANENT, LINKUI-ENVELOPE 2026-08-30, Carter Windows
+                  // screenshot): the no-overlap guarantee must hold across the WHOLE
+                  // geometry envelope the UI can actually produce, at the widths the
+                  // RUNNING PLATFORM really measures -- not at one lucky strip size
+                  // with widths typed into the test.
+                  //
+                  // WHY THIS EXISTS. T63/T65 pinned labelW=96/pillW=34, which are the
+                  // macOS numbers; Windows resolves the same Font to Arial and gets
+                  // ~10% narrower text (86.15 -> 77.12 px for "Block 2 <-> Block 3",
+                  // measured on both platforms). Frozen widths meant those two tests
+                  // could only ever prove self-consistency for one platform's metrics.
+                  //   They also each fix ONE strip size. The block strip is a user-
+                  // dragged pane: SplitLayout lets it be anywhere from blocksMinH to
+                  // well past blocksDefaultH, and its width follows the window. Below
+                  // ~208px tall the old lane pass had room for exactly ONE lane, ran
+                  // out of horizontal slots, and then placed the label anyway without
+                  // re-checking -- a silent overlap. Against the pre-fix tree this
+                  // sweep reports 76 overlapping cells; it is the negative control.
+                  //  (a) NO cell may contain two intersecting label groups;
+                  //  (b) NO cell may drop a label (that would satisfy (a) by hiding);
+                  //  (c) every placed label stays inside the strip.
+                    using namespace LinkArcLayout;
+
+                    const auto nameFont66 = LinkLabelMetrics::nameFont();
+                    const auto pillFont66 = LinkLabelMetrics::pillFont();
+
+                    const int heights[] = { SplitLayout::blocksMinH, 160, 180, 200, 220,
+                                            260, 300, SplitLayout::blocksDefaultH };
+                    const int widths[]  = { 420, 500, 600, 700, 800, 900 };
+                    const int counts[]  = { 4, 5, 6, 7, 8 };
+                    const float tileW = 100.0f, tileGap = 10.0f, tilePad = 8.0f;
+
+                    int  badCells = 0, overlapPairs = 0, droppedLabels = 0, outOfBounds = 0;
+                    juce::String worstCell;
+                    float measuredName66 = 0.0f, measuredPill66 = 0.0f;
+
+                    for (int h : heights) for (int w : widths) for (int n : counts) {
+                        Config cfg66;
+                        cfg66.width = (float)w; cfg66.height = (float)h;
+                        cfg66.cy = (float)h * 0.5f; cfg66.colHalfW = tileW * 0.5f;
+
+                        // Single-block columns: each tile fills the strip height, which
+                        // is the case that makes "clear of the tiles" unsatisfiable.
+                        const int cols = juce::jmax(3, n / 2 + 2);
+                        std::vector<juce::Rectangle<float>> tiles66;
+                        for (int i = 0; i < cols; ++i)
+                            tiles66.push_back({ tilePad + (float)i * (tileW + tileGap),
+                                                0.0f, tileW, (float)h });
+
+                        std::vector<LinkIn> links66;
+                        for (int i = 0; i < n; ++i) {
+                            const int ia = i % cols, ib = (i * 2 + 1) % cols;
+                            if (ia == ib) continue;
+                            LinkIn in;
+                            in.a.x = tiles66[(size_t)ia].getCentreX();
+                            in.a.y = tiles66[(size_t)ia].getCentreY(); in.a.valid = true;
+                            in.b.x = tiles66[(size_t)ib].getCentreX();
+                            in.b.y = tiles66[(size_t)ib].getCentreY(); in.b.valid = true;
+                            in.labelW = LinkLabelMetrics::nameWidth(nameFont66,
+                                            LinkLabelMetrics::nameText("Block " + juce::String(ia + 1),
+                                                                       "Block " + juce::String(ib + 1)));
+                            in.pillW  = LinkLabelMetrics::pillWidth(pillFont66,
+                                            LinkLabelMetrics::pillText(0.5f));
+                            measuredName66 = in.labelW; measuredPill66 = in.pillW;
+                            links66.push_back(in);
+                        }
+
+                        const auto placed66 = layout(links66, cfg66, tiles66);
+                        const juce::Rectangle<float> strip66(0.0f, 0.0f, (float)w, (float)h);
+
+                        int cellOverlaps = 0, cellDrops = 0, cellOut = 0;
+                        for (size_t i = 0; i < placed66.size(); ++i) {
+                            if (!placed66[i].visible) continue;
+                            if (!placed66[i].labelVisible) { ++cellDrops; continue; }
+                            if (!strip66.contains(placed66[i].labelBox)) ++cellOut;
+                            for (size_t j = i + 1; j < placed66.size(); ++j)
+                                if (placed66[j].visible && placed66[j].labelVisible
+                                    && placed66[i].labelBox.intersects(placed66[j].labelBox))
+                                    ++cellOverlaps;
+                        }
+                        overlapPairs += cellOverlaps; droppedLabels += cellDrops;
+                        outOfBounds  += cellOut;
+                        if (cellOverlaps || cellDrops || cellOut) {
+                            ++badCells;
+                            if (worstCell.isEmpty())
+                                worstCell = " firstBad=" + juce::String(h) + "x" + juce::String(w)
+                                          + "/" + juce::String(n) + "links(ov="
+                                          + juce::String(cellOverlaps) + ",drop="
+                                          + juce::String(cellDrops) + ",oob="
+                                          + juce::String(cellOut) + ")";
+                        }
+                    }
+
+                    const int totalCells = (int)(std::size(heights) * std::size(widths)
+                                                 * std::size(counts));
+                    verdict("T66 LINKUI-ENVELOPE: across every strip height/width/link-count the UI can produce, and at the widths THIS platform really measures, no two label groups overlap, no label is dropped, none escapes the strip",
+                            badCells == 0,
+                            juce::String("cells=") + juce::String(totalCells)
+                            + ", badCells=" + juce::String(badCells)
+                            + ", overlappingPairs=" + juce::String(overlapPairs)
+                            + ", droppedLabels=" + juce::String(droppedLabels)
+                            + ", outOfBounds=" + juce::String(outOfBounds)
+                            + worstCell
+                            + " | measuredW(name/pill)=" + juce::String(measuredName66, 2)
+                            + "/" + juce::String(measuredPill66, 2));
                 }
 
                 { // T64 (PERMANENT, ASCII/MOJIBAKE 2026-08-26): user-visible strings

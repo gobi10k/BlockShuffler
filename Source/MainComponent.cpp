@@ -5,6 +5,17 @@ namespace BlockShuffler {
 MainComponent::MainComponent(PlaybackEngine& eng)
     : engine(eng)
 {
+    // setLookAndFeel() alone is NOT enough to get our embedded typefaces used.
+    // JUCE resolves every Font -> Typeface through the DEFAULT LookAndFeel only
+    // (juce_LookAndFeel.cpp wires juce_getTypefaceForFont to
+    // LookAndFeel::getDefaultLookAndFeel()), so with only a component-local
+    // LookAndFeel the Inter / JetBrains Mono TTFs in BinaryData were loaded and
+    // then never asked for: every Font fell back to whatever face the platform
+    // happens to supply for an unknown family. That silently made text a
+    // different width on Windows than on macOS -- the link-label overlap Carter
+    // reported. Registering as the default makes getTypefaceForFont() the one
+    // route for measurement AND drawing, on every platform.
+    juce::LookAndFeel::setDefaultLookAndFeel(&customLookAndFeel);
     setLookAndFeel(&customLookAndFeel);
     setWantsKeyboardFocus(true);
 
@@ -149,6 +160,9 @@ MainComponent::MainComponent(PlaybackEngine& eng)
 MainComponent::~MainComponent() {
     project->removeChangeListener(this);
     setLookAndFeel(nullptr);
+    // Hand the default back before customLookAndFeel dies with us -- a dangling
+    // default LookAndFeel would outlive this component inside a plugin host.
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 }
 
 void MainComponent::applyBlockSelection(Block* block) {
