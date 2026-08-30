@@ -32,12 +32,22 @@ public:
      */
     void setBlockAnchors(const juce::HashMap<juce::String, juce::Rectangle<int>>& bounds);
 
+    /**
+     * The part of the overlay the user can actually see -- the strip's viewport,
+     * in overlay-local coordinates. The overlay covers the WHOLE strip (including
+     * the "+" button gutter) while the tiles scroll underneath it, so without this
+     * the layout has no way to tell a link that has scrolled away from one that is
+     * simply near the edge. Left unset, everything counts as visible.
+     */
+    void setViewportRect(juce::Rectangle<int> r);
+
     /** Show a "linking mode" indicator at this x position (-1 = off). */
     void setLinkingSourceX(int x);
 
 private:
     Project* project = nullptr;
     juce::HashMap<juce::String, juce::Rectangle<int>> blockBounds;
+    juce::Rectangle<int> viewportRect;
     int linkingSourceX = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BlockLinkOverlay)

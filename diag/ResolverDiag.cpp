@@ -4503,7 +4503,7 @@ int main(int argc, char* argv[]) {
                     //     could satisfy (c)-(e) by dropping labels it could not fit.
                     bool allLabelsDrawn = true;
                     for (auto& p : placed)
-                        if (p.visible && (!p.labelVisible || p.degraded)) allLabelsDrawn = false;
+                        if (p.visible && !p.offViewport && (!p.labelVisible || p.degraded)) allLabelsDrawn = false;
 
                     verdict("T63 LINKUI arcs/labels: same-column links bow OUT to the side of the stack (never a vertical line through the tiles), two same-stack brackets differ, no two labels intersect, no label lands on a block tile, all labels clamped inside the strip",
                             allVisible && sameColFlags && bowsOutside && bracketsDiffer
@@ -4598,7 +4598,7 @@ int main(int argc, char* argv[]) {
                     // A layout that drops labels could satisfy "no overlap" trivially.
                     auto allDrawn = [&](const std::vector<Placed>& placed) {
                         for (auto& p : placed)
-                            if (p.visible && (!p.labelVisible || p.degraded)) return false;
+                            if (p.visible && !p.offViewport && (!p.labelVisible || p.degraded)) return false;
                         return true;
                     };
 
@@ -4676,7 +4676,13 @@ int main(int argc, char* argv[]) {
 
                         // Single-block columns: each tile fills the strip height, which
                         // is the case that makes "clear of the tiles" unsatisfiable.
-                        const int cols = juce::jmax(3, n / 2 + 2);
+                        // Columns must FIT the strip: this sweep is about crowding,
+                        // not scrolling. Content wider than the viewport is the
+                        // scroll case and belongs to T67, which owns the culling and
+                        // arc-tracking rules.
+                        const int colsThatFit = juce::jmax(2,
+                            (int)((float)w - 2.0f * tilePad) / (int)(tileW + tileGap));
+                        const int cols = juce::jlimit(2, colsThatFit, n / 2 + 2);
                         std::vector<juce::Rectangle<float>> tiles66;
                         for (int i = 0; i < cols; ++i)
                             tiles66.push_back({ tilePad + (float)i * (tileW + tileGap),
@@ -4706,7 +4712,13 @@ int main(int argc, char* argv[]) {
                         int cellOverlaps = 0, cellDrops = 0, cellOut = 0;
                         for (size_t i = 0; i < placed66.size(); ++i) {
                             if (!placed66[i].visible) continue;
-                            if (!placed66[i].labelVisible) { ++cellDrops; continue; }
+                            // An off-viewport cull is correct behaviour, not a drop:
+                            // T66's narrow cells put columns past the strip edge, and
+                            // T67 owns that rule. A DROP is "no room for it anywhere".
+                            if (!placed66[i].labelVisible) {
+                                if (!placed66[i].offViewport) ++cellDrops;
+                                continue;
+                            }
                             if (!strip66.contains(placed66[i].labelBox)) ++cellOut;
                             for (size_t j = i + 1; j < placed66.size(); ++j)
                                 if (placed66[j].visible && placed66[j].labelVisible
@@ -4738,6 +4750,118 @@ int main(int argc, char* argv[]) {
                             + worstCell
                             + " | measuredW(name/pill)=" + juce::String(measuredName66, 2)
                             + "/" + juce::String(measuredPill66, 2));
+                }
+
+                { // T67 (PERMANENT, LINKUI-SCROLL 2026-08-30, Carter screenshot on
+                  // 4a5d1b3): a link label must not outlive its arc. Strip scrolled
+                  // right to Blocks 8-15, yet "Block 1 <-> Block 7" and its 50% pill
+                  // were still drawn at the LEFT EDGE of the strip.
+                  //
+                  // CAUSE: the bounds clamp was applied last and given priority, so
+                  // it pinned every label into the strip no matter where the arc had
+                  // gone. Anchors are already scroll-corrected by BlockStrip (they go
+                  // negative as blocks scroll off), so the arc correctly vanished and
+                  // the clamp stranded the label on its own.
+                  //
+                  // THE RULE: a label is drawn only if its ARC intersects the
+                  // viewport. Partially visible => the label tracks the arc and is
+                  // CLIPPED, never pushed inward to stay wholly visible.
+                  //  (a) both endpoints scrolled off  -> label NOT drawn;
+                  //  (b) one endpoint visible         -> label drawn, centred on the
+                  //      arc clamped to the arc's own VISIBLE extent (not shoved to
+                  //      the viewport edge to fit);
+                  //  (c) both endpoints visible       -> exactly as before;
+                  //  (d) the labels that ARE drawn still never overlap.
+                    using namespace LinkArcLayout;
+
+                    const float sW67 = 900.0f, sH67 = 300.0f;
+                    Config cfg67;
+                    cfg67.width = sW67; cfg67.height = sH67; cfg67.cy = sH67 * 0.5f;
+                    cfg67.colHalfW = 50.0f;
+                    // Viewport: the strip minus its padding and the "+" button, the
+                    // way BlockStrip::resized lays it out.
+                    cfg67.viewport = juce::Rectangle<float>(8.0f, 0.0f, 848.0f, sH67);
+
+                    // Tile centre Xs AFTER scrolling (BlockStrip hands the overlay
+                    // strip-local coords with viewPositionX already subtracted, so a
+                    // scrolled-off block simply has a negative centre).
+                    const float cxA = -700.0f;   // far off to the left
+                    const float cxB = -300.0f;   // off to the left
+                    const float cxC =   60.0f;   // just inside the viewport
+                    const float cxD =  400.0f;   // comfortably inside
+                    const float cxE =  700.0f;   // comfortably inside
+
+                    auto tile67 = [&](float cx) {
+                        return juce::Rectangle<float>(cx - 50.0f, cfg67.cy - 32.0f, 100.0f, 64.0f);
+                    };
+                    std::vector<juce::Rectangle<float>> tiles67 {
+                        tile67(cxA), tile67(cxB), tile67(cxC), tile67(cxD), tile67(cxE) };
+
+                    const auto nameFont67 = LinkLabelMetrics::nameFont();
+                    const auto pillFont67 = LinkLabelMetrics::pillFont();
+                    auto mk67 = [&](float xa, float xb, const juce::String& na,
+                                    const juce::String& nb) {
+                        LinkIn in;
+                        in.a.x = xa; in.a.y = cfg67.cy; in.a.valid = true;
+                        in.b.x = xb; in.b.y = cfg67.cy; in.b.valid = true;
+                        in.labelW = LinkLabelMetrics::nameWidth(nameFont67,
+                                        LinkLabelMetrics::nameText(na, nb));
+                        in.pillW  = LinkLabelMetrics::pillWidth(pillFont67,
+                                        LinkLabelMetrics::pillText(0.5f));
+                        return in;
+                    };
+                    std::vector<LinkIn> links67 {
+                        mk67(cxA, cxB, "Block 1", "Block 2"),   // (a) both scrolled off
+                        mk67(cxB, cxC, "Block 2", "Block 3"),   // (b) one visible
+                        mk67(cxD, cxE, "Block 4", "Block 5")    // (c) both visible
+                    };
+
+                    const auto placed67 = layout(links67, cfg67, tiles67);
+
+                    // (a) both off-viewport: nothing drawn, and nothing left behind.
+                    const bool culled = placed67.size() == 3
+                                     && !placed67[0].labelVisible
+                                     && placed67[0].offViewport
+                                     && placed67[0].labelBox.isEmpty();
+
+                    // (b) one endpoint visible: drawn, and sitting where the arc is.
+                    //     The arc spans cxB..cxC; the part of it the user can see is
+                    //     [viewport.x, cxC]. The label's centre must be the arc's
+                    //     midpoint clamped into THAT range -- not the viewport edge
+                    //     plus a margin, which is what stranding looks like.
+                    const float arcMidB  = (cxB + cxC) * 0.5f;
+                    const float visLeftB = juce::jmax(cfg67.viewport.getX(), cxB);
+                    const float visRightB= juce::jmin(cfg67.viewport.getRight(), cxC);
+                    const float wantB    = juce::jlimit(visLeftB, visRightB, arcMidB);
+                    const float gotB     = placed67[1].labelBox.getCentreX();
+                    const bool  partial  = placed67[1].labelVisible
+                                        && std::abs(gotB - wantB) <= 1.0f;
+
+                    // (c) both visible: centred on the arc midpoint, as it always was.
+                    const float wantC = (cxD + cxE) * 0.5f;
+                    const float gotC  = placed67[2].labelBox.getCentreX();
+                    const bool  normal = placed67[2].labelVisible
+                                      && std::abs(gotC - wantC) <= 1.0f;
+
+                    // (d) culling must not cost the non-overlap guarantee.
+                    bool drawnDisjoint = true;
+                    for (size_t i = 0; i < placed67.size(); ++i)
+                        for (size_t j = i + 1; j < placed67.size(); ++j)
+                            if (placed67[i].labelVisible && placed67[j].labelVisible
+                                && placed67[i].labelBox.intersects(placed67[j].labelBox))
+                                drawnDisjoint = false;
+
+                    verdict("T67 LINKUI-SCROLL: a label is drawn only where its arc is -- both endpoints scrolled off => not drawn at all; partly visible => tracks the arc and is clipped, never shoved inward to stay whole; fully visible => unchanged; drawn labels still disjoint",
+                            culled && partial && normal && drawnDisjoint,
+                            juce::String("(a) offscreenLabelDrawn=")
+                            + (placed67[0].labelVisible ? "Y(BUG)" : "n")
+                            + " box=" + juce::String(placed67[0].labelBox.getX(), 1)
+                            + " | (b) drawn=" + (placed67[1].labelVisible ? "y" : "N")
+                            + " centreX=" + juce::String(gotB, 1)
+                            + " want=" + juce::String(wantB, 1)
+                            + " | (c) centreX=" + juce::String(gotC, 1)
+                            + " want=" + juce::String(wantC, 1)
+                            + " | drawnDisjoint=" + (drawnDisjoint ? "y" : "N"));
                 }
 
                 { // T64 (PERMANENT, ASCII/MOJIBAKE 2026-08-26): user-visible strings

@@ -12,6 +12,12 @@ void BlockLinkOverlay::setBlockAnchors(const juce::HashMap<juce::String, juce::R
     repaint();
 }
 
+void BlockLinkOverlay::setViewportRect(juce::Rectangle<int> r) {
+    if (viewportRect == r) return;
+    viewportRect = r;
+    repaint();
+}
+
 void BlockLinkOverlay::setLinkingSourceX(int x) {
     if (linkingSourceX == x) return;
     linkingSourceX = x;
@@ -30,6 +36,9 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
     cfg.width  = (float)getWidth();
     cfg.height = (float)getHeight();
     cfg.cy     = (float)(getHeight() / 2);
+    // Empty until BlockStrip tells us otherwise, which the layout reads as
+    // "the whole strip is visible".
+    cfg.viewport = viewportRect.toFloat();
 
     // Collect the inputs the pure layout pass needs, and the tile rects labels
     // must keep clear of so a link label never lands on a block's name.
@@ -73,6 +82,14 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
     }
 
     const auto placed = LinkArcLayout::layout(ins, cfg, reserved);
+
+    // Everything belonging to a link is clipped to the viewport. A link whose arc
+    // has scrolled out of view is culled by the layout above; one that is only
+    // PARTLY out keeps its natural place on its arc and is cut off at the edge
+    // here, rather than being shoved inward to stay whole.
+    {
+    juce::Graphics::ScopedSaveState clipToViewport(g);
+    if (!viewportRect.isEmpty()) g.reduceClipRegion(viewportRect);
 
     int linkIndex = 0;
     for (auto* link : project->links) {
@@ -136,6 +153,8 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
 
         ++linkIndex;
     }
+    }   // end viewport clip -- the linking-mode indicator below is deliberately
+        // NOT clipped: it marks the whole strip's source column, not one arc.
 
     // Linking-mode indicator: the vertical line marking the SOURCE block only.
     // The instruction text used to be drawn here too — it is now owned solely by

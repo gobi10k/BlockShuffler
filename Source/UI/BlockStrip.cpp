@@ -474,6 +474,10 @@ void BlockStrip::updateOverlay() {
                                         b.getWidth(), b.getHeight()));
     }
     overlay->setProject(project);
+    // What the user can actually see. The overlay spans the whole strip (the "+"
+    // button gutter included) while the tiles scroll under it, so without this the
+    // label pass cannot tell a link that has scrolled away from one near the edge.
+    overlay->setViewportRect(viewport.getBounds());
     overlay->setBlockAnchors(bounds);
 }
 

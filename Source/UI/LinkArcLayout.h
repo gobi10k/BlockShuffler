@@ -98,6 +98,14 @@ struct Config {
     float slotGap  =  6.0f;  ///< clear space required between two label groups
     float margin   =  2.0f;
 
+    /** The part of the overlay the user can actually SEE: the block strip's
+     *  viewport, in overlay-local coordinates. The strip scrolls horizontally
+     *  under a fixed overlay, so a link whose blocks have scrolled away has an
+     *  arc that is off-screen even though its anchors are still valid numbers.
+     *  Left empty it means "the whole strip", which is what every caller and
+     *  test that predates scrolling wants. */
+    juce::Rectangle<float> viewport;
+
     float pushStep = 18.0f;  ///< one vertical displacement step
     int   maxPush  = 24;     ///< most steps a label may be pushed up
     float slideStep=  8.0f;  ///< one horizontal displacement step
@@ -123,9 +131,10 @@ struct Placed {
     juce::Rectangle<float> nameRect;
     juce::Rectangle<float> pillRect;
 
-    bool labelVisible = false;  ///< false only when no free position existed at all
+    bool labelVisible = false;  ///< false when culled off-viewport, or when no free position existed
     bool displaced    = false;  ///< true when a collision moved it off its natural spot
     bool degraded     = false;  ///< true only if the strip ran out of room entirely
+    bool offViewport  = false;  ///< true when the ARC is off-screen: culled, not dropped
 };
 
 inline float totalLabelH(const Config& c) { return c.nameRowH + c.rowGap + c.pillH; }
@@ -165,11 +174,39 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         return 0;
     };
 
-    auto clampBox = [&](juce::Rectangle<float> r) {
-        if (r.getRight()  > cfg.width  - cfg.margin) r.setX(cfg.width  - cfg.margin - r.getWidth());
-        if (r.getX()      < cfg.margin)              r.setX(cfg.margin);
-        if (r.getBottom() > cfg.height - cfg.margin) r.setY(cfg.height - cfg.margin - r.getHeight());
-        if (r.getY()      < cfg.margin)              r.setY(cfg.margin);
+    // What the user can actually see. Empty means "the whole strip", which is what
+    // every caller that does not scroll wants.
+    const juce::Rectangle<float> vis = cfg.viewport.isEmpty()
+        ? juce::Rectangle<float>(0.0f, 0.0f, cfg.width, cfg.height)
+        : cfg.viewport;
+
+    // The clamp is a READABILITY NICETY and nothing more. It used to be applied
+    // last and given priority over everything, which is what pinned a label to the
+    // strip edge after its blocks had scrolled away (Carter, 4a5d1b3): the arc was
+    // gone and the label was still there, clamped into view on its own.
+    // Now it clamps into the VISIBLE area, and where the arc runs off that area it
+    // may not drag the label past the part of the arc still on screen -- a label
+    // whose arc is half off-screen goes half off-screen with it and is clipped.
+    auto clampBox = [&](juce::Rectangle<float> r,
+                        const juce::Rectangle<float>& arcVisible,
+                        bool arcRunsOffViewport) {
+        if (arcRunsOffViewport) {
+            // The arc itself is running off the edge. The label goes with it: its
+            // centre stays over the part of the arc that is still on screen and the
+            // box is left to be CLIPPED. The horizontal viewport clamp is skipped
+            // outright here -- pushing the label inward so it stays wholly visible
+            // is precisely what stranded it at the strip edge.
+            const float lo = arcVisible.getX()     - r.getWidth() * 0.5f;
+            const float hi = arcVisible.getRight() - r.getWidth() * 0.5f;
+            r.setX(juce::jlimit(juce::jmin(lo, hi), juce::jmax(lo, hi), r.getX()));
+        } else {
+            if (r.getRight() > vis.getRight() - cfg.margin) r.setX(vis.getRight() - cfg.margin - r.getWidth());
+            if (r.getX()     < vis.getX()     + cfg.margin) r.setX(vis.getX()     + cfg.margin);
+        }
+        // Vertical always: the strip scrolls sideways, so a label is never pushed
+        // off the top or bottom by scrolling and the old clamp still applies.
+        if (r.getBottom() > vis.getBottom() - cfg.margin) r.setY(vis.getBottom() - cfg.margin - r.getHeight());
+        if (r.getY()      < vis.getY()      + cfg.margin) r.setY(vis.getY()      + cfg.margin);
         return r;
     };
     auto freeOfLabels = [&](const juce::Rectangle<float>& r) {
@@ -228,7 +265,36 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
             naturalTop = cfg.cy - (cfg.arcHBase + (float)i * cfg.arcHStep) - H - 4.0f;
         }
 
-        const auto naturalBox = clampBox({ naturalX, naturalTop, boxW, H });
+        // ── Is this link's arc on screen at all? ─────────────────────────────
+        // BlockStrip hands us anchors with the viewport's scroll already taken out,
+        // so a block that has scrolled off simply has a negative centre. The arc is
+        // then drawn off-screen and everything that belongs to it must go with it.
+        const juce::Rectangle<float> arcBounds = p.sameColumn
+            ? juce::Rectangle<float>::leftTopRightBottom(
+                  juce::jmin(p.anchorX1, p.apexX), juce::jmin(p.anchorY1, p.anchorY2),
+                  juce::jmax(p.anchorX1, p.apexX), juce::jmax(p.anchorY1, p.anchorY2))
+            : juce::Rectangle<float>::leftTopRightBottom(
+                  juce::jmin(p.anchorX1, p.anchorX2), juce::jmin(cfg.cy, naturalTop),
+                  juce::jmax(p.anchorX1, p.anchorX2), juce::jmax(cfg.cy, naturalTop));
+
+        if (!arcBounds.intersects(vis)) {
+            // Scrolled away. No clamp, no plate, no pill, no leader -- and nothing
+            // pushed into `committed`, so it cannot displace a label that IS on
+            // screen. Culling only ever gives the visible labels more room.
+            p.labelVisible = false;
+            p.offViewport  = true;
+            p.labelBox     = {};
+            continue;
+        }
+
+        const auto arcVis = arcBounds.getIntersection(vis);
+        // Horizontal only: the strip scrolls sideways, and a vertical overhang is
+        // the ordinary "tall arc" case the clamp has always handled.
+        const bool arcRunsOff = arcBounds.getX() < vis.getX()
+                             || arcBounds.getRight() > vis.getRight();
+
+        const auto naturalBox = clampBox({ naturalX, naturalTop, boxW, H },
+                                         arcVis, arcRunsOff);
 
         // The arc is drawn to its OWN natural height whatever happens to the
         // label, so a displaced label drags a leader line rather than the arc.
@@ -280,7 +346,8 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         for (const auto& c : cands) {
             if (settled && c.cost >= bestCost) break;
             const auto trial = clampBox({ naturalBox.getX() + c.dx,
-                                          naturalBox.getY() + c.dy, boxW, H });
+                                          naturalBox.getY() + c.dy, boxW, H },
+                                        arcVis, arcRunsOff);
             if (!freeOfLabels(trial)) continue;
             const float total = c.cost + (clearOfTiles(trial) ? 0.0f : cfg.tilePenalty);
             if (settled && total >= bestCost) continue;
