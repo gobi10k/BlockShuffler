@@ -1,0 +1,1159 @@
+{
+ "version": 1,
+ "name": "stress50_fixture",
+ "sampleRate": 48000.0,
+ "defaultClipTempo": 120.0,
+ "blocks": [
+  {
+   "id": "000000000000000000000000000003e9",
+   "name": "Block 1",
+   "color": "ffcc8844",
+   "position": 0,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003ea",
+   "name": "Block 2",
+   "color": "ffccaa44",
+   "position": 1,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003eb",
+   "name": "Block 3",
+   "color": "ff44cc44",
+   "position": 2,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003ec",
+   "name": "Block 4",
+   "color": "ff44cccc",
+   "position": 3,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003ed",
+   "name": "Block 5",
+   "color": "ff4488cc",
+   "position": 4,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003ee",
+   "name": "Block 6",
+   "color": "ff8844cc",
+   "position": 5,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003ef",
+   "name": "Block 7",
+   "color": "ffcc44aa",
+   "position": 6,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f0",
+   "name": "Block 8",
+   "color": "ffcc4444",
+   "position": 7,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f1",
+   "name": "Block 9",
+   "color": "ffcc8844",
+   "position": 8,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f2",
+   "name": "Block 10",
+   "color": "ffccaa44",
+   "position": 9,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f3",
+   "name": "Block 11",
+   "color": "ff44cc44",
+   "position": 10,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f4",
+   "name": "Block 12",
+   "color": "ff44cccc",
+   "position": 11,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f5",
+   "name": "Block 13",
+   "color": "ff4488cc",
+   "position": 12,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f6",
+   "name": "Block 14",
+   "color": "ff8844cc",
+   "position": 13,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f7",
+   "name": "Block 15",
+   "color": "ffcc44aa",
+   "position": 14,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f8",
+   "name": "Block 16",
+   "color": "ffcc4444",
+   "position": 15,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003f9",
+   "name": "Block 17",
+   "color": "ffcc8844",
+   "position": 16,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003fa",
+   "name": "Block 18",
+   "color": "ffccaa44",
+   "position": 17,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003fb",
+   "name": "Block 19",
+   "color": "ff44cc44",
+   "position": 18,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003fc",
+   "name": "Block 20",
+   "color": "ff44cccc",
+   "position": 19,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003fd",
+   "name": "Block 21",
+   "color": "ff4488cc",
+   "position": 20,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003fe",
+   "name": "Block 22",
+   "color": "ff8844cc",
+   "position": 21,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "000000000000000000000000000003ff",
+   "name": "Block 23",
+   "color": "ffcc44aa",
+   "position": 22,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000400",
+   "name": "Block 24",
+   "color": "ffcc4444",
+   "position": 23,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000401",
+   "name": "Block 25",
+   "color": "ffcc8844",
+   "position": 24,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000402",
+   "name": "Block 26",
+   "color": "ffccaa44",
+   "position": 25,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000403",
+   "name": "Block 27",
+   "color": "ff44cc44",
+   "position": 26,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000404",
+   "name": "Block 28",
+   "color": "ff44cccc",
+   "position": 27,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000405",
+   "name": "Block 29",
+   "color": "ff4488cc",
+   "position": 28,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000406",
+   "name": "Block 30",
+   "color": "ff8844cc",
+   "position": 29,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000407",
+   "name": "Block 31",
+   "color": "ffcc44aa",
+   "position": 30,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000408",
+   "name": "Block 32",
+   "color": "ffcc4444",
+   "position": 31,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000409",
+   "name": "Block 33",
+   "color": "ffcc8844",
+   "position": 32,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "0000000000000000000000000000040a",
+   "name": "Block 34",
+   "color": "ffccaa44",
+   "position": 33,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "0000000000000000000000000000040b",
+   "name": "Block 35",
+   "color": "ff44cc44",
+   "position": 34,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "0000000000000000000000000000040c",
+   "name": "Block 36",
+   "color": "ff44cccc",
+   "position": 35,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "0000000000000000000000000000040d",
+   "name": "Block 37",
+   "color": "ff4488cc",
+   "position": 36,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "0000000000000000000000000000040e",
+   "name": "Block 38",
+   "color": "ff8844cc",
+   "position": 37,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "0000000000000000000000000000040f",
+   "name": "Block 39",
+   "color": "ffcc44aa",
+   "position": 38,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000410",
+   "name": "Block 40",
+   "color": "ffcc4444",
+   "position": 39,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000411",
+   "name": "Block 41",
+   "color": "ffcc8844",
+   "position": 40,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000412",
+   "name": "Block 42",
+   "color": "ffccaa44",
+   "position": 41,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000413",
+   "name": "Block 43",
+   "color": "ff44cc44",
+   "position": 42,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000414",
+   "name": "Block 44",
+   "color": "ff44cccc",
+   "position": 43,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000415",
+   "name": "Block 45",
+   "color": "ff4488cc",
+   "position": 44,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000416",
+   "name": "Block 46",
+   "color": "ff8844cc",
+   "position": 45,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000417",
+   "name": "Block 47",
+   "color": "ffcc44aa",
+   "position": 46,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000418",
+   "name": "Block 48",
+   "color": "ffcc4444",
+   "position": 47,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000419",
+   "name": "Block 49",
+   "color": "ffcc8844",
+   "position": 48,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "0000000000000000000000000000041a",
+   "name": "Block 50",
+   "color": "ffccaa44",
+   "position": 49,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  }
+ ],
+ "links": []
+}

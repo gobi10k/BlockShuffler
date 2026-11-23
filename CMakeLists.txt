@@ -109,6 +109,14 @@ target_compile_definitions(BlockShuffler PUBLIC
     JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
 )
 
+# QA hook: scripted open/snapshot/geometry dump of the REAL app (Source/QA/QaHook.h).
+# OFF by default. Only ever configure it ON in its own build dir:
+#   cmake -B build-qa -DCMAKE_BUILD_TYPE=Release -DBLOCKSHUFFLER_QA_HOOK=ON
+option(BLOCKSHUFFLER_QA_HOOK "Build the scripted QA snapshot hook into the app" OFF)
+if(BLOCKSHUFFLER_QA_HOOK)
+    target_compile_definitions(BlockShuffler PUBLIC BLOCKSHUFFLER_QA_HOOK=1)
+endif()
+
 # macOS .app icon: JUCE generates Icon.icns from ICON_BIG/ICON_SMALL (appicon.png)
 # and sets CFBundleIconFile in the bundle's Info.plist automatically — the previous
 # hand-rolled app.icns copy + patch_icon.sh are no longer needed.
@@ -177,6 +185,38 @@ target_compile_definitions(ResolverDiag PRIVATE
     JUCE_USE_CURL=0
 )
 target_link_libraries(ResolverDiag
+    PRIVATE
+        BlockShufflerResources
+        juce::juce_core
+        juce::juce_events
+        juce::juce_data_structures
+        juce::juce_audio_basics
+        juce::juce_audio_formats
+        juce::juce_graphics
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+)
+
+# ── QaFixtureGen: manual-QA .bsp generator (diag only, off by default) ──
+#   cmake --build build-diag --target QaFixtureGen
+#   ./build-diag/QaFixtureGen_artefacts/Debug/QaFixtureGen ~/Desktop/BlockShuffler_QA .
+juce_add_console_app(QaFixtureGen PRODUCT_NAME "QaFixtureGen")
+set_target_properties(QaFixtureGen PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_sources(QaFixtureGen PRIVATE
+    diag/QaFixtureGen.cpp
+    Source/Model/Project.cpp
+    Source/Model/Block.cpp
+    Source/Model/Clip.cpp
+    Source/Model/BlockLink.cpp
+    Source/Model/Serialization.cpp
+    Source/Audio/ArrangementResolver.cpp
+    Source/Audio/TempoStretcher.cpp
+    Source/UI/LookAndFeel_BlockShuffler.cpp
+)
+target_include_directories(QaFixtureGen PRIVATE Source)
+target_compile_definitions(QaFixtureGen PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(QaFixtureGen
     PRIVATE
         BlockShufflerResources
         juce::juce_core

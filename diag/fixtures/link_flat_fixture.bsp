@@ -1,0 +1,214 @@
+{
+ "version": 1,
+ "name": "link_flat_fixture",
+ "sampleRate": 48000.0,
+ "defaultClipTempo": 120.0,
+ "blocks": [
+  {
+   "id": "00000000000000000000000000000001",
+   "name": "Block 1",
+   "color": "ffcc8844",
+   "position": 0,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000002",
+   "name": "Block 2",
+   "color": "ffccaa44",
+   "position": 1,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000003",
+   "name": "Block 3",
+   "color": "ff44cc44",
+   "position": 2,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000004",
+   "name": "Block 4",
+   "color": "ff44cccc",
+   "position": 3,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000005",
+   "name": "Block 5",
+   "color": "ff4488cc",
+   "position": 4,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000006",
+   "name": "Block 6",
+   "color": "ff8844cc",
+   "position": 5,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000007",
+   "name": "Block 7",
+   "color": "ffcc44aa",
+   "position": 6,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  },
+  {
+   "id": "00000000000000000000000000000008",
+   "name": "Block 8",
+   "color": "ffcc4444",
+   "position": 7,
+   "stackGroup": -1,
+   "stackPlayMode": "sequential",
+   "alwaysPlayBase": false,
+   "probability": 1.0,
+   "isDone": false,
+   "playChance": 1.0,
+   "tempo": 120.0,
+   "tempoOverridden": false,
+   "stackPlayCount": {
+    "values": [
+     1
+    ],
+    "weights": [
+     1.0
+    ]
+   },
+   "clips": []
+  }
+ ],
+ "links": [
+  {
+   "blockA": "00000000000000000000000000000001",
+   "blockB": "00000000000000000000000000000003",
+   "swapProbability": 0.5
+  },
+  {
+   "blockA": "00000000000000000000000000000002",
+   "blockB": "00000000000000000000000000000005",
+   "swapProbability": 0.5
+  },
+  {
+   "blockA": "00000000000000000000000000000004",
+   "blockB": "00000000000000000000000000000007",
+   "swapProbability": 0.5
+  },
+  {
+   "blockA": "00000000000000000000000000000006",
+   "blockB": "00000000000000000000000000000008",
+   "swapProbability": 0.5
+  }
+ ]
+}

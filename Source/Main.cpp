@@ -2,6 +2,9 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include "MainComponent.h"
 #include "UI/LookAndFeel_BlockShuffler.h"
+#if BLOCKSHUFFLER_QA_HOOK
+#include "QA/QaHook.h"   // QA build only (build-qa)
+#endif
 
 #if JUCE_WINDOWS
 #include <shlobj.h>   // SHChangeNotify
@@ -141,6 +144,11 @@ public:
         // delivers an open-document event, which JUCE routes to
         // anotherInstanceStarted() below (cold start AND already running).
         openBspFromCommandLine(commandLine);
+#if BLOCKSHUFFLER_QA_HOOK
+        if (juce::SystemStats::getEnvironmentVariable("BS_QA_SCRIPT", {}).isNotEmpty())
+            qaHook = std::make_unique<BlockShuffler::QaHook>(*mainWindow,
+                         [this](const juce::File& f) { mainWindow->openFile(f); });   // the Open path
+#endif
     }
 
     void anotherInstanceStarted(const juce::String& commandLine) override {
@@ -153,6 +161,9 @@ public:
     }
 
     void shutdown() override {
+#if BLOCKSHUFFLER_QA_HOOK
+        qaHook = nullptr;
+#endif
         mainWindow = nullptr;
     }
 
@@ -259,6 +270,9 @@ public:
 
 private:
     std::unique_ptr<MainWindow> mainWindow;
+#if BLOCKSHUFFLER_QA_HOOK
+    std::unique_ptr<BlockShuffler::QaHook> qaHook;
+#endif
 };
 
 START_JUCE_APPLICATION(BlockShufflerApplication)
