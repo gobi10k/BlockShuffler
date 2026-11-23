@@ -6077,6 +6077,33 @@ int main(int argc, char* argv[]) {
                     + ", zeroDefault->120=" + (zeroFallback ? "ok" : "BAD"));
         }
 
+        { // T74 (PERMANENT, DEFAULT TEMPO FOR NEW BLOCKS 2026-11-23): set the default
+          // through the real setter (as the inspector does) -> add a block -> 97 and
+          // inheriting; a later default change follows it; ONE undo removes the block.
+            Project p;
+            p.addBlock("Block 1");
+            p.undoManager.clearUndoHistory();
+            p.setDefaultTempo(97.0);
+            p.undoManager.beginNewTransaction();
+            const int before = p.blocks.size();
+            auto* nb = p.addBlock();
+            const double newTempo = nb ? nb->tempo : -1.0;              // read now: undo frees nb
+            const bool newInherits = nb && !nb->tempoOverridden;
+            const bool is97 = std::abs(newTempo - 97.0) < 1e-9 && newInherits;
+            p.undoManager.beginNewTransaction();
+            p.setDefaultTempo(101.0);
+            const bool follows = std::abs(p.blocks.getLast()->tempo - 101.0) < 1e-9;
+            p.undoManager.undo();                       // undo the 101 change
+            const bool back97 = std::abs(p.blocks.getLast()->tempo - 97.0) < 1e-9;
+            p.undoManager.undo();                       // ONE undo removes the new block
+            const bool removed = p.blocks.size() == before && std::abs(p.defaultClipTempo - 97.0) < 1e-9;
+            verdict("T74 DEFAULT-TEMPO: default 97 -> new block is 97 and inherits; follows a later default change; one undo removes the block",
+                    is97 && follows && back97 && removed,
+                    juce::String("newTempo=") + juce::String(newTempo, 1) + " inherits=" + (newInherits ? "y" : "N")
+                    + " follows101=" + (follows ? "y" : "N") + " undo->97=" + (back97 ? "y" : "N")
+                    + " oneUndoRemoves=" + (removed ? "y" : "N") + " blocks=" + juce::String(p.blocks.size()) + "/" + juce::String(before));
+        }
+
         { // T52: tempo inherit/override write-paths (design A+B). Tempos stay
           // MATERIALIZED — read paths untouched; only the Project setters, the
           // serialization flags (+ legacy inference) and the clip-drag retarget
