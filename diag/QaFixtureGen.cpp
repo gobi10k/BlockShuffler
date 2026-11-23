@@ -261,6 +261,13 @@ int main(int argc, char* argv[]) {
         stack(p, { byName(p, "Block 3"), byName(p, "Block 4"), byName(p, "Block 5"), byName(p, "Block 6") }, SEQ, 1);
         saveAndCheck(p, "QA6_stack_insert_order.bsp");
     }
+    { // QA7 -- new blocks take the project default tempo (97, not 120); Block 2 is an explicit 140 override
+        Project p; p.name = "QA7_default_tempo";
+        for (int n = 1; n <= 3; ++n) blk(p, "Block " + juce::String(n));
+        p.setDefaultTempo(97.0);                         // inheriting blocks + their clips -> 97
+        p.setBlockTempo(*byName(p, "Block 2"), 140.0);   // override: must stay 140
+        saveAndCheck(p, "QA7_default_tempo.bsp");
+    }
 
     say(juce::String("\nGENERATOR RESULT: ") + (gFailures == 0 ? "ALL OK" : juce::String(gFailures) + " FAILURE(S)"));
     return gFailures == 0 ? 0 : 1;

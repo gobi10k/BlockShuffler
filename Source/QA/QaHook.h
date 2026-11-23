@@ -15,11 +15,20 @@
 //   drag <from> <to> <fx> <fy> [shift]   grab <from>'s tile centre, release at
 //                         <to>'s tile x+fx*w, y+fy*h (fy>1 = below the tile)
 //   order <txt>           append blocks[] / on-screen stack order
+//   preview <txt> <tag>   append what the strip's drop preview showed just before
+//                         the last drag's release (action, target, insert index)
+//   sweep <from> <to> <txt>  grab <from>, hover 1px steps across <to>'s column at
+//                         its centre y (-40..+140px), log the live preview per px,
+//                         release back where it started (no-op drop)
+//   wheel <dx>            horizontal wheel over the block strip (through the peer)
+//   tips <txt>            append every reachable tooltip, measured with the
+//                         TooltipWindow's own LookAndFeel (wrap/clip/ellipsis)
 //   quit
 #if BLOCKSHUFFLER_QA_HOOK
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../UI/BlockStrip.h"
 #include "../UI/BlockLinkOverlay.h"
+#include "../UI/LookAndFeel_BlockShuffler.h"
 
 namespace BlockShuffler {
 
@@ -28,6 +37,12 @@ struct QaHook : private juce::Timer {
         : window(w), open(std::move(opener)) {
         juce::File f(juce::SystemStats::getEnvironmentVariable("BS_QA_SCRIPT", {}));
         f.readLines(lines);
+        // macOS hit-tests through the window server (ComponentPeer::contains asks
+        // which window is TOPMOST at the point): a QA window launched behind another
+        // app silently loses every synthetic press. Keep it frontmost for the run.
+        if (auto* tlw = dynamic_cast<juce::TopLevelWindow*>(&window)) tlw->setAlwaysOnTop(true);
+        juce::Process::makeForegroundProcess();
+        window.toFront(true);
         startTimer(50);
     }
 
@@ -38,6 +53,8 @@ private:
     int pc = 0;
     // pending drag
     juce::Array<juce::Point<float>> dragPath; juce::ModifierKeys dragMods;
+    juce::String lastPreview;                       // strip drop preview just before release
+    juce::File sweepOut; float sweepColX = 0; int sweepPending = 0; juce::String sweepLog;
 
     template <typename T> static T* find(juce::Component& c) {
         if (auto* t = dynamic_cast<T*>(&c)) return t;
@@ -64,7 +81,12 @@ private:
         // JUCE reads keyboard modifiers (Shift) from this global, not from the event.
         juce::ModifierKeys::currentModifiers = mods;
         if (auto* peer = window.getPeer())
-            peer->handleMouseEvent(juce::MouseInputSource::InputSourceType::mouse, windowPt, mods,
+            // PEN source, not mouse (macOS never creates touch sources): same
+            // ComponentPeer::handleMouseEvent entry and
+            // same component mouseDown/Drag/Up, but a source of its own, so real
+            // pointer activity on this machine cannot move it mid-drag (2026-11-23:
+            // the shared mouse source was overwritten to the menu bar, drags vanished).
+            peer->handleMouseEvent(juce::MouseInputSource::InputSourceType::pen, windowPt, mods,
                                    juce::MouseInputSource::defaultPressure,
                                    juce::MouseInputSource::defaultOrientation,
                                    juce::Time::currentTimeMillis());
@@ -73,8 +95,15 @@ private:
     void timerCallback() override {
         stopTimer();
         if (!dragPath.isEmpty()) {                 // one mouse step per tick, loop runs between
+            if (dragPath.size() == 1) lastPreview = previewString();
             auto p = dragPath.removeAndReturn(0);
             mouse(p, dragPath.isEmpty() ? juce::ModifierKeys(dragMods.withoutMouseButtons()) : dragMods);
+            if (approachSkip > 0) --approachSkip;
+            else if (sweepPending > 0) {                 // sweep step: log what the live preview shows here
+                --sweepPending;
+                sweepLog << "  x=" << juce::String(p.x - sweepColX, 0) << " " << previewString() << "\n";
+                if (sweepPending == 0) { sweepOut.appendText(sweepLog); sweepLog = {}; }
+            }
             startTimer(dragPath.isEmpty() ? 300 : 16);
             return;
         }
@@ -85,7 +114,12 @@ private:
         int next = 50;
         const auto cmd = t.isEmpty() || t[0].startsWith("#") ? juce::String() : t[0];
         if (cmd == "open")  { open(juce::File(t[1])); next = 600; }
-        else if (cmd == "size")  { window.setSize(t[1].getIntValue(), t[2].getIntValue()); next = 600; }
+        else if (cmd == "size")  { window.setSize(t[1].getIntValue(), t[2].getIntValue());
+                                   // pin to the main display: on a multi-display Mac the window
+                                   // was observed drifting onto the second screen between files
+                                   if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+                                       window.setTopLeftPosition(d->userArea.getPosition() + juce::Point<int>(20, 20));
+                                   next = 600; }
         else if (cmd == "wait")  next = t[1].getIntValue();
         else if (cmd == "snap")  { auto img = window.createComponentSnapshot(window.getLocalBounds(), true, 1.0f);
                                    juce::File f(t[1]); f.deleteFile(); juce::FileOutputStream os(f);
@@ -102,6 +136,28 @@ private:
                                    const auto a = window.getLocalPoint(bc, bc->getLocalBounds().getCentre()).toFloat();
                                    const juce::ModifierKeys down(juce::ModifierKeys::leftButtonModifier);
                                    mouse(a, {}); mouse(a, down); mouse(a, {}); next = 400; }
+        else if (cmd == "plus")  { auto& b = strip()->addButton;                                // real press+release on the strip's "+" button
+                                   const auto a = window.getLocalPoint(&b, b.getLocalBounds().getCentre()).toFloat();
+                                   const juce::ModifierKeys down(juce::ModifierKeys::leftButtonModifier);
+                                   mouse(a, {}); mouse(a, down); mouse(a, {}); next = 400; }
+        else if (cmd == "tempo") { auto* pr = strip()->project; juce::String o;               // model tempo state + what each tile draws
+                                   o << "[" << t[2] << "] default " << pr->defaultClipTempo << "  blocks " << pr->blocks.size()
+                                     << "  canUndo " << (pr->undoManager.canUndo() ? "y" : "n") << "\n";
+                                   for (auto* b : pr->blocks) o << "   " << b->name << "  tempo " << b->tempo
+                                     << (b->tempoOverridden ? "  OVERRIDDEN" : "  inherits") << "  tile label \"" << (int)b->tempo << " bpm\""
+                                     << (strip()->selectedBlockId == b->id ? "  SELECTED" : "") << "\n";
+                                   juce::File(t[1]).appendText(o); }
+        else if (cmd == "deftempo") { strip()->project->setDefaultTempo(t[1].getDoubleValue()); next = 300; }
+        else if (cmd == "preview") juce::File(t[1]).appendText("[" + t[2] + "] preview: " + lastPreview + "\n");
+        else if (cmd == "sweep") { startSweep(t); next = 16; }
+        else if (cmd == "tips")  tips(juce::File(t[1]));
+        else if (cmd == "wheel") { auto* s = strip();
+                                   const auto c = window.getLocalPoint(s, s->getLocalBounds().getCentre()).toFloat();
+                                   juce::MouseWheelDetails w { t[1].getFloatValue(), 0.0f, false, false, false };
+                                   if (auto* peer = window.getPeer())
+                                       peer->handleMouseWheel(juce::MouseInputSource::InputSourceType::mouse, c,
+                                                              juce::Time::currentTimeMillis(), w);
+                                   next = 400; }
         else if (cmd == "quit")  { juce::ModifierKeys::currentModifiers = {}; juce::JUCEApplicationBase::quit(); return; }
         startTimer(next);
     }
@@ -120,6 +176,95 @@ private:
         mouse(a, dragMods);                                                  // press
         for (int k = 1; k <= 20; ++k) dragPath.add(a + (b - a) * ((float)k / 20.0f));
         dragPath.add(b);                                                     // release (last)
+    }
+
+    juce::String previewString() {
+        auto* s = strip();
+        using DA = BlockStrip::DropAction;
+        const auto a = s->currentDropAction;
+        juce::String out = a == DA::Stack ? "STACK" : a == DA::Reorder ? "INSERT"
+                         : a == DA::RearrangeInStack ? "REARRANGE" : "NONE";
+        if ((a == DA::Stack || a == DA::RearrangeInStack) && s->dropTargetComp && s->dropTargetComp->getBlock())
+            out << " target=" << s->dropTargetComp->getBlock()->name;
+        else if (a == DA::Reorder)
+            out << " before=" << (s->dropTargetIndex >= 0 && s->dropTargetIndex < s->project->blocks.size()
+                                  ? s->project->blocks[s->dropTargetIndex]->name : juce::String("END"));
+        if (a == DA::None) {   // diagnose a drag that never registered
+            const juce::MouseInputSource* src = nullptr;
+            for (auto& m : juce::Desktop::getInstance().getMouseSources())
+                if (m.isPen()) src = &m;
+            if (src == nullptr) return out << " (no input source)";
+            auto& ms = *src;
+            out << " (activeDrag=" << (s->activeDragComp ? "y" : "n")
+                << " mouseScreen=" << ms.getScreenPosition().toString()
+                << " down=" << (ms.isDragging() ? "drag" : ms.getCurrentModifiers().isAnyMouseButtonDown() ? "y" : "n")
+                << " underMouse=" << (ms.getComponentUnderMouse() ? ms.getComponentUnderMouse()->getName() + "/" + juce::String(typeid(*ms.getComponentUnderMouse()).name()) : juce::String("null"))
+                << " winScreen=" << window.getScreenBounds().toString() << ")";
+        }
+        return out;
+    }
+
+    // sweep "Block 6" "Block 7" out.txt -- hover only; releases where it started.
+    void startSweep(const juce::StringArray& t) {
+        auto* from = compFor(blockNamed(t[1])); auto* to = compFor(blockNamed(t[2]));
+        if (!from || !to) return;
+        sweepOut = juce::File(t[3]);
+        const auto a  = window.getLocalPoint(from, from->getLocalBounds().getCentre()).toFloat();
+        const auto tb = window.getLocalArea(to, to->getLocalBounds()).toFloat();
+        sweepColX = tb.getX();
+        sweepLog = "[sweep " + t[1] + " over " + t[2] + "] x relative to the target column's left edge\n";
+        dragMods = juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier);
+        mouse(a, {}); mouse(a, dragMods);
+        const float y = tb.getCentreY();
+        for (int k = 0; k <= 10; ++k) dragPath.add(a + (juce::Point<float>(tb.getX() - 40, y) - a) * (k / 10.0f));
+        sweepPending = 0;
+        for (int dx = -40; dx <= 140; ++dx) { dragPath.add({ tb.getX() + (float)dx, y }); ++sweepPending; }
+        // the sweep log is written by the step that consumes the last sweep point
+        for (int k = 1; k <= 10; ++k) dragPath.add(juce::Point<float>(tb.getX() + 140, y) + (a - juce::Point<float>(tb.getX() + 140, y)) * (k / 10.0f));
+        dragPath.add(a);
+        // sweepPending counts down only on sweep points: skip the approach steps
+        approachSkip = 11;
+    }
+    int approachSkip = 0;
+
+    void tips(const juce::File& f) {
+        auto* tw = find<juce::TooltipWindow>(window);
+        auto& lnf = tw ? tw->getLookAndFeel() : window.getLookAndFeel();
+        auto* bs = dynamic_cast<LookAndFeel_BlockShuffler*>(&lnf);
+        juce::String out;
+        const auto area = window.getScreenBounds();
+        std::function<void(juce::Component&)> walk = [&](juce::Component& c) {
+            if (c.isShowing())
+                if (auto* tc = dynamic_cast<juce::TooltipClient*>(&c)) {
+                    const auto tip = tc->getTooltip();
+                    if (tip.isNotEmpty()) {
+                        bool ok = bs != nullptr; juce::String why = bs ? "" : " LnF-not-BlockShuffler";
+                        int lines = 0; juce::Rectangle<int> box;
+                        if (bs) {
+                            const auto tl = LookAndFeel_BlockShuffler::tooltipLayout(tip);
+                            lines = tl.getNumLines();
+                            // worst case: pointer at the far corner of the window
+                            for (auto pt : { area.getTopLeft(), area.getBottomRight() }) {
+                                box = lnf.getTooltipBounds(tip, pt, area);
+                                if (tl.getWidth()  > box.getWidth()  - 2 * LookAndFeel_BlockShuffler::tooltipPadX + 0.5f
+                                 || tl.getHeight() > box.getHeight() - 2 * LookAndFeel_BlockShuffler::tooltipPadY + 0.5f)
+                                    { ok = false; why << " CLIPPED"; }
+                                if (!area.contains(box)) { ok = false; why << " OFFSCREEN"; }
+                            }
+                            int chars = 0;
+                            for (int i = 0; i < lines; ++i) chars += tl.getLine(i).runs.isEmpty() ? 0
+                                         : tl.getLine(i).stringRange.getLength();
+                            if (chars < tip.length() - lines) { ok = false; why << " TRUNCATED"; }   // wrap may eat 1 space/line
+                        }
+                        if (tip.contains(juce::String::fromUTF8("\xe2\x80\xa6")) || tip.contains("...")) { ok = false; why << " ELLIPSIS"; }
+                        out << (ok ? "PASS " : "FAIL ") << lines << " line(s) " << box.getWidth() << "x" << box.getHeight()
+                            << why << " | " << tip.replace("\n", " ").substring(0, 70) << "\n";
+                    }
+                }
+            for (auto* ch : c.getChildren()) walk(*ch);
+        };
+        walk(window);
+        f.appendText(out);
     }
 
     void order(const juce::File& f, const juce::String& tag) {
@@ -159,6 +304,8 @@ private:
         if (auto* ov = find<BlockLinkOverlay>(window)) {
             auto* p = ov->project;
             out << "overlay " << r2s(ov->getBounds().toFloat()) << " viewportRect " << r2s(ov->viewportRect.toFloat())
+                << " keepOut(banner) " << r2s(ov->keepOutRect.toFloat())
+                << " bannerVisible " << (s->modeLabel.isVisible() ? "y " : "n ") << r2s(s->modeLabel.getBounds().toFloat())
                 << " links=" << ov->qaPlaced.size() << " paints=" << ov->qaPaintSeq << " drawOrder";
             for (int k : ov->qaDrawOrder) out << " L" << k;
             out << "\n";
