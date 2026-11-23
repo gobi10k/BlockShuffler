@@ -19,6 +19,7 @@
 #include "Utils/GridSnap.h"
 #include "UI/BlockLinkOverlay.h"
 #include "UI/LinkArcLayout.h"
+#include "UI/BlockDropClassifier.h"
 #include "UI/LinkLabelMetrics.h"
 #include "UI/LookAndFeel_BlockShuffler.h"
 #include <cmath>
@@ -4862,6 +4863,77 @@ int main(int argc, char* argv[]) {
                             + " | (c) centreX=" + juce::String(gotC, 1)
                             + " want=" + juce::String(wantC, 1)
                             + " | drawnDisjoint=" + (drawnDisjoint ? "y" : "N"));
+                }
+
+                { // T68 (PERMANENT, DROP-ZONES 2026-11-13): a block drag over a column
+                  // stacks only in the column's middle 50%; the outer 25% on each side
+                  // inserts. Gaps between stacked tiles still stack. Shift+drag of a
+                  // stack member only ever inserts; a sibling tile rearranges.
+                  // Layout: A(0..100) | stack B,C (110..210, C below B) | D(220..320).
+                    namespace DC = BlockDropClassifier;
+                    std::vector<DC::Tile> t68 {
+                        { { 0, 0, 100, 300 }, -1 },     // 0 A
+                        { { 110, 0, 100, 140 }, 0 },    // 1 B (stack 0)
+                        { { 110, 150, 100, 140 }, 0 },  // 2 C (stack 0)
+                        { { 220, 0, 100, 300 }, -1 } }; // 3 D
+                    auto is = [&](juce::Point<int> pt, int dragged, bool shift, DC::Action a, int idx) {
+                        const auto r = DC::classify(pt, t68, dragged, shift);
+                        return r.action == a && r.index == idx;
+                    };
+                    const bool leftEdge  = is({ 115, 70 },  3, false, DC::Action::Insert, 1);  // 5% into B's column
+                    const bool middle    = is({ 160, 70 },  3, false, DC::Action::Stack,  1);
+                    const bool rightEdge = is({ 205, 70 },  0, false, DC::Action::Insert, 3);  // 95%: before D
+                    const bool gapStacks = DC::classify({ 160, 145 }, t68, 3, false).action == DC::Action::Stack;  // B/C gap -> nearest member
+                    const bool lower     = is({ 160, 250 }, 3, false, DC::Action::Stack,  2);
+                    const bool between   = is({ 105, 70 },  3, false, DC::Action::Insert, 1);  // gap A|B
+                    const bool append    = is({ 400, 70 },  0, false, DC::Action::Insert, 4);
+                    const bool sibling   = is({ 160, 250 }, 1, false, DC::Action::RearrangeInStack, 2);
+                    const bool shiftIns  = DC::classify({ 30, 70 }, t68, 1, true).stackMove
+                                        && is({ 30, 70 }, 1, true, DC::Action::Insert, 0);
+                    verdict("T68 DROP-ZONES: column middle 50% stacks, outer 25% each side inserts, gaps between stacked tiles stack, sibling tile rearranges, Shift+drag of a stack member only inserts",
+                            leftEdge && middle && rightEdge && gapStacks && lower && between
+                                && append && sibling && shiftIns,
+                            juce::String("leftEdge=") + (leftEdge ? "y" : "N") + " middle=" + (middle ? "y" : "N")
+                            + " rightEdge=" + (rightEdge ? "y" : "N") + " gapStacks=" + (gapStacks ? "y" : "N")
+                            + " lower=" + (lower ? "y" : "N") + " between=" + (between ? "y" : "N")
+                            + " append=" + (append ? "y" : "N") + " sibling=" + (sibling ? "y" : "N")
+                            + " shiftInsert=" + (shiftIns ? "y" : "N"));
+                }
+
+                { // T69 (PERMANENT, STACK-MEMBER LINK ANCHORS 2026-11-13): cross-column
+                  // links between members of two stacks used to anchor at the column
+                  // centre at mid-height, so B1<->D1 and B2<->D2 drew as ONE curve.
+                  // Each must now leave its own member tile's facing side edge.
+                    using namespace LinkArcLayout;
+                    Config c69;
+                    c69.width = 600.0f; c69.height = 300.0f; c69.cy = 150.0f; c69.colHalfW = 50.0f;
+                    const juce::Rectangle<float> b1(100, 10, 100, 130), b2(100, 160, 100, 130),
+                                                 d1(400, 10, 100, 130), d2(400, 160, 100, 130);
+                    auto anc = [](juce::Rectangle<float> r) {
+                        Anchor a; a.x = r.getCentreX(); a.y = r.getCentreY(); a.valid = true;
+                        a.stacked = true; a.tile = r; return a;
+                    };
+                    LinkIn l1, l2;
+                    l1.a = anc(b1); l1.b = anc(d1); l2.a = anc(b2); l2.b = anc(d2);
+                    l1.labelW = l2.labelW = 90.0f; l1.pillW = l2.pillW = 32.0f;
+                    const auto p69 = layout({ l1, l2 }, c69, { b1, b2, d1, d2 });
+                    auto onEdge = [](float x, float y, juce::Rectangle<float> r, float edgeX) {
+                        return std::abs(x - edgeX) < 0.5f && y > r.getY() && y < r.getBottom();
+                    };
+                    const bool edges = p69.size() == 2
+                        && onEdge(p69[0].anchorX1, p69[0].anchorY1, b1, b1.getRight())
+                        && onEdge(p69[0].anchorX2, p69[0].anchorY2, d1, d1.getX())
+                        && onEdge(p69[1].anchorX1, p69[1].anchorY1, b2, b2.getRight())
+                        && onEdge(p69[1].anchorX2, p69[1].anchorY2, d2, d2.getX());
+                    const bool distinct = p69.size() == 2
+                        && std::abs(p69[0].anchorY1 - p69[1].anchorY1) > 20.0f;
+                    const bool labelsOk = p69.size() == 2 && p69[0].labelVisible && p69[1].labelVisible
+                        && !p69[0].labelBox.intersects(p69[1].labelBox);
+                    verdict("T69 LINK-STACK-ANCHORS: a cross-column link between stack members leaves each member tile's facing side edge, so two such links are distinct curves; both labels drawn, disjoint",
+                            edges && distinct && labelsOk,
+                            juce::String("onMemberEdges=") + (edges ? "y" : "N")
+                            + " distinctCurves=" + (distinct ? "y" : "N")
+                            + " labelsDrawnDisjoint=" + (labelsOk ? "y" : "N"));
                 }
 
                 { // T64 (PERMANENT, ASCII/MOJIBAKE 2026-08-26): user-visible strings
