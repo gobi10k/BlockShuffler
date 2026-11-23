@@ -74,6 +74,10 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         LinkArcLayout::LinkIn in;
         in.a = anchorFor(link->blockA);
         in.b = anchorFor(link->blockB);
+        // A link is identified by its two block UUIDs; order-independent, so the
+        // tie-break never flips with which end is A.
+        in.tieBulgesDown = ((link->blockA < link->blockB ? link->blockA + link->blockB
+                                                         : link->blockB + link->blockA).hashCode() & 1) != 0;
 
         juce::String nameA = "?", nameB = "?";
         if (auto* ba = project->getBlockById(link->blockA)) nameA = ba->name;

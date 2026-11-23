@@ -80,6 +80,9 @@ struct Anchor {
 
 struct LinkIn {
     Anchor a, b;
+    /** Fixed per-link tie-break for the arc direction rule (2026-11-23): used only
+     *  when a stack-touching link's anchors average EXACTLY on the strip centre. */
+    bool tieBulgesDown = false;
     float  labelW = 0.0f;   ///< measured width of the "A <-> B" row (incl. padding)
     float  pillW  = 0.0f;   ///< measured width of the "50%" pill   (incl. padding)
 };
@@ -475,12 +478,30 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
     // or the label riding on it -- out of the top of the visible strip is scaled
     // down instead of being clipped (R2). With every link fitting, as in a plain
     // unstacked strip, nothing is scaled and the arcs are the reference arcs.
-    int nCross = 0;
-    for (auto& in : links)
-        if (in.a.valid && in.b.valid && !isSameColumn(in.a.x, in.b.x)) ++nCross;
-    const float maxRise = cfg.arcHBase + (float)juce::jmax(0, nCross - 1) * cfg.arcHStep;
-    const float topFloor = vis.getY() + cfg.margin + H * 0.5f + 1.0f;
-    int rank = 0;
+    //
+    // DIRECTION (2026-11-23). A link with at least one STACKED end bulges DOWN when
+    // its two anchors average below the strip's vertical centre, UP otherwise (an
+    // exact tie: in.tieBulgesDown, fixed per link). Links between unstacked blocks
+    // always bulge up, exactly as before. Each direction nests and scales on its
+    // own, against its own edge of the strip, so a pure-unstacked strip is laid out
+    // exactly as before (every link UP, same ranks, same scale).
+    std::vector<bool> down(links.size(), false);
+    int nUp = 0, nDown = 0;
+    for (size_t i = 0; i < links.size(); ++i) {
+        const auto& in = links[i];
+        if (!in.a.valid || !in.b.valid || isSameColumn(in.a.x, in.b.x)) continue;
+        if (in.a.stacked || in.b.stacked) {
+            const float ya = isMember(in.a) ? memberEnd[2 * i].y     : cfg.cy;
+            const float yb = isMember(in.b) ? memberEnd[2 * i + 1].y : cfg.cy;
+            const float avg = (ya + yb) * 0.5f;
+            down[i] = avg > cfg.cy || (avg == cfg.cy && in.tieBulgesDown);
+        }
+        ++(down[i] ? nDown : nUp);
+    }
+    auto maxRiseFor = [&](int n) { return cfg.arcHBase + (float)juce::jmax(0, n - 1) * cfg.arcHStep; };
+    const float topFloor    = vis.getY()      + cfg.margin + H * 0.5f + 1.0f;
+    const float bottomFloor = vis.getBottom() - cfg.margin - H * 0.5f - 1.0f;
+    int rankUp = 0, rankDown = 0;
 
     for (size_t i = 0; i < links.size(); ++i) {
         const auto& in = links[i];
@@ -507,18 +528,19 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
             p.ctrlX2 = e2.x + ((in.b.stacked && !in.b.tile.isEmpty()) ? -dir * push : 0.0f);
         }
 
-        const float base  = juce::jmin(e1.y, e2.y);
-        const float rise  = cfg.arcHBase + (float)rank * cfg.arcHStep;
-        const float scale = juce::jlimit(0.0f, 1.0f, (base - topFloor) / juce::jmax(1.0f, maxRise));
-        ++rank;
-        p.arcControlY = base - rise * scale;
+        const bool  dn    = down[i];
+        const float base  = dn ? juce::jmax(e1.y, e2.y) : juce::jmin(e1.y, e2.y);
+        const float rise  = cfg.arcHBase + (float)(dn ? rankDown++ : rankUp++) * cfg.arcHStep;
+        const float room  = dn ? bottomFloor - base : base - topFloor;
+        const float scale = juce::jlimit(0.0f, 1.0f, room / juce::jmax(1.0f, maxRiseFor(dn ? nDown : nUp)));
+        p.arcControlY = base + (dn ? 1.0f : -1.0f) * rise * scale;
         const auto mid = crossCurvePoint(p, 0.5f);
         p.midX = mid.x; p.midY = mid.y;
 
         // Cull a link whose arc has scrolled out of view (T67 rule, unchanged).
         const juce::Rectangle<float> arcBounds = juce::Rectangle<float>::leftTopRightBottom(
-            juce::jmin(p.anchorX1, p.anchorX2), juce::jmin(p.arcControlY, base),
-            juce::jmax(p.anchorX1, p.anchorX2), juce::jmax(p.anchorY1, p.anchorY2));
+            juce::jmin(p.anchorX1, p.anchorX2), juce::jmin(p.arcControlY, p.anchorY1, p.anchorY2),
+            juce::jmax(p.anchorX1, p.anchorX2), juce::jmax(p.arcControlY, p.anchorY1, p.anchorY2));
         if (!arcBounds.intersects(vis)) {
             p.labelVisible = false; p.offViewport = true; p.labelBox = {};
             continue;

@@ -5005,6 +5005,57 @@ int main(int argc, char* argv[]) {
                             + " bannerFree=" + (bannerFree ? "y" : "N") + " disjoint=" + (disjoint ? "y" : "N"));
                 }
 
+                { // T72 (PERMANENT, ARC DIRECTION 2026-11-23): a cross-column link with a
+                  // STACKED end bulges DOWN when its anchors average below the strip's
+                  // vertical centre, UP otherwise; an exact tie follows the link's fixed
+                  // tieBulgesDown. Arcs stay inside the strip; labels on/leadered to their
+                  // curve, disjoint. Links between unstacked blocks always bulge UP.
+                    using namespace LinkArcLayout;
+                    Config c72; c72.width = 800.0f; c72.height = 300.0f; c72.cy = 150.0f; c72.colHalfW = 50.0f;
+                    const juce::Rectangle<float> sTop(100, 0, 100, 96), sMid(100, 102, 100, 96), sLow(100, 204, 100, 96),
+                                                 tTop(500, 0, 100, 146), tLow(500, 154, 100, 146),
+                                                 u1(300, 0, 100, 300), u2(700, 0, 100, 300);
+                    auto mem = [](juce::Rectangle<float> r) { Anchor a; a.x = r.getCentreX(); a.y = r.getCentreY();
+                                                              a.valid = true; a.stacked = true; a.tile = r; return a; };
+                    auto uns = [](juce::Rectangle<float> r) { Anchor a; a.x = r.getCentreX(); a.y = r.getCentreY(); a.valid = true; return a; };
+                    auto L = [](Anchor a, Anchor b, bool tie = false) { LinkIn l; l.a = a; l.b = b; l.labelW = 90; l.pillW = 32;
+                                                                         l.tieBulgesDown = tie; return l; };
+                    std::vector<LinkIn> in72 { L(mem(sLow), mem(tLow)),          // 0: avg below  -> DOWN
+                                               L(mem(sTop), mem(tTop)),          // 1: avg above  -> UP
+                                               L(uns(u1), uns(u2)) };            // 2: unstacked -> UP
+                    // Exact ties: ONE link on sMid's edge, so its anchor sits exactly on
+                    // the centre (150) -- two on one edge would spread to 147/153.
+                    const std::vector<juce::Rectangle<float>> res72 { sTop, sMid, sLow, tTop, tLow, u1, u2 };
+                    const auto tieDn = layout({ L(mem(sMid), uns(u1), true)  }, c72, res72);
+                    const auto tieUp = layout({ L(mem(sMid), uns(u1), false) }, c72, res72);
+                    const auto p72 = layout(in72, c72, { sTop, sMid, sLow, tTop, tLow, u1, u2 });
+                    const auto again = layout(in72, c72, { sTop, sMid, sLow, tTop, tLow, u1, u2 });
+                    auto bulgesDown = [&](const Placed& p) { return p.arcControlY > juce::jmax(p.anchorY1, p.anchorY2); };
+                    auto bulgesUp   = [&](const Placed& p) { return p.arcControlY < juce::jmin(p.anchorY1, p.anchorY2); };
+                    const bool dirs = bulgesDown(p72[0]) && bulgesUp(p72[1]) && bulgesUp(p72[2])
+                                   && tieDn[0].anchorY1 == 150.0f && bulgesDown(tieDn[0]) && bulgesUp(tieUp[0]);
+                    bool inside = true, onCurve = true, disjoint = true, same = true;
+                    for (size_t i = 0; i < p72.size(); ++i) {
+                        for (int k = 0; k <= 100; ++k) {
+                            const auto q = crossCurvePoint(p72[i], (float)k / 100.0f);
+                            if (q.y < 0.0f || q.y > c72.height) inside = false;
+                        }
+                        if (!p72[i].labelVisible) onCurve = false;
+                        else if (!p72[i].displaced && distanceToCrossCurve(p72[i], p72[i].labelBox.getCentre()) > 6.0f) onCurve = false;
+                        if (p72[i].labelBox.getY() < 0 || p72[i].labelBox.getBottom() > c72.height) inside = false;
+                        for (size_t j = i + 1; j < p72.size(); ++j)
+                            if (p72[i].labelBox.intersects(p72[j].labelBox)) disjoint = false;
+                        if (p72[i].arcControlY != again[i].arcControlY || p72[i].labelBox != again[i].labelBox) same = false;
+                    }
+                    juce::String ctl;
+                    for (auto& p : p72) ctl << " " << juce::String(p.arcControlY, 1);
+                    ctl << " tie(dn/up)=" << juce::String(tieDn[0].arcControlY, 1) << "/" << juce::String(tieUp[0].arcControlY, 1);
+                    verdict("T72 ARC-DIRECTION: stack-touching links bulge DOWN when their anchors average below the strip centre, UP otherwise, exact tie by the link's fixed bit; unstacked links UP; arcs and labels inside the strip; labels on their curve (or leadered), disjoint; deterministic",
+                            dirs && inside && onCurve && disjoint && same,
+                            juce::String("dirs=") + (dirs ? "y" : "N") + " ctrlY=" + ctl + " inside=" + (inside ? "y" : "N")
+                            + " onCurve=" + (onCurve ? "y" : "N") + " disjoint=" + (disjoint ? "y" : "N") + " deterministic=" + (same ? "y" : "N"));
+                }
+
                 { // T69 (PERMANENT, STACK-MEMBER LINK ANCHORS 2026-11-13): cross-column
                   // links between members of two stacks used to anchor at the column
                   // centre at mid-height, so B1<->D1 and B2<->D2 drew as ONE curve.
