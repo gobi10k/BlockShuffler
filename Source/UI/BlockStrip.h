@@ -162,11 +162,13 @@ private:
     void enterStackMode(const juce::String& fromBlockId);
     void completePendingMode(const juce::String& targetBlockId);
     void updateOverlay();
-    int  blockCentreX(int blockIndex) const;
 
     /** Converts a BlockStrip-local point to contentArea-local coordinates. */
     juce::Point<int> toContentPos(juce::Point<int> stripLocal) const;
 
+#if BLOCKSHUFFLER_QA_HOOK
+    friend struct QaHook;   // QA build only: read-only access for snapshots/dumps
+#endif
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BlockStrip)
 };
 

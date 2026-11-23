@@ -18,9 +18,9 @@ void BlockLinkOverlay::setViewportRect(juce::Rectangle<int> r) {
     repaint();
 }
 
-void BlockLinkOverlay::setLinkingSourceX(int x) {
-    if (linkingSourceX == x) return;
-    linkingSourceX = x;
+void BlockLinkOverlay::setLinkingSource(const juce::String& blockId) {
+    if (linkingSourceId == blockId) return;
+    linkingSourceId = blockId;
     repaint();
 }
 
@@ -56,6 +56,8 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
             a.x = r.getCentreX();
             a.y = r.getCentreY();
             a.valid = true;
+            a.tile  = r;
+            if (auto* b = project->getBlockById(id)) a.stacked = b->stackGroup >= 0;
             cfg.colHalfW = r.getWidth() * 0.5f;   // tiles are uniform width
         }
         return a;
@@ -82,6 +84,11 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
     }
 
     const auto placed = LinkArcLayout::layout(ins, cfg, reserved);
+#if BLOCKSHUFFLER_QA_HOOK
+    qaIns = ins; qaPlaced = placed;   // QA build only: record, never feed back
+    qaArcAlpha.assign(placed.size(), 0.0f); qaLabelAlpha.assign(placed.size(), 0.0f);
+    qaDrawOrder.clear(); ++qaPaintSeq;
+#endif
 
     // Everything belonging to a link is clipped to the viewport. A link whose arc
     // has scrolled out of view is culled by the layout above; one that is only
@@ -99,6 +106,10 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         auto col = juce::Colour(LookAndFeel_BlockShuffler::accentCol)
                        .withAlpha(0.4f + 0.6f * link->swapProbability);
         g.setColour(col);
+#if BLOCKSHUFFLER_QA_HOOK
+        qaArcAlpha[(size_t)linkIndex] = col.getFloatAlpha();
+        qaDrawOrder.push_back(linkIndex);
+#endif
 
         juce::Path arc;
         if (p.sameColumn) {
@@ -118,16 +129,18 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
             }
         } else {
             arc.startNewSubPath(p.anchorX1, p.anchorY1);
-            arc.cubicTo(p.anchorX1, p.arcControlY, p.anchorX2, p.arcControlY,
+            arc.cubicTo(p.ctrlX1, p.arcControlY, p.ctrlX2, p.arcControlY,
                         p.anchorX2, p.anchorY2);
             g.strokePath(arc, juce::PathStrokeType(2.0f,
                               juce::PathStrokeType::curved,
                               juce::PathStrokeType::rounded));
 
             // A label sits on its own arc by default. Only one that a collision
-            // actually displaced gets a leader tying it back to its arc.
+            // actually displaced gets a leader tying it back to its arc -- to the
+            // curve's real midpoint (t=0.5), not to the control-point height,
+            // which is above the curve.
             if (p.labelVisible && p.displaced) {
-                const juce::Point<float> mid((p.anchorX1 + p.anchorX2) * 0.5f, p.arcControlY);
+                const juce::Point<float> mid(p.midX, p.midY);
                 g.setColour(col.withMultipliedAlpha(0.65f));
                 g.drawLine({ mid, p.labelBox.getConstrainedPoint(mid) }, 1.0f);
             }
@@ -141,6 +154,9 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgDark).withAlpha(0.82f));
         g.fillRoundedRectangle(p.nameRect.expanded(2.0f, 1.0f), 3.0f);
         g.setColour(col.withAlpha(1.0f));
+#if BLOCKSHUFFLER_QA_HOOK
+        qaLabelAlpha[(size_t)linkIndex] = 1.0f;
+#endif
         g.setFont(labelFont);
         g.drawText(labelTexts[linkIndex], p.nameRect, juce::Justification::centred);
 
@@ -153,18 +169,22 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
 
         ++linkIndex;
     }
-    }   // end viewport clip -- the linking-mode indicator below is deliberately
-        // NOT clipped: it marks the whole strip's source column, not one arc.
+    }   // end viewport clip
 
-    // Linking-mode indicator: the vertical line marking the SOURCE block only.
-    // The instruction text used to be drawn here too — it is now owned solely by
-    // BlockStrip::modeLabel, which also covers stack mode and the Esc hint. Two
-    // centred strings at the top of the same rectangle rendered on top of each
-    // other (Carter 2026-08-22 screenshot).
-    if (linkingSourceX >= 0) {
-        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.8f));
-        g.drawLine((float)linkingSourceX, 0.0f,
-                   (float)linkingSourceX, (float)getHeight(), 2.0f);
+    // Link-mode source marker: an outline on the source block's OWN tile. It used
+    // to be a full-height vertical line at the source's column centre X, which on a
+    // stack ran down through every member tile (Carter screenshot, link mode from
+    // Block 4). Drawn from the same blockBounds the arcs use, clipped like them.
+    if (linkingSourceId.isNotEmpty() && blockBounds.contains(linkingSourceId)) {
+        juce::Graphics::ScopedSaveState clipToViewport(g);
+        if (!viewportRect.isEmpty()) g.reduceClipRegion(viewportRect);
+        const auto r = blockBounds[linkingSourceId].toFloat().reduced(1.0f);
+        // Tinted + heavier than the 1px cyan border every TARGET tile gets in link
+        // mode, so the source reads as the source.
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.18f));
+        g.fillRoundedRectangle(r, 6.0f);
+        g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentCol).withAlpha(0.95f));
+        g.drawRoundedRectangle(r, 6.0f, 3.0f);
     }
 }
 

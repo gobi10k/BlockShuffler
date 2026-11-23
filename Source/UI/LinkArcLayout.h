@@ -65,11 +65,17 @@
 namespace BlockShuffler {
 namespace LinkArcLayout {
 
-/** One endpoint: a block tile's centre, in overlay-local coordinates. */
+/** One endpoint: a block tile's centre, in overlay-local coordinates.
+ *  `stacked` + `tile` (2026-11-13): a CROSS-column link whose endpoint is a
+ *  stack member is anchored on THAT member tile's side edge, not at the column
+ *  centre at strip mid-height (which every member of a stack shared, so all
+ *  links between two stacks were drawn as one identical curve). */
 struct Anchor {
     float x = 0.0f;
     float y = 0.0f;
     bool  valid = false;
+    bool  stacked = false;            ///< endpoint is a member of a stack
+    juce::Rectangle<float> tile;      ///< that member's tile rect (needed when stacked)
 };
 
 struct LinkIn {
@@ -115,6 +121,17 @@ struct Config {
      *  backing plate is the better answer, because a label dragged across the
      *  strip is harder to read than one sitting on a tile it is plated over. */
     float tilePenalty = 70.0f;
+
+    // ── Cross-column links (2026-11-13) ──────────────────────────────────────
+    float anchorSpread = 6.0f;  ///< spacing between links leaving the same tile edge
+    float labelVGap    = 2.0f;  ///< vertical clearance between label boxes (plates overhang 1px)
+    float onCurveTol   = 6.0f;  ///< label centre within this of its curve = "on its curve"
+    float tMin = 0.25f, tMax = 0.75f, tStep = 0.05f;  ///< slide range along the curve
+    /** A stack-member end leaves its tile's SIDE edge, so its control point is
+     *  pushed outward by this fraction of the span (capped) -- otherwise the
+     *  reference cubic's vertical end tangent runs the curve straight up the
+     *  tile border. Unstacked ends keep offset 0 (the reference arch). */
+    float edgeCtrlFrac = 0.3f, edgeCtrlMax = 60.0f;
 };
 
 struct Placed {
@@ -126,6 +143,8 @@ struct Placed {
 
     float apexX = 0.0f, apexY = 0.0f;         ///< same-column only: bow apex
     float arcControlY = 0.0f;                 ///< cross-column only: cubic control Y
+    float midX = 0.0f, midY = 0.0f;           ///< cross-column only: curve point at t=0.5 (leader target)
+    float ctrlX1 = 0.0f, ctrlX2 = 0.0f;       ///< cross-column only: cubic control X (== anchor X for an unstacked end)
 
     juce::Rectangle<float> labelBox;   ///< name row + gap + pill + plate: the collision unit
     juce::Rectangle<float> nameRect;
@@ -142,6 +161,23 @@ inline float totalLabelH(const Config& c) { return c.nameRowH + c.rowGap + c.pil
 /** Two endpoints count as the same column when their centres are within a pixel
  *  or two — stacked tiles share an X exactly, but keep a tolerance for rounding. */
 inline bool isSameColumn(float x1, float x2) { return std::abs(x2 - x1) < 4.0f; }
+
+/** Point on a cross-column arc: the cubic BlockLinkOverlay::paint strokes,
+ *  P0=(x1,y1) P1=(ctrlX1,cY) P2=(ctrlX2,cY) P3=(x2,y2). */
+inline juce::Point<float> crossCurvePoint(const Placed& p, float t) {
+    const float u = 1.0f - t;
+    const float a = u * u * u, b = 3.0f * u * u * t, c = 3.0f * u * t * t, d = t * t * t;
+    return { a * p.anchorX1 + b * p.ctrlX1 + c * p.ctrlX2 + d * p.anchorX2,
+             a * p.anchorY1 + (b + c) * p.arcControlY + d * p.anchorY2 };
+}
+
+/** Distance from a point to a cross-column arc (sampled; plenty for a 6px test). */
+inline float distanceToCrossCurve(const Placed& p, juce::Point<float> q) {
+    float best = 1e9f;
+    for (int k = 0; k <= 200; ++k)
+        best = juce::jmin(best, q.getDistanceFrom(crossCurvePoint(p, (float)k / 200.0f)));
+    return best;
+}
 
 /**
  *  @param links     one entry per project link, in project order.
@@ -222,20 +258,25 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         return true;
     };
 
+    // ── PASS 1: SAME-COLUMN links (inside one stack). Behaviour identical to the
+    // pre-2026-11-13 loop for these links (only its now-unreachable cross-column
+    // branch was removed). Placed first so a cross-column label can never
+    // displace one of them.
     for (size_t i = 0; i < links.size(); ++i) {
         const auto& in = links[i];
         auto& p = out[i];
         if (!in.a.valid || !in.b.valid) continue;
+        if (!isSameColumn(in.a.x, in.b.x)) continue;   // pass 2 handles these
         p.visible = true;
 
         // The drawn name plate is nameRect.expanded(2,1), so the collision unit
         // must cover that overhang or two labels can touch plate-to-plate.
         const float boxW = juce::jmax(in.labelW, in.pillW) + 4.0f;
-        p.sameColumn = isSameColumn(in.a.x, in.b.x);
+        p.sameColumn = true;
 
         // ── Arc geometry + this label's NATURAL position ─────────────────────
         float naturalX, naturalTop;
-        if (p.sameColumn) {
+        {
             const float colX = (in.a.x + in.b.x) * 0.5f;
             const int   k    = nextColumnIndex(colX);
             const float bow  = cfg.colHalfW + cfg.bowBase + (float)k * cfg.bowStep;
@@ -255,27 +296,15 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
             // column — not stacked above the tiles.
             naturalX   = p.apexX + side * (cfg.labelGap + boxW * 0.5f) - boxW * 0.5f;
             naturalTop = p.apexY - H * 0.5f;
-        } else {
-            p.anchorX1 = in.a.x; p.anchorY1 = cfg.cy;
-            p.anchorX2 = in.b.x; p.anchorY2 = cfg.cy;
-
-            // 86cc4b6's placement, restored verbatim: centred on the arc midpoint,
-            // riding just above an arc band that steps up with the link index.
-            naturalX   = (in.a.x + in.b.x) * 0.5f - boxW * 0.5f;
-            naturalTop = cfg.cy - (cfg.arcHBase + (float)i * cfg.arcHStep) - H - 4.0f;
         }
 
         // ── Is this link's arc on screen at all? ─────────────────────────────
         // BlockStrip hands us anchors with the viewport's scroll already taken out,
         // so a block that has scrolled off simply has a negative centre. The arc is
         // then drawn off-screen and everything that belongs to it must go with it.
-        const juce::Rectangle<float> arcBounds = p.sameColumn
-            ? juce::Rectangle<float>::leftTopRightBottom(
+        const juce::Rectangle<float> arcBounds = juce::Rectangle<float>::leftTopRightBottom(
                   juce::jmin(p.anchorX1, p.apexX), juce::jmin(p.anchorY1, p.anchorY2),
-                  juce::jmax(p.anchorX1, p.apexX), juce::jmax(p.anchorY1, p.anchorY2))
-            : juce::Rectangle<float>::leftTopRightBottom(
-                  juce::jmin(p.anchorX1, p.anchorX2), juce::jmin(cfg.cy, naturalTop),
-                  juce::jmax(p.anchorX1, p.anchorX2), juce::jmax(cfg.cy, naturalTop));
+                  juce::jmax(p.anchorX1, p.apexX), juce::jmax(p.anchorY1, p.anchorY2));
 
         if (!arcBounds.intersects(vis)) {
             // Scrolled away. No clamp, no plate, no pill, no leader -- and nothing
@@ -369,6 +398,156 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         p.labelVisible = true;
         p.displaced    = std::abs(box.getX() - naturalBox.getX()) > 0.5f
                       || std::abs(box.getY() - naturalBox.getY()) > 0.5f;
+        p.labelBox     = box;
+        p.nameRect     = juce::Rectangle<float>(box.getCentreX() - in.labelW * 0.5f,
+                                                box.getY(), in.labelW, cfg.nameRowH);
+        p.pillRect     = juce::Rectangle<float>(box.getCentreX() - in.pillW * 0.5f,
+                                                box.getY() + cfg.nameRowH + cfg.rowGap,
+                                                in.pillW, cfg.pillH);
+    }
+
+
+    // ── PASS 2: CROSS-COLUMN links (2026-11-13) ──────────────────────────────
+    // ANCHORS. An unstacked endpoint keeps the reference rule: its tile centre X
+    // at strip mid-height (a single-block tile fills the strip, so that point is
+    // its middle). A STACK MEMBER is anchored on its own tile's side edge facing
+    // the other end. Several links leaving the same edge are spread
+    // cfg.anchorSpread apart, never at the edge's centre Y -- that is exactly
+    // where pass 1's same-column brackets meet the edge.
+    std::vector<std::pair<juce::Point<float>, int>> edgeUse;   // edge key -> uses
+    auto nextEdgeUse = [&](juce::Point<float> key) {
+        for (auto& e : edgeUse)
+            if (e.first.getDistanceFrom(key) < 0.5f) return e.second++;
+        edgeUse.push_back({ key, 1 });
+        return 0;
+    };
+    auto endpoint = [&](const Anchor& self, const Anchor& other) -> juce::Point<float> {
+        const float s = cfg.anchorSpread;
+        if (!self.stacked || self.tile.isEmpty()) {
+            const int k = nextEdgeUse({ self.x, cfg.cy });
+            const float d = (k == 0) ? 0.0f : (float)((k + 1) / 2) * s * ((k % 2) ? 1.0f : -1.0f);
+            return { self.x + d, cfg.cy };                 // k=0: the reference point exactly
+        }
+        const bool right = other.x >= self.x;
+        const float ex = right ? self.tile.getRight() : self.tile.getX();
+        const int k = nextEdgeUse({ ex, self.tile.getCentreY() });
+        const float d = (float)(k / 2 + 1) * s * ((k % 2) ? 1.0f : -1.0f);   // -s,+s,-2s,+2s...
+        return { ex, juce::jlimit(self.tile.getY() + 3.0f, self.tile.getBottom() - 3.0f,
+                                  self.tile.getCentreY() + d) };
+    };
+
+    // HEIGHTS. Arcs still nest by rank (36 + r*22 above their lower anchor), but r
+    // now counts CROSS-column links only, and a rise that would carry the curve --
+    // or the label riding on it -- out of the top of the visible strip is scaled
+    // down instead of being clipped (R2). With every link fitting, as in a plain
+    // unstacked strip, nothing is scaled and the arcs are the reference arcs.
+    int nCross = 0;
+    for (auto& in : links)
+        if (in.a.valid && in.b.valid && !isSameColumn(in.a.x, in.b.x)) ++nCross;
+    const float maxRise = cfg.arcHBase + (float)juce::jmax(0, nCross - 1) * cfg.arcHStep;
+    const float topFloor = vis.getY() + cfg.margin + H * 0.5f + 1.0f;
+    int rank = 0;
+
+    for (size_t i = 0; i < links.size(); ++i) {
+        const auto& in = links[i];
+        auto& p = out[i];
+        if (!in.a.valid || !in.b.valid) continue;
+        if (isSameColumn(in.a.x, in.b.x)) continue;     // pass 1 placed it
+        p.visible = true;
+        p.sameColumn = false;
+
+        const float boxW = juce::jmax(in.labelW, in.pillW) + 4.0f;
+        const auto e1 = endpoint(in.a, in.b);
+        const auto e2 = endpoint(in.b, in.a);
+        p.anchorX1 = e1.x; p.anchorY1 = e1.y;
+        p.anchorX2 = e2.x; p.anchorY2 = e2.y;
+        {
+            const float push = juce::jmin(cfg.edgeCtrlMax, cfg.edgeCtrlFrac * std::abs(e2.x - e1.x));
+            const float dir  = (e2.x >= e1.x) ? 1.0f : -1.0f;
+            p.ctrlX1 = e1.x + ((in.a.stacked && !in.a.tile.isEmpty()) ?  dir * push : 0.0f);
+            p.ctrlX2 = e2.x + ((in.b.stacked && !in.b.tile.isEmpty()) ? -dir * push : 0.0f);
+        }
+
+        const float base  = juce::jmin(e1.y, e2.y);
+        const float rise  = cfg.arcHBase + (float)rank * cfg.arcHStep;
+        const float scale = juce::jlimit(0.0f, 1.0f, (base - topFloor) / juce::jmax(1.0f, maxRise));
+        ++rank;
+        p.arcControlY = base - rise * scale;
+        const auto mid = crossCurvePoint(p, 0.5f);
+        p.midX = mid.x; p.midY = mid.y;
+
+        // Cull a link whose arc has scrolled out of view (T67 rule, unchanged).
+        const juce::Rectangle<float> arcBounds = juce::Rectangle<float>::leftTopRightBottom(
+            juce::jmin(p.anchorX1, p.anchorX2), juce::jmin(p.arcControlY, base),
+            juce::jmax(p.anchorX1, p.anchorX2), juce::jmax(p.anchorY1, p.anchorY2));
+        if (!arcBounds.intersects(vis)) {
+            p.labelVisible = false; p.offViewport = true; p.labelBox = {};
+            continue;
+        }
+        const auto arcVis = arcBounds.getIntersection(vis);
+        const bool arcRunsOff = arcBounds.getX() < vis.getX() || arcBounds.getRight() > vis.getRight();
+
+        // LABEL. Candidates, cheapest first: (1) centred ON the curve, sliding
+        // from t=0.5 out to tMin/tMax; (2) only then the old displacement search
+        // around the midpoint, which costs extra so a label slides along its own
+        // curve before it leaves it. Label-vs-label clearance (now with a vertical
+        // gap too, since the plate overhangs its box) stays HARD; tiles stay a
+        // priced preference exactly as before.
+        struct Cand { float cost; juce::Rectangle<float> box; };
+        std::vector<Cand> cands;
+        const int nT = (int)std::round((cfg.tMax - cfg.tMin) / cfg.tStep);
+        for (int k = 0; k <= nT; ++k) {
+            const int   j = (k + 1) / 2 * ((k % 2) ? -1 : 1);       // 0,-1,+1,-2,+2...
+            const float t = 0.5f + (float)j * cfg.tStep;
+            if (t < cfg.tMin - 1e-4f || t > cfg.tMax + 1e-4f) continue;
+            const auto c = crossCurvePoint(p, t);
+            cands.push_back({ std::abs(t - 0.5f) * 20.0f,
+                              clampBox({ c.x - boxW * 0.5f, c.y - H * 0.5f, boxW, H }, arcVis, arcRunsOff) });
+        }
+        {
+            const int slideMax = (int)std::ceil(cfg.width  / juce::jmax(1.0f, cfg.slideStep));
+            const int pushMax  = (int)std::ceil(cfg.height / juce::jmax(1.0f, cfg.pushStep));
+            const int upMax    = juce::jmax(cfg.maxPush, pushMax);
+            const juce::Rectangle<float> home(mid.x - boxW * 0.5f, mid.y - H * 0.5f, boxW, H);
+            for (int sy = -upMax; sy <= pushMax; ++sy) {
+                const float dy = (float)sy * cfg.pushStep;
+                const float dyCost = std::abs(dy) * (sy <= 0 ? 1.0f : 1.25f);
+                for (int sx = 0; sx <= slideMax; ++sx) {
+                    const float dx = (float)sx * cfg.slideStep;
+                    if (sx == 0 && sy == 0) continue;            // that is the t=0.5 candidate
+                    const float cost = 10.0f + dyCost + dx * 0.5f;
+                    cands.push_back({ cost, clampBox(home.translated( dx, dy), arcVis, arcRunsOff) });
+                    if (sx > 0)
+                        cands.push_back({ cost, clampBox(home.translated(-dx, dy), arcVis, arcRunsOff) });
+                }
+            }
+        }
+        std::stable_sort(cands.begin(), cands.end(),
+                         [](const Cand& l, const Cand& r) { return l.cost < r.cost; });
+
+        auto freeWithGap = [&](const juce::Rectangle<float>& r) {
+            for (auto& c : committed)
+                if (r.getRight()  + cfg.slotGap   > c.getX() && c.getRight()  + cfg.slotGap   > r.getX()
+                 && r.getBottom() + cfg.labelVGap > c.getY() && c.getBottom() + cfg.labelVGap > r.getY())
+                    return false;
+            return true;
+        };
+        juce::Rectangle<float> box;
+        bool settled = false; float bestCost = 0.0f;
+        for (const auto& c : cands) {
+            if (settled && c.cost >= bestCost) break;
+            if (!freeWithGap(c.box)) continue;
+            const float total = c.cost + (clearOfTiles(c.box) ? 0.0f : cfg.tilePenalty);
+            if (settled && total >= bestCost) continue;
+            box = c.box; bestCost = total; settled = true;     // only ever a candidate that PASSED
+        }
+        if (!settled) {
+            p.labelVisible = false; p.degraded = true; p.labelBox = {};
+            continue;
+        }
+        committed.push_back(box);
+        p.labelVisible = true;
+        p.displaced    = distanceToCrossCurve(p, box.getCentre()) > cfg.onCurveTol;
         p.labelBox     = box;
         p.nameRect     = juce::Rectangle<float>(box.getCentreX() - in.labelW * 0.5f,
                                                 box.getY(), in.labelW, cfg.nameRowH);

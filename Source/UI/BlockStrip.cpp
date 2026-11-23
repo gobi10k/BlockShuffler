@@ -401,11 +401,7 @@ void BlockStrip::enterLinkMode(const juce::String& fromBlockId) {
         auto* bPtr = bc->getBlock();
         bc->setHighlighted(bPtr && bPtr->id != fromBlockId);
     }
-    if (overlay) {
-        int idx = 0;
-        for (auto* b : project->blocks) { if (b->id == fromBlockId) break; ++idx; }
-        overlay->setLinkingSourceX(blockCentreX(idx));
-    }
+    if (overlay) overlay->setLinkingSource(fromBlockId);
     modeLabel.setText("Click a block to link to it  (Esc to cancel)",
                       juce::dontSendNotification);
     modeLabel.setVisible(true);
@@ -417,9 +413,9 @@ void BlockStrip::enterStackMode(const juce::String& fromBlockId) {
     pendingMode    = PendingMode::Stack;
     pendingBlockId = fromBlockId;
     // Switching straight from link mode to stack mode (right-click a second block
-    // without pressing Esc first) used to leave the link source's vertical line
-    // painted under the stack banner. Stack mode has no source line of its own.
-    if (overlay) overlay->setLinkingSourceX(-1);
+    // without pressing Esc first) used to leave the link source marker
+    // painted under the stack banner. Stack mode has no source marker of its own.
+    if (overlay) overlay->setLinkingSource({});
     for (auto* bc : blockComponents) {
         auto* bPtr = bc->getBlock();
         bc->setHighlighted(bPtr && bPtr->id != fromBlockId);
@@ -436,7 +432,7 @@ void BlockStrip::cancelPendingMode() {
     pendingBlockId = {};
     for (auto* bc : blockComponents)
         bc->setHighlighted(false);
-    if (overlay) overlay->setLinkingSourceX(-1);
+    if (overlay) overlay->setLinkingSource({});
     modeLabel.setVisible(false);
     repaint();
 }
@@ -469,8 +465,12 @@ void BlockStrip::updateOverlay() {
         if (i >= originalBounds.size()) break;
         auto b = originalBounds[i];
         bounds.set(project->blocks[i]->id,
+                   // viewport.getX() already IS the left padding (resized():
+                   // area = bounds.reduced(padding, 0)); adding padding again put
+                   // every overlay rect 8px right of its tile. Same conversion as
+                   // paintOverChildren's contentToStripX.
                    juce::Rectangle<int>(viewport.getX() + b.getX()
-                                            - viewport.getViewPositionX() + padding,
+                                            - viewport.getViewPositionX(),
                                         viewport.getY() + b.getY(),
                                         b.getWidth(), b.getHeight()));
     }
@@ -499,12 +499,6 @@ Block* BlockStrip::getBlockAtLocalPoint(juce::Point<int> localPt) const {
             return (i < project->blocks.size()) ? project->blocks[i] : nullptr;
     }
     return nullptr;
-}
-
-int BlockStrip::blockCentreX(int blockIndex) const {
-    if (blockIndex < 0 || blockIndex >= blockCentreXCache.size()) return 0;
-    return viewport.getX() + blockCentreXCache[blockIndex]
-           - viewport.getViewPositionX() + padding;
 }
 
 juce::Point<int> BlockStrip::toContentPos(juce::Point<int> stripLocal) const {

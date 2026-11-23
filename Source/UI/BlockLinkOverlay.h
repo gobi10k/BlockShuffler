@@ -1,6 +1,10 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Model/Project.h"
+#if BLOCKSHUFFLER_QA_HOOK
+#include "LinkArcLayout.h"
+#define BS_OVERLAY_HAS_QA 1
+#endif
 
 namespace BlockShuffler {
 
@@ -41,15 +45,26 @@ public:
      */
     void setViewportRect(juce::Rectangle<int> r);
 
-    /** Show a "linking mode" indicator at this x position (-1 = off). */
-    void setLinkingSourceX(int x);
+    /** Link mode: outline this block's OWN tile as the link source (empty = off).
+     *  Keyed by block id, not an x position, so it marks the member tile rather
+     *  than the whole stack column and follows the tile when the strip scrolls. */
+    void setLinkingSource(const juce::String& blockId);
 
 private:
     Project* project = nullptr;
     juce::HashMap<juce::String, juce::Rectangle<int>> blockBounds;
     juce::Rectangle<int> viewportRect;
-    int linkingSourceX = -1;
+    juce::String linkingSourceId;
 
+#if BLOCKSHUFFLER_QA_HOOK
+    // QA build only: a COPY of what the last paint() laid out, for the dump.
+    friend struct QaHook;
+    std::vector<LinkArcLayout::LinkIn> qaIns;
+    std::vector<LinkArcLayout::Placed> qaPlaced;
+    std::vector<float> qaArcAlpha, qaLabelAlpha;   // what paint() actually used
+    int qaPaintSeq = 0;                             // which link was stroked in what order
+    std::vector<int> qaDrawOrder;
+#endif
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BlockLinkOverlay)
 };
 
