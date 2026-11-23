@@ -113,6 +113,28 @@ Evidence classes: **T#** = Step 6 harness test (12/12 green) · **M#** = Step 6 
 
 ## SESSION LOG
 
+### 2026-11-23 — Recovered + committed the unlogged 2026-11-13/14 UI round (4 Carter issues); T68/T69 added
+- Context: a session on 2026-11-13/14 fixed four UI issues but was interrupted before committing or logging. This session read the diff, verified it, added the missing proof, and committed it. Issue numbering below is from that session's snapshot names (`diag/snapshots/issueN_{before,after}_*.png`, left untracked: ~2.8 MB of evidence).
+- What I changed (files) — commits:
+  - `f50505d` Tooltips wrap (issue 3): `LookAndFeel_BlockShuffler.{h,cpp}` — `getTooltipBounds()` + `drawTooltip()` share `tooltipLayout()` (word wrap, max 320px). Before, the box was sized from JUCE's 13pt bold layout while one 11.5pt line was drawn with an ellipsis.
+  - `221cd42` Drop zones (issue 4): `Source/UI/BlockDropClassifier.h` (NEW) — per column 25% insert | 50% stack | 25% insert; gaps between stacked tiles stack (they used to insert); sibling rearrange + Shift+drag unchanged. `BlockStrip::updateDragFeedback` calls it; the drop commits what the preview showed.
+  - `35fef8f` Links on stacks (issues 1+2): link-mode source = outline on its OWN tile (was a full-height line through every stack member); `updateOverlay()` double-added padding (every overlay rect 8px right of its tile); cross-column links between stack members anchor on the member tile's facing edge (were one shared curve).
+  - `45c6196` Harness: **T68** (drop zones) + **T69** (stack-member anchors), PERMANENT.
+  - `b5c372d` QA tooling: `Source/QA/QaHook.h` (CMake option `BLOCKSHUFFLER_QA_HOOK`, OFF) + `diag/QaFixtureGen.cpp` (EXCLUDE_FROM_ALL) + `diag/fixtures/*.bsp`. Not in Release builds.
+- What I proved (PASS/FAIL):
+  - Full harness **71 PASS, STEP6 RESULT: ALL PASS** (macOS); T63/T65/T66/T67 still green against the rewritten `LinkArcLayout.h`. Release `BlockShuffler_Standalone` builds clean.
+  - T68 NEGATIVE CONTROL: `insertEdgeFrac = 0` (old whole-tile stacking) → `leftEdge=N rightEdge=N`, FAIL; restored → PASS.
+  - T69: `onMemberEdges=y distinctCurves=y labelsDrawnDisjoint=y`.
+  - Real-app snapshots (from the QA hook): hovering Block 2's left quarter shows the insert line, not a stack.
+- What regressed or surprised me:
+  - T68 first failed on MY assertion: a point in the B/C gap is 5px from C, 6px from B → correctly stacks onto C (nearest member). Test now asserts "gap stacks", not which member.
+  - **OPEN, not fixed:** in the 12-link link-mode snapshot (`issue2_recheck41_linkpending_block4_nonbase.png`) the "Block 11 <-> Block 3" label sits on top of the "Click a block to link…" banner, and some labels cover tile names (Block 5, Block 7). Dense stress case; needs an Alec ruling.
+  - Not Windows-CI'd yet (layout changed in `LinkArcLayout.h`; T66 measures per-platform widths).
+- NEXT SESSION should:
+  1. HOLD: Alec eyeballs all four on Mac (drag zones, link mode from a stack member, links between two stacks, long tooltips); Carter on Windows.
+  2. **New request in Alec's QA notes (`docs/ACCEPTANCE_TESTS.md` under 9.3):** new blocks don't inherit tempo — he prefers they take the PROJECT DEFAULT tempo. Not started.
+  3. Alec's acceptance-doc edits (root + docs/ `ACCEPTANCE_TESTS.md`) left uncommitted — his to commit.
+
 ### 2026-08-30 (b) — Link labels: culled with their arcs, so scrolling no longer strands one at the strip edge
 - What I changed (files):
   - `Source/UI/LinkArcLayout.h` — new `Config::viewport` (empty = "whole strip", so every pre-scroll caller is unaffected). A link whose ARC does not intersect the viewport is culled: `labelVisible = false`, `offViewport = true`, empty box, nothing drawn. Where the arc runs off the viewport the horizontal clamp is SKIPPED and the label's centre is held over the visible stub of its own arc instead. Vertical clamping unchanged.
