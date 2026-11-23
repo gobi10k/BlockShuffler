@@ -18,6 +18,12 @@ void BlockLinkOverlay::setViewportRect(juce::Rectangle<int> r) {
     repaint();
 }
 
+void BlockLinkOverlay::setKeepOut(juce::Rectangle<int> r) {
+    if (keepOutRect == r) return;
+    keepOutRect = r;
+    repaint();
+}
+
 void BlockLinkOverlay::setLinkingSource(const juce::String& blockId) {
     if (linkingSourceId == blockId) return;
     linkingSourceId = blockId;
@@ -39,6 +45,7 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
     // Empty until BlockStrip tells us otherwise, which the layout reads as
     // "the whole strip is visible".
     cfg.viewport = viewportRect.toFloat();
+    if (!keepOutRect.isEmpty()) cfg.keepOut.push_back(keepOutRect.toFloat());
 
     // Collect the inputs the pure layout pass needs, and the tile rects labels
     // must keep clear of so a link label never lands on a block's name.

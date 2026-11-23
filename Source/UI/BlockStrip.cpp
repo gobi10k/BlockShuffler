@@ -401,6 +401,7 @@ void BlockStrip::enterLinkMode(const juce::String& fromBlockId) {
     modeLabel.setText("Click a block to link to it  (Esc to cancel)",
                       juce::dontSendNotification);
     modeLabel.setVisible(true);
+    updateOverlay();
     grabKeyboardFocus();
     repaint();
 }
@@ -419,6 +420,7 @@ void BlockStrip::enterStackMode(const juce::String& fromBlockId) {
     modeLabel.setText("Click a block to stack with it  (Esc to cancel)",
                       juce::dontSendNotification);
     modeLabel.setVisible(true);
+    updateOverlay();
     grabKeyboardFocus();
     repaint();
 }
@@ -430,6 +432,7 @@ void BlockStrip::cancelPendingMode() {
         bc->setHighlighted(false);
     if (overlay) overlay->setLinkingSource({});
     modeLabel.setVisible(false);
+    updateOverlay();
     repaint();
 }
 
@@ -475,6 +478,8 @@ void BlockStrip::updateOverlay() {
     // button gutter included) while the tiles scroll under it, so without this the
     // label pass cannot tell a link that has scrolled away from one near the edge.
     overlay->setViewportRect(viewport.getBounds());
+    // Labels must never cover the link/stack-mode banner (it shares our coords).
+    overlay->setKeepOut(modeLabel.isVisible() ? modeLabel.getBounds() : juce::Rectangle<int>());
     overlay->setBlockAnchors(bounds);
 }
 

@@ -122,6 +122,10 @@ struct Config {
      *  strip is harder to read than one sitting on a tile it is plated over. */
     float tilePenalty = 70.0f;
 
+    /** Space no label may cover, treated exactly like an already-placed label
+     *  (2026-11-23: the link/stack-mode banner "Click a block to link to it"). */
+    std::vector<juce::Rectangle<float>> keepOut;
+
     // ── Cross-column links (2026-11-13) ──────────────────────────────────────
     float anchorSpread = 6.0f;  ///< spacing between links leaving the same tile edge
     float labelVGap    = 2.0f;  ///< vertical clearance between label boxes (plates overhang 1px)
@@ -198,7 +202,7 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
     // Committed label boxes. A box only ever lands here after it has been proven
     // free of every box already in it, which is what makes separation a guarantee
     // rather than an outcome.
-    std::vector<juce::Rectangle<float>> committed;
+    std::vector<juce::Rectangle<float>> committed(cfg.keepOut.begin(), cfg.keepOut.end());
 
     // Per-column counter, so several links inside one stack bow to different
     // depths and alternating sides instead of tracing the same bracket.
@@ -421,20 +425,50 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         edgeUse.push_back({ key, 1 });
         return 0;
     };
-    auto endpoint = [&](const Anchor& self, const Anchor& other) -> juce::Point<float> {
+    auto isMember = [](const Anchor& a) { return a.stacked && !a.tile.isEmpty(); };
+    auto endpoint = [&](const Anchor& self) -> juce::Point<float> {   // unstacked end
         const float s = cfg.anchorSpread;
-        if (!self.stacked || self.tile.isEmpty()) {
-            const int k = nextEdgeUse({ self.x, cfg.cy });
-            const float d = (k == 0) ? 0.0f : (float)((k + 1) / 2) * s * ((k % 2) ? 1.0f : -1.0f);
-            return { self.x + d, cfg.cy };                 // k=0: the reference point exactly
-        }
-        const bool right = other.x >= self.x;
-        const float ex = right ? self.tile.getRight() : self.tile.getX();
-        const int k = nextEdgeUse({ ex, self.tile.getCentreY() });
-        const float d = (float)(k / 2 + 1) * s * ((k % 2) ? 1.0f : -1.0f);   // -s,+s,-2s,+2s...
-        return { ex, juce::jlimit(self.tile.getY() + 3.0f, self.tile.getBottom() - 3.0f,
-                                  self.tile.getCentreY() + d) };
+        const int k = nextEdgeUse({ self.x, cfg.cy });
+        const float d = (k == 0) ? 0.0f : (float)((k + 1) / 2) * s * ((k % 2) ? 1.0f : -1.0f);
+        return { self.x + d, cfg.cy };                     // k=0: the reference point exactly
     };
+
+    // STACK-MEMBER ends (2026-11-23): on the side edge of THAT member's tile facing
+    // the other end, centred on the tile's vertical centre; several ends on one
+    // edge spread cfg.anchorSpread apart, ordered by the other end's height so
+    // they do not cross on the way out. memberEnd[2*i + (0 = a, 1 = b)].
+    std::vector<juce::Point<float>> memberEnd(links.size() * 2);
+    {
+        struct Use { float ex, ey, otherY; size_t slot; juce::Rectangle<float> tile; };
+        std::vector<Use> uses;
+        for (size_t i = 0; i < links.size(); ++i) {
+            const auto& in = links[i];
+            if (!in.a.valid || !in.b.valid || isSameColumn(in.a.x, in.b.x)) continue;
+            for (int e = 0; e < 2; ++e) {
+                const auto& self  = e ? in.b : in.a;
+                const auto& other = e ? in.a : in.b;
+                if (!isMember(self)) continue;
+                const float ex = other.x >= self.x ? self.tile.getRight() : self.tile.getX();
+                uses.push_back({ ex, self.tile.getCentreY(), other.y, 2 * i + (size_t)e, self.tile });
+            }
+        }
+        std::vector<bool> done(uses.size(), false);
+        for (size_t u = 0; u < uses.size(); ++u) {
+            if (done[u]) continue;
+            std::vector<size_t> group;
+            for (size_t v = u; v < uses.size(); ++v)
+                if (!done[v] && std::abs(uses[v].ex - uses[u].ex) < 0.5f && std::abs(uses[v].ey - uses[u].ey) < 0.5f)
+                    { group.push_back(v); done[v] = true; }
+            std::stable_sort(group.begin(), group.end(),
+                             [&](size_t l, size_t r) { return uses[l].otherY < uses[r].otherY; });
+            const float n = (float)group.size();
+            for (size_t j = 0; j < group.size(); ++j) {
+                const auto& g = uses[group[j]];
+                const float y = g.ey + ((float)j - (n - 1.0f) * 0.5f) * cfg.anchorSpread;
+                memberEnd[g.slot] = { g.ex, juce::jlimit(g.tile.getY() + 1.0f, g.tile.getBottom() - 1.0f, y) };
+            }
+        }
+    }
 
     // HEIGHTS. Arcs still nest by rank (36 + r*22 above their lower anchor), but r
     // now counts CROSS-column links only, and a rise that would carry the curve --
@@ -457,8 +491,13 @@ inline std::vector<Placed> layout(const std::vector<LinkIn>& links,
         p.sameColumn = false;
 
         const float boxW = juce::jmax(in.labelW, in.pillW) + 4.0f;
-        const auto e1 = endpoint(in.a, in.b);
-        const auto e2 = endpoint(in.b, in.a);
+        // A stacked end with no tile rect has nothing true to anchor to: draw
+        // nothing rather than fall back to the column centre (2026-11-23).
+        if ((in.a.stacked && in.a.tile.isEmpty()) || (in.b.stacked && in.b.tile.isEmpty())) {
+            p.visible = false; p.labelVisible = false; continue;
+        }
+        const auto e1 = isMember(in.a) ? memberEnd[2 * i]     : endpoint(in.a);
+        const auto e2 = isMember(in.b) ? memberEnd[2 * i + 1] : endpoint(in.b);
         p.anchorX1 = e1.x; p.anchorY1 = e1.y;
         p.anchorX2 = e2.x; p.anchorY2 = e2.y;
         {

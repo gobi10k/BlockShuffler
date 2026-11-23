@@ -4960,6 +4960,51 @@ int main(int argc, char* argv[]) {
                             juce::String(ok) + "/" + juce::String((int)std::size(cases)) + " scenarios" + bad);
                 }
 
+                { // T71 (PERMANENT, MEMBER ANCHORS + BANNER 2026-11-23):
+                  //  (a) a stacked end sits on ITS tile's edge facing the other end, at the
+                  //      tile's vertical centre; (b) 3 ends on one edge are 6px apart,
+                  //      centred on that centre; (c) a link to the BASE anchors on the base
+                  //      tile, not the column; (d) a stacked end whose tile rect is empty
+                  //      is NOT drawn (never the column-centre fallback); (e) no label
+                  //      intersects a keepOut rect (the link-mode banner).
+                    using namespace LinkArcLayout;
+                    Config c71; c71.width = 700.0f; c71.height = 300.0f; c71.cy = 150.0f; c71.colHalfW = 50.0f;
+                    const juce::Rectangle<float> base(100, 10, 100, 90), mid(100, 105, 100, 90), low(100, 200, 100, 90),
+                                                 u1(400, 0, 100, 300), u2(510, 0, 100, 300), u3(620, 0, 100, 300);
+                    auto mem = [](juce::Rectangle<float> r) { Anchor a; a.x = r.getCentreX(); a.y = r.getCentreY();
+                                                              a.valid = true; a.stacked = true; a.tile = r; return a; };
+                    auto uns = [](juce::Rectangle<float> r) { Anchor a; a.x = r.getCentreX(); a.y = r.getCentreY();
+                                                              a.valid = true; return a; };
+                    auto L = [](Anchor a, Anchor b) { LinkIn l; l.a = a; l.b = b; l.labelW = 90; l.pillW = 32; return l; };
+                    // mid <-> u1, u2, u3 (three ends on mid's right edge); base <-> u1
+                    std::vector<LinkIn> in71 { L(mem(mid), uns(u1)), L(mem(mid), uns(u2)), L(mem(mid), uns(u3)),
+                                               L(mem(base), uns(u2)) };
+                    c71.keepOut.push_back({ 0, 0, 700, 20 });   // banner across the top
+                    const auto p71 = layout(in71, c71, { base, mid, low, u1, u2, u3 });
+                    std::vector<float> ys { p71[0].anchorY1, p71[1].anchorY1, p71[2].anchorY1 };
+                    std::sort(ys.begin(), ys.end());
+                    const bool onEdge = p71[0].anchorX1 == mid.getRight() && p71[1].anchorX1 == mid.getRight()
+                                     && p71[2].anchorX1 == mid.getRight();
+                    const bool spread = std::abs(ys[1] - mid.getCentreY()) < 0.01f
+                                     && std::abs(ys[1] - ys[0] - 6.0f) < 0.01f && std::abs(ys[2] - ys[1] - 6.0f) < 0.01f;
+                    const bool baseTile = p71[3].anchorX1 == base.getRight() && std::abs(p71[3].anchorY1 - base.getCentreY()) < 0.01f;
+                    bool bannerFree = true, disjoint = true;
+                    for (size_t i = 0; i < p71.size(); ++i) {
+                        if (p71[i].labelVisible && p71[i].labelBox.intersects(c71.keepOut[0])) bannerFree = false;
+                        for (size_t j = i + 1; j < p71.size(); ++j)
+                            if (p71[i].labelVisible && p71[j].labelVisible && p71[i].labelBox.intersects(p71[j].labelBox)) disjoint = false;
+                    }
+                    Anchor empty = mem(mid); empty.tile = {};               // member rect not set yet
+                    const auto pE = layout({ L(empty, uns(u1)) }, c71, {});
+                    const bool noFallback = !pE[0].visible && !pE[0].labelVisible;
+                    verdict("T71 MEMBER-ANCHORS+BANNER: member ends on their own tile's facing edge at its vertical centre, 6px spread centred, base link on the base tile, empty member rect never falls back to the column centre, no label covers the banner",
+                            onEdge && spread && baseTile && noFallback && bannerFree && disjoint,
+                            juce::String("onEdge=") + (onEdge ? "y" : "N") + " ys=" + juce::String(ys[0], 1) + "/" + juce::String(ys[1], 1)
+                            + "/" + juce::String(ys[2], 1) + " (centre " + juce::String(mid.getCentreY(), 1) + ") spread=" + (spread ? "y" : "N")
+                            + " baseTile=" + (baseTile ? "y" : "N") + " noColumnFallback=" + (noFallback ? "y" : "N")
+                            + " bannerFree=" + (bannerFree ? "y" : "N") + " disjoint=" + (disjoint ? "y" : "N"));
+                }
+
                 { // T69 (PERMANENT, STACK-MEMBER LINK ANCHORS 2026-11-13): cross-column
                   // links between members of two stacks used to anchor at the column
                   // centre at mid-height, so B1<->D1 and B2<->D2 drew as ONE curve.

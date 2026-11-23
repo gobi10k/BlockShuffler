@@ -50,11 +50,16 @@ public:
      *  than the whole stack column and follows the tile when the strip scrolls. */
     void setLinkingSource(const juce::String& blockId);
 
+    /** Strip-local rect no link label may cover (the link/stack-mode banner);
+     *  empty = none. */
+    void setKeepOut(juce::Rectangle<int> r);
+
 private:
     Project* project = nullptr;
     juce::HashMap<juce::String, juce::Rectangle<int>> blockBounds;
     juce::Rectangle<int> viewportRect;
     juce::String linkingSourceId;
+    juce::Rectangle<int> keepOutRect;
 
 #if BLOCKSHUFFLER_QA_HOOK
     // QA build only: a COPY of what the last paint() laid out, for the dump.
