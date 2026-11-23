@@ -1,5 +1,6 @@
 #include "BlockStrip.h"
 #include "LookAndFeel_BlockShuffler.h"
+#include "BlockDropClassifier.h"
 
 namespace BlockShuffler {
 
@@ -525,56 +526,26 @@ void BlockStrip::updateDragFeedback(BlockComponent* draggedComp, juce::Point<int
     auto* draggedBlock = draggedComp->getBlock();
     if (draggedBlock == nullptr) { repaint(); return; }
 
-    // Shift+drag on a stacked block: show a stack-move insertion line, skipping same-stack slots.
-    if (shiftDrag && draggedBlock->stackGroup >= 0) {
-        currentDropAction = DropAction::Reorder;
-        isStackMove       = true;
-        dropTargetIndex   = blockComponents.size();  // default: append
-        for (int i = 0; i < blockComponents.size(); ++i) {
-            if (i >= originalBounds.size()) continue;
-            auto* b = blockComponents[i]->getBlock();
-            if (b == nullptr || b->stackGroup == draggedBlock->stackGroup) continue;
-            if (originalBounds[i].getCentreX() > centre.x) {
-                dropTargetIndex = i;
-                break;
-            }
-        }
-        repaint();
-        return;
+    // The stack/insert decision is made in ONE place, BlockDropClassifier::classify.
+    // blockDropped() re-runs this function at the release point and commits what
+    // it leaves in currentDropAction, so the preview IS the commit.
+    std::vector<BlockDropClassifier::Tile> tiles;
+    int draggedIndex = -1;
+    for (int i = 0; i < blockComponents.size() && i < originalBounds.size(); ++i) {
+        auto* b = blockComponents[i]->getBlock();
+        tiles.push_back({ originalBounds[i], b ? b->stackGroup : -1 });
+        if (blockComponents[i] == draggedComp) draggedIndex = i;
     }
+    const auto r = BlockDropClassifier::classify(centre, tiles, draggedIndex, shiftDrag);
 
-    // Check every other block's ORIGINAL (pre-drag) bounds for a hit.
-    for (int i = 0; i < blockComponents.size(); ++i) {
-        auto* comp = blockComponents[i];
-        if (comp == draggedComp) continue;                         // skip self
-        if (i >= originalBounds.size()) continue;
-
-        if (originalBounds[i].contains(centre)) {
-            auto* targetBlock = comp->getBlock();
-            if (targetBlock == nullptr) continue;
-
-            bool sameStack = (draggedBlock->stackGroup >= 0
-                           && draggedBlock->stackGroup == targetBlock->stackGroup);
-
-            currentDropAction = sameStack ? DropAction::RearrangeInStack : DropAction::Stack;
-            dropTargetIndex   = i;
-            dropTargetComp    = comp;
-            repaint();
-            return;
-        }
-    }
-
-    // No block hit — find insertion point for reorder.
-    // dropTargetIndex = "insert before this block index" (== blockComponents.size() → append).
-    currentDropAction = DropAction::Reorder;
-    dropTargetIndex   = blockComponents.size();  // default: append
-    for (int i = 0; i < originalBounds.size(); ++i) {
-        if (blockComponents[i] == draggedComp) continue;
-        if (originalBounds[i].getCentreX() > centre.x) {
-            dropTargetIndex = i;
-            break;
-        }
-    }
+    using A = BlockDropClassifier::Action;
+    currentDropAction = r.action == A::Insert           ? DropAction::Reorder
+                      : r.action == A::Stack            ? DropAction::Stack
+                      : r.action == A::RearrangeInStack ? DropAction::RearrangeInStack
+                                                        : DropAction::None;
+    dropTargetIndex = r.index;
+    dropTargetComp  = (r.action == A::Stack || r.action == A::RearrangeInStack) ? blockComponents[r.index] : nullptr;
+    isStackMove     = r.stackMove;
     repaint();
 }
 
