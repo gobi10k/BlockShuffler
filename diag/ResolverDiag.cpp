@@ -4900,6 +4900,72 @@ int main(int argc, char* argv[]) {
                             + " shiftInsert=" + (shiftIns ? "y" : "N"));
                 }
 
+                { // T70 (PERMANENT, STACK INSERT ORDER 2026-11-23): a block dropped onto
+                  // stack member M -- or into the gap directly under M -- lands directly
+                  // BELOW M; onto an unstacked T it forms [T, dragged]. The base never
+                  // changes and ONE undo restores the order exactly. Since 47cabbf
+                  // (Project.cpp:291) every drop appended at the stack's bottom.
+                  // Drives the same two calls the strip makes: classify() -> target,
+                  // restackBlockOnto(dragged, target, belowTarget=true).
+                    namespace DC = BlockDropClassifier;
+                    // Screen geometry: X | [S1..S4] (4 tiles, 4px gaps) | U | [Y1,Y2]
+                    std::vector<juce::Rectangle<int>> rects {
+                        { 0, 0, 100, 340 },                                   // X
+                        { 110, 0, 100, 82 }, { 110, 86, 100, 82 },            // S1 S2
+                        { 110, 172, 100, 82 }, { 110, 258, 100, 82 },         // S3 S4
+                        { 220, 0, 100, 340 },                                 // U
+                        { 330, 0, 100, 168 }, { 330, 172, 100, 168 } };       // Y1 Y2
+                    const juce::StringArray nm { "X", "S1", "S2", "S3", "S4", "U", "Y1", "Y2" };
+                    struct Case { const char* name; int dragged; juce::Point<int> pt; const char* want; };
+                    const Case cases[] {
+                        { "onto-top S1",    0, { 160,  41 }, "S1 X S2 S3 S4" },
+                        { "onto-mid S2",    0, { 160, 127 }, "S1 S2 X S3 S4" },
+                        { "onto-mid S3",    0, { 160, 213 }, "S1 S2 S3 X S4" },
+                        { "onto-bottom S4", 0, { 160, 299 }, "S1 S2 S3 S4 X" },
+                        { "gap S1|S2",      0, { 160,  84 }, "S1 X S2 S3 S4" },
+                        { "gap S2|S3",      0, { 160, 170 }, "S1 S2 X S3 S4" },
+                        { "gap S3|S4",      0, { 160, 256 }, "S1 S2 S3 X S4" },
+                        { "onto unstacked U", 0, { 270, 170 }, "U X" },
+                        { "stacked Y2 onto S2", 7, { 160, 127 }, "S1 S2 Y2 S3 S4" } };
+                    int ok = 0; juce::String bad;
+                    for (auto& c : cases) {
+                        Project p;
+                        juce::Array<Block*> b;
+                        for (auto& n : nm) { b.add(p.addBlock(n)); addClipTo(b.getLast(), "c" + n); }
+                        p.stackBlocks(b[2]->id, b[1]->id); p.stackBlocks(b[3]->id, b[1]->id);
+                        p.stackBlocks(b[4]->id, b[1]->id); p.stackBlocks(b[7]->id, b[6]->id);
+                        std::vector<DC::Tile> tiles;
+                        for (int i = 0; i < nm.size(); ++i) tiles.push_back({ rects[(size_t)i], b[i]->stackGroup });
+                        auto groups = [&] {   // each stack's members in blocks[] order (= top->bottom on screen)
+                            std::map<int, juce::StringArray> g;
+                            for (auto* x : p.blocks) if (x->stackGroup >= 0) g[x->stackGroup].add(x->name);
+                            juce::StringArray out;
+                            for (auto& [k, v] : g) out.add(v.joinIntoString(" "));
+                            return out;
+                        };
+                        auto full = [&] { juce::String s; for (auto* x : p.blocks) s << x->name << "/" << x->stackGroup << " "; return s; };
+                        const juce::String before = full();
+                        const juce::String baseBefore = p.getBlockById(b[1]->id)->name;
+                        const auto r = DC::classify(c.pt, tiles, c.dragged, false);
+                        if (r.action == DC::Action::Stack)
+                            p.restackBlockOnto(b[c.dragged]->id, b[r.index]->id, true);
+                        const juce::String got = groups().joinIntoString(" | ");
+                        // the S-stack's base is still S1 (first member in blocks[] order)
+                        Block* firstS = nullptr;
+                        for (auto* x : p.blocks) if (x->stackGroup == p.getBlockById(b[1]->id)->stackGroup) { firstS = x; break; }
+                        const bool baseOk = firstS && firstS->name == baseBefore;
+                        const bool want = groups().contains(c.want);   // exact match of one stack
+                        p.undoManager.undo();
+                        const bool undoOk = full() == before;
+                        if (r.action == DC::Action::Stack && want && baseOk && undoOk) ++ok;
+                        else bad << " [" << c.name << ": got '" << got << "' base=" << (baseOk ? "ok" : "MOVED")
+                                 << " undo=" << (undoOk ? "ok" : "BAD") << "]";
+                    }
+                    verdict("T70 STACK-INSERT-ORDER: drop onto member M or into the gap under M lands directly below M; onto unstacked T forms [T,dragged]; base unchanged; one undo restores the exact order",
+                            ok == (int)std::size(cases),
+                            juce::String(ok) + "/" + juce::String((int)std::size(cases)) + " scenarios" + bad);
+                }
+
                 { // T69 (PERMANENT, STACK-MEMBER LINK ANCHORS 2026-11-13): cross-column
                   // links between members of two stacks used to anchor at the column
                   // centre at mid-height, so B1<->D1 and B2<->D2 drew as ONE curve.

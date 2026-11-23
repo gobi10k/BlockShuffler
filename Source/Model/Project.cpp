@@ -255,7 +255,8 @@ void Project::detachBlockFromStack(Block& block) {
     }
 }
 
-void Project::restackBlockOnto(const juce::String& draggedBlockId, const juce::String& targetBlockId) {
+void Project::restackBlockOnto(const juce::String& draggedBlockId, const juce::String& targetBlockId,
+                               bool belowTarget) {
     auto* dragged = getBlockById(draggedBlockId);
     auto* target  = getBlockById(targetBlockId);
     if (dragged == nullptr || target == nullptr || dragged == target) return;
@@ -288,7 +289,7 @@ void Project::restackBlockOnto(const juce::String& draggedBlockId, const juce::S
         int lastOfGroup = -1;
         for (int i = 0; i < blocks.size(); ++i)
             if (blocks[i]->stackGroup == group) lastOfGroup = i;
-        blocks.insert(lastOfGroup + 1, moved);
+        blocks.insert((belowTarget ? blocks.indexOf(target) : lastOfGroup) + 1, moved);
     }
     for (int i = 0; i < blocks.size(); ++i)
         blocks[i]->position = i;

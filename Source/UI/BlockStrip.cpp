@@ -85,6 +85,8 @@ void BlockStrip::paintOverChildren(juce::Graphics& g) {
                                        cb.getWidth(), cb.getHeight());
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::accentTeal).withAlpha(0.85f));
         g.drawRoundedRectangle(r.toFloat().reduced(2.0f), 7.0f, 2.5f);
+        // The dropped block lands directly BELOW this tile: mark its bottom edge.
+        g.fillRect(r.getX() + 6, r.getBottom() - 1, r.getWidth() - 12, 3);
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::textPrimary));
         g.setFont(LookAndFeel_BlockShuffler::uiFontBold(10.0f));
         g.drawText("STACK", r.withTrimmedTop(r.getHeight() / 2), juce::Justification::centred);
@@ -574,7 +576,33 @@ void BlockStrip::blockDropped(BlockComponent* draggedComp, juce::Point<int> cent
         // anchor-free stackBlocks primitive left rightward drops at the dragged
         // block's old slot (resized() anchors a stack at its first member in
         // blocks[] order = min index).
-        project->restackBlockOnto(draggedBlock->id, dropTargetComp->getBlock()->id);
+        //
+        // 2026-11-23: the dragged block lands directly BELOW the tile it was
+        // dropped on (the classifier's target member), not at the stack's bottom.
+        auto* target = dropTargetComp->getBlock();
+        if (isStackMove && draggedBlock->stackGroup >= 0 && target->stackGroup >= 0
+            && target->stackGroup != draggedBlock->stackGroup) {
+            // Shift+drag a whole stack onto member M of another stack: its members
+            // go directly below M, in their existing order. Target settings win.
+            auto pre = project->toJSON();
+            const int fromGroup = draggedBlock->stackGroup, toGroup = target->stackGroup;
+            juce::Array<Block*> members;
+            for (auto* b : project->blocks)
+                if (b->stackGroup == fromGroup) members.add(b);
+            for (auto* b : members)
+                project->blocks.removeObject(b, false);
+            int insertAt = project->blocks.indexOf(target) + 1;
+            for (auto* b : members) {
+                b->stackGroup = toGroup;
+                project->blocks.insert(insertAt++, b);
+            }
+            for (int i = 0; i < project->blocks.size(); ++i)
+                project->blocks[i]->position = i;
+            project->propagateStackSettings(toGroup);
+            project->applyExternalMutation(pre);
+        } else {
+            project->restackBlockOnto(draggedBlock->id, target->id, /*belowTarget*/ true);
+        }
 
     } else if (currentDropAction == DropAction::RearrangeInStack) {
         // Swap the two blocks' positions in project->blocks to change vertical order.

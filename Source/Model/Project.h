@@ -49,9 +49,12 @@ public:
      *  then stacks it with the target — joining the target's stack if it has one,
      *  else forming a fresh two-block stack. The resulting stack is anchored at
      *  the DROP TARGET's slot: the dragged block is reinserted after the target
-     *  group's last member, never left at its old index.
+     *  group's last member, never left at its old index -- or, with belowTarget
+     *  (block drag-drop, 2026-11-23), directly below the target itself. Either
+     *  way it lands after the group's first member, so the base never changes.
      *  One undo entry, one change message. */
-    void   restackBlockOnto(const juce::String& draggedBlockId, const juce::String& targetBlockId);
+    void   restackBlockOnto(const juce::String& draggedBlockId, const juce::String& targetBlockId,
+                            bool belowTarget = false);
 
     /** Removes the block from its stack group; if exactly one member remains in
      *  the old group it auto-unstacks with its stack settings reset (H6/H7).

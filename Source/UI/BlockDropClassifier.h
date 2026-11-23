@@ -13,9 +13,16 @@
 // blocks got stacked by accident; and in a stack column only the tiles counted,
 // so the 4px gaps between stacked tiles silently turned into INSERT.
 //
+// STACK TARGET (2026-11-23): the member the dropped block goes directly BELOW --
+// the tile under the point, or, in the gap between two stacked tiles, the tile
+// ABOVE the gap (above the column's first tile: that first tile). Never "nearest",
+// which flipped to the lower tile halfway through a gap.
+//
 // Kept exactly as before: dragging a stack member over a SIBLING tile rearranges
-// within the stack (whole-tile hit, no zones); Shift+drag of a stacked block is a
-// whole-stack move that only ever inserts, skipping its own stack's slots.
+// within the stack (whole-tile hit, no zones). Shift+drag of a stacked block is a
+// whole-stack move, skipping its own stack's slots: it inserts, EXCEPT in the
+// stack zone over a member of ANOTHER stack, where the whole stack goes below
+// that member (Stack + stackMove). Over an unstacked block it still inserts.
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <vector>
@@ -60,13 +67,10 @@ inline Result classify(juce::Point<int> pt, const std::vector<Tile>& tiles, int 
         return (int)tiles.size();
     };
 
-    if (shiftDrag && dragSg >= 0) {                     // whole-stack move: insert only
-        r.action = Action::Insert; r.stackMove = true; r.index = insertIndex(dragSg);
-        return r;
-    }
+    const bool stackMove = shiftDrag && dragSg >= 0;   // whole-stack move
 
     // Stack member over a sibling tile: rearrange within the stack (unchanged).
-    if (dragSg >= 0)
+    if (dragSg >= 0 && !stackMove)
         for (int i = 0; i < (int)tiles.size(); ++i)
             if (i != dragged && tiles[(size_t)i].stackGroup == dragSg && tiles[(size_t)i].rect.contains(pt)) {
                 r.action = Action::RearrangeInStack; r.index = i;
@@ -76,23 +80,26 @@ inline Result classify(juce::Point<int> pt, const std::vector<Tile>& tiles, int 
     // Which other column is the point over? Columns are identified by their x.
     // The dragged block's own column (its own tile, or its own stack) is never a
     // stack target -- over it the drop inserts, as before.
-    int best = -1; int bestDy = 0;
+    int best = -1, top = -1;
     for (int i = 0; i < (int)tiles.size(); ++i) {
         if (i == dragged) continue;
         const auto& t = tiles[(size_t)i];
         if (dragSg >= 0 && t.stackGroup == dragSg) continue;
         if (pt.x < t.rect.getX() || pt.x >= t.rect.getRight()) continue;
         const float rel = (float)(pt.x - t.rect.getX()) / (float)juce::jmax(1, t.rect.getWidth());
-        if (rel < insertEdgeFrac || rel > 1.0f - insertEdgeFrac) break;   // edge of this column: INSERT
-        // Middle of the column: the member under the point, else the nearest one
-        // vertically (the gaps between stacked tiles still stack).
-        const int dy = pt.y < t.rect.getY() ? t.rect.getY() - pt.y
-                     : pt.y >= t.rect.getBottom() ? pt.y - t.rect.getBottom() + 1 : 0;
-        if (best < 0 || dy < bestDy) { best = i; bestDy = dy; }
+        if (rel < insertEdgeFrac || rel > 1.0f - insertEdgeFrac) { best = top = -1; break; }   // edge: INSERT
+        // Middle of the column: the lowest member whose top is at/above the point
+        // (the tile under it, or the tile above a gap); else the topmost member.
+        if (t.rect.getY() <= pt.y && (best < 0 || t.rect.getY() > tiles[(size_t)best].rect.getY())) best = i;
+        if (top < 0 || t.rect.getY() < tiles[(size_t)top].rect.getY()) top = i;
     }
-    if (best >= 0) { r.action = Action::Stack; r.index = best; return r; }
+    if (best < 0) best = top;
+    // A whole-stack move only merges into ANOTHER stack; over an unstacked block it inserts.
+    if (best >= 0 && !(stackMove && tiles[(size_t)best].stackGroup < 0)) {
+        r.action = Action::Stack; r.index = best; r.stackMove = stackMove; return r;
+    }
 
-    r.action = Action::Insert; r.index = insertIndex(-1);
+    r.action = Action::Insert; r.stackMove = stackMove; r.index = insertIndex(stackMove ? dragSg : -1);
     return r;
 }
 
