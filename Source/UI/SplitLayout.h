@@ -112,5 +112,24 @@ inline int restoreBlocksHeight(int storedBlocksH, int totalH) noexcept
     return clampBlocksHeight(sanitizeStoredBlocksHeight(storedBlocksH), totalH);
 }
 
+// ── Stack tiles in the block strip (2026-11-23, decision A2 / 13.2) ──────────
+// The strip NEVER scrolls vertically: every stack fits by shrinking its tiles
+// into the height the viewport actually shows (the strip area minus the
+// horizontal scroll bar when that bar is needed). There used to be a 16px floor
+// that let tall stacks overflow, and the bar's 8px was never subtracted, so any
+// strip wide enough to scroll horizontally also grew a vertical bar.
+inline constexpr int stackTileGap = 4;
+
+/** Height of each tile of an n-tile stack laid out in visibleH. n tiles plus
+ *  (n-1) gaps never exceed visibleH while a tile is >= 1px.
+ *  ponytail: fixed 4px gaps, so past ~(visibleH/5) members (26 at the 132px
+ *  minimum strip) tiles hit 1px and clip; shrink the gap there if that matters. */
+inline int stackTileHeight(int visibleH, int n) noexcept
+{
+    n = n < 1 ? 1 : n;
+    const int h = (visibleH - (n - 1) * stackTileGap) / n;
+    return h < 1 ? 1 : h;
+}
+
 } // namespace SplitLayout
 } // namespace BlockShuffler

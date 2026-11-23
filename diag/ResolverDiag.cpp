@@ -1718,31 +1718,25 @@ int main(int argc, char* argv[]) {
                     + ", maxDiff=" + juce::String(cr.maxDiff, 6));
         }
 
-        { // T26 (13.2): nine-block stack visibility. Mirrors the BlockStrip tile
-          // layout arithmetic (BlockStrip.cpp:191-193): perH = jmax(16, (areaH -
-          // (n-1)*4) / n); neededH = perH*n + (n-1)*4. Strip height areaH = 360
-          // (MainComponent.h:70 blockStripHeight, reduced(padding,0) leaves height
-          // untouched → BlockStrip.cpp:145 areaH = 360). A stack "fits" (all tiles
-          // on screen) when neededH <= areaH; otherwise perH clamps to 16 and the
-          // content overflows into the vertical scrollbar (setScrollBarsShown true)
-          // → still reachable. Invariant guarded: 13.2 tiles visible/reachable.
-            const int areaH = 360;
-            auto perH    = [](int n, int aH){ return juce::jmax(16, (aH - (n - 1) * 4) / n); };
-            auto neededH = [&](int n, int aH){ return perH(n, aH) * n + (n - 1) * 4; };
-            bool fit7 = neededH(7, areaH) <= areaH;
-            bool fit8 = neededH(8, areaH) <= areaH;
-            bool fit9 = neededH(9, areaH) <= areaH;
-            // A very tall stack must clamp to the 16px floor and overflow → scrolls.
-            const int big = 30;
-            bool clampsAndScrolls = (perH(big, areaH) == 16) && (neededH(big, areaH) > areaH);
-            verdict("T26 nine-block stack: n=7/8/9 all fit at 360px; large stacks scroll",
-                    fit7 && fit8 && fit9 && clampsAndScrolls,
-                    "perH 7/8/9 = " + juce::String(perH(7, areaH)) + "/" + juce::String(perH(8, areaH))
-                    + "/" + juce::String(perH(9, areaH)) + ", neededH 7/8/9 = "
-                    + juce::String(neededH(7, areaH)) + "/" + juce::String(neededH(8, areaH))
-                    + "/" + juce::String(neededH(9, areaH)) + " (<=360), big(" + juce::String(big)
-                    + ") perH=" + juce::String(perH(big, areaH)) + " neededH="
-                    + juce::String(neededH(big, areaH)));
+        { // T26 (13.2, rewritten 2026-11-23 for decision A2): the block strip never
+          // scrolls vertically -- every stack fits by shrinking its tiles. Uses the
+          // SAME function BlockStrip::resized() lays tiles out with
+          // (SplitLayout::stackTileHeight), not a copy. It used to assert the
+          // opposite ("large stacks clamp to 16px and scroll"), which is what put a
+          // vertical bar on the strip.
+          // Visible heights: 360 (default strip), 352 (default minus the 8px
+          // horizontal bar), 132 (blocksMinH 140 minus the bar).
+            auto neededH = [](int n, int vis) {
+                return SplitLayout::stackTileHeight(vis, n) * n + (n - 1) * SplitLayout::stackTileGap; };
+            int worst = 0; juce::String bad;
+            for (int vis : { 360, 352, 132 })
+                for (int n = 1; n <= 26; ++n)
+                    if (neededH(n, vis) > vis) { ++worst; bad << " n=" << n << "@" << vis; }
+            const int p9 = SplitLayout::stackTileHeight(352, 9);
+            verdict("T26 stacks fit: every stack of 1..26 tiles fits the visible strip height (360/352/132px) -- no vertical scrolling",
+                    worst == 0 && p9 >= 30,
+                    "overflowing cases=" + juce::String(worst) + bad
+                    + " | 9-stack tile @352=" + juce::String(p9) + "px, @132=" + juce::String(SplitLayout::stackTileHeight(132, 9)) + "px");
         }
 
         { // T27 (13.3): grid lines never obscure the waveform on long clips. Mirrors
