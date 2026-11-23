@@ -288,10 +288,35 @@ void LookAndFeel_BlockShuffler::drawTooltip(juce::Graphics& g,
     g.fillRoundedRectangle(bounds, 4.0f);
     g.setColour(juce::Colour(borderStrong));
     g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
-    g.setColour(juce::Colour(textPrimary));
-    g.setFont(uiFont(11.5f));
-    g.drawText(text, juce::Rectangle<int>(8, 4, width - 16, height - 8),
-               juce::Justification::centredLeft, true);
+    tooltipLayout(text).draw(g, juce::Rectangle<int>(tooltipPadX, tooltipPadY,
+                                                     width  - 2 * tooltipPadX,
+                                                     height - 2 * tooltipPadY).toFloat());
+}
+
+juce::TextLayout LookAndFeel_BlockShuffler::tooltipLayout(const juce::String& text)
+{
+    juce::AttributedString s;
+    s.setJustification(juce::Justification::topLeft);
+    s.setWordWrap(juce::AttributedString::byWord);
+    s.append(text, uiFont(11.5f), juce::Colour(textPrimary));
+    juce::TextLayout tl;
+    tl.createLayoutWithBalancedLineLengths(s, (float)(tooltipMaxWidth - 2 * tooltipPadX));  // shrinks to the text
+    return tl;
+}
+
+juce::Rectangle<int> LookAndFeel_BlockShuffler::getTooltipBounds(const juce::String& tipText,
+                                                                 juce::Point<int> screenPos,
+                                                                 juce::Rectangle<int> parentArea)
+{
+    const auto tl = tooltipLayout(tipText);
+    const int w = (int)std::ceil(tl.getWidth())  + 2 * tooltipPadX;
+    const int h = (int)std::ceil(tl.getHeight()) + 2 * tooltipPadY;
+    // Placement is JUCE's (LookAndFeel_V2): flip to the other side of the pointer
+    // past the parent's centre, then keep the whole box inside the parent.
+    return juce::Rectangle<int>(screenPos.x > parentArea.getCentreX() ? screenPos.x - (w + 12) : screenPos.x + 24,
+                                screenPos.y > parentArea.getCentreY() ? screenPos.y - (h + 6)  : screenPos.y + 6,
+                                w, h)
+               .constrainedWithin(parentArea);
 }
 
 // ── getTextButtonFont ─────────────────────────────────────────────────────────

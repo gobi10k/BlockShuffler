@@ -109,6 +109,17 @@ public:
     void drawTooltip(juce::Graphics& g, const juce::String& text,
                      int width, int height) override;
 
+    /** Tooltips wrap instead of truncating. The window size (getTooltipBounds)
+     *  and the drawn text (drawTooltip) both come from tooltipLayout(), so they
+     *  cannot disagree -- before 2026-11-13 JUCE sized the box from its own 13pt
+     *  bold layout while drawTooltip drew ONE 11.5pt line with an ellipsis. */
+    static constexpr int tooltipMaxWidth = 320;   ///< whole tooltip, padding included
+    static constexpr int tooltipPadX = 8, tooltipPadY = 4;
+    static juce::TextLayout tooltipLayout(const juce::String& text);
+    juce::Rectangle<int> getTooltipBounds(const juce::String& tipText,
+                                          juce::Point<int> screenPos,
+                                          juce::Rectangle<int> parentArea) override;
+
     juce::Font getTextButtonFont(juce::TextButton& button, int buttonHeight) override;
 
     /** Measure the advance width of a single line of text.
