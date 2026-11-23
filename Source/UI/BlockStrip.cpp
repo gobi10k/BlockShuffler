@@ -358,6 +358,7 @@ void BlockStrip::selectBlock(Block* block) {
         }
     }
 
+    updateOverlay();   // selection focus on the link overlay
     if (onBlockSelected) onBlockSelected(block);
 }
 
@@ -480,6 +481,8 @@ void BlockStrip::updateOverlay() {
     overlay->setViewportRect(viewport.getBounds());
     // Labels must never cover the link/stack-mode banner (it shares our coords).
     overlay->setKeepOut(modeLabel.isVisible() ? modeLabel.getBounds() : juce::Rectangle<int>());
+    // Selection focus: the link-mode source while linking, else the selected block.
+    overlay->setFocusBlock(pendingMode == PendingMode::Link ? pendingBlockId : selectedBlockId);
     overlay->setBlockAnchors(bounds);
 }
 

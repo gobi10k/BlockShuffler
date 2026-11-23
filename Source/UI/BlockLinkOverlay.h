@@ -54,12 +54,19 @@ public:
      *  empty = none. */
     void setKeepOut(juce::Rectangle<int> r);
 
+    /** Selection focus (2026-11-23): links touching this block are drawn at full
+     *  strength and LAST (on top); every other link is dimmed (arc ~15%, label
+     *  ~25%) and drawn underneath. Empty = no focus: all links as before. Changes
+     *  alpha and draw order only, never geometry. */
+    void setFocusBlock(const juce::String& blockId);
+
 private:
     Project* project = nullptr;
     juce::HashMap<juce::String, juce::Rectangle<int>> blockBounds;
     juce::Rectangle<int> viewportRect;
     juce::String linkingSourceId;
     juce::Rectangle<int> keepOutRect;
+    juce::String focusBlockId;
 
 #if BLOCKSHUFFLER_QA_HOOK
     // QA build only: a COPY of what the last paint() laid out, for the dump.

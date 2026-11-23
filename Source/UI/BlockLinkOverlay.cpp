@@ -24,6 +24,12 @@ void BlockLinkOverlay::setKeepOut(juce::Rectangle<int> r) {
     repaint();
 }
 
+void BlockLinkOverlay::setFocusBlock(const juce::String& blockId) {
+    if (focusBlockId == blockId) return;
+    focusBlockId = blockId;
+    repaint();
+}
+
 void BlockLinkOverlay::setLinkingSource(const juce::String& blockId) {
     if (linkingSourceId == blockId) return;
     linkingSourceId = blockId;
@@ -109,13 +115,21 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
     juce::Graphics::ScopedSaveState clipToViewport(g);
     if (!viewportRect.isEmpty()) g.reduceClipRegion(viewportRect);
 
-    int linkIndex = 0;
-    for (auto* link : project->links) {
+    // Draw order + dimming for the selection focus (LinkArcLayout::focusDrawOrder).
+    std::vector<std::pair<juce::String, juce::String>> ends;
+    for (auto* l : project->links) ends.push_back({ l->blockA, l->blockB });
+    std::vector<bool> dimmed;
+    const auto drawOrder = LinkArcLayout::focusDrawOrder(ends, focusBlockId, dimmed);
+
+    for (const int linkIndex : drawOrder) {
+        const auto* link = project->links[linkIndex];
         const auto& p = placed[(size_t)linkIndex];
-        if (!p.visible) { ++linkIndex; continue; }
+        if (!p.visible) continue;
+        const bool dim = dimmed[(size_t)linkIndex];
 
         auto col = juce::Colour(LookAndFeel_BlockShuffler::accentCol)
                        .withAlpha(0.4f + 0.6f * link->swapProbability);
+        if (dim) col = col.withAlpha(0.15f);
         g.setColour(col);
 #if BLOCKSHUFFLER_QA_HOOK
         qaArcAlpha[(size_t)linkIndex] = col.getFloatAlpha();
@@ -159,14 +173,17 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
 
         // The label is skipped only when the strip had no room for it anywhere
         // without covering another label; the arc above is still drawn.
-        if (!p.labelVisible) { ++linkIndex; continue; }
+        if (!p.labelVisible) continue;
+
+        // A dimmed label (plate, text and pill together) is drawn at 25%.
+        if (dim) g.beginTransparencyLayer(0.25f);
 
         // Name row — backed so it stays readable over an arc passing behind it.
         g.setColour(juce::Colour(LookAndFeel_BlockShuffler::bgDark).withAlpha(0.82f));
         g.fillRoundedRectangle(p.nameRect.expanded(2.0f, 1.0f), 3.0f);
         g.setColour(col.withAlpha(1.0f));
 #if BLOCKSHUFFLER_QA_HOOK
-        qaLabelAlpha[(size_t)linkIndex] = 1.0f;
+        qaLabelAlpha[(size_t)linkIndex] = dim ? 0.25f : 1.0f;
 #endif
         g.setFont(labelFont);
         g.drawText(labelTexts[linkIndex], p.nameRect, juce::Justification::centred);
@@ -178,7 +195,7 @@ void BlockLinkOverlay::paint(juce::Graphics& g) {
         g.setFont(probFont);
         g.drawText(probTexts[linkIndex], p.pillRect, juce::Justification::centred);
 
-        ++linkIndex;
+        if (dim) g.endTransparencyLayer();
     }
     }   // end viewport clip
 

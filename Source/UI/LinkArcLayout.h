@@ -178,6 +178,24 @@ inline juce::Point<float> crossCurvePoint(const Placed& p, float t) {
              a * p.anchorY1 + (b + c) * p.arcControlY + d * p.anchorY2 };
 }
 
+/** Selection focus (2026-11-23). ends[i] = link i's two block ids. Returns the
+ *  paint order -- links NOT touching `focus` first (underneath), the focus
+ *  block's links last (on top) -- and, via dim, which links are drawn dimmed.
+ *  An empty focus = project order, nothing dimmed. Never touches geometry. */
+inline std::vector<int> focusDrawOrder(const std::vector<std::pair<juce::String, juce::String>>& ends,
+                                       const juce::String& focus, std::vector<bool>& dim)
+{
+    dim.assign(ends.size(), false);
+    std::vector<int> order, top;
+    for (int i = 0; i < (int)ends.size(); ++i) {
+        const bool touches = focus.isNotEmpty() && (ends[(size_t)i].first == focus || ends[(size_t)i].second == focus);
+        dim[(size_t)i] = focus.isNotEmpty() && !touches;
+        (touches ? top : order).push_back(i);
+    }
+    order.insert(order.end(), top.begin(), top.end());
+    return order;
+}
+
 /** Distance from a point to a cross-column arc (sampled; plenty for a 6px test). */
 inline float distanceToCrossCurve(const Placed& p, juce::Point<float> q) {
     float best = 1e9f;

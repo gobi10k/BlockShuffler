@@ -5056,6 +5056,24 @@ int main(int argc, char* argv[]) {
                             + " onCurve=" + (onCurve ? "y" : "N") + " disjoint=" + (disjoint ? "y" : "N") + " deterministic=" + (same ? "y" : "N"));
                 }
 
+                { // T73 (PERMANENT, SELECTION FOCUS 2026-11-23): no focus = project order,
+                  // nothing dimmed; focus B = links touching B (either end) drawn LAST and
+                  // full, the rest dimmed and drawn first; geometry is not an input.
+                    using namespace LinkArcLayout;
+                    const std::vector<std::pair<juce::String, juce::String>> e73 {
+                        { "A", "B" }, { "C", "D" }, { "B", "C" }, { "D", "E" }, { "E", "B" } };
+                    std::vector<bool> d0, dB, dZ;
+                    const auto o0 = focusDrawOrder(e73, {}, d0);
+                    const auto oB = focusDrawOrder(e73, "B", dB);
+                    const auto oZ = focusDrawOrder(e73, "Z", dZ);   // focus touching no link
+                    const bool none = o0 == std::vector<int>{ 0, 1, 2, 3, 4 } && std::none_of(d0.begin(), d0.end(), [](bool b) { return b; });
+                    const bool focB = oB == std::vector<int>{ 1, 3, 0, 2, 4 } && dB == std::vector<bool>{ false, true, false, true, false };
+                    const bool noTouch = oZ == std::vector<int>{ 0, 1, 2, 3, 4 } && std::all_of(dZ.begin(), dZ.end(), [](bool b) { return b; });
+                    verdict("T73 SELECTION-FOCUS: no selection = project order, nothing dimmed; selected B = B's links drawn last at full strength, all others dimmed underneath",
+                            none && focB && noTouch,
+                            juce::String("noFocus=") + (none ? "y" : "N") + " focusB=" + (focB ? "y" : "N") + " focusTouchingNothing=" + (noTouch ? "y" : "N"));
+                }
+
                 { // T69 (PERMANENT, STACK-MEMBER LINK ANCHORS 2026-11-13): cross-column
                   // links between members of two stacks used to anchor at the column
                   // centre at mid-height, so B1<->D1 and B2<->D2 drew as ONE curve.
